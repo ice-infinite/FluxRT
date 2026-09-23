@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FluxRT (NUCLEO-G431RB, ST-LINK)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "stlink",
+      "device": "STM32G431RB",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/cmake-build/rtthread.elf",
+      "runToEntryPoint": "main",
+      "preLaunchTask": "FluxRT: 增量编译"
+    }
+  ]
+}

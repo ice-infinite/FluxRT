@@ -1,0 +1,17 @@
+[package]
+name = "foc-rt-bridge"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+default = []
+stm32g4-cordic = []
+
+[lib]
+name = "foc_rt_bridge"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+foc-algorithm = { path = "../foc-algorithm" }
+foc-control = { path = "../foc-control" }

@@ -1,0 +1,31 @@
+* text=auto
+
+.gitattributes text eol=lf
+.gitignore text eol=lf
+.config text eol=lf
+Kconfig text eol=lf
+SConstruct text eol=lf
+SConscript text eol=lf
+
+*.c text eol=lf
+*.h text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.lock text eol=lf
+*.py text eol=lf
+*.m text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.csv text eol=lf
+*.cmake text eol=lf
+*.lds text eol=lf
+*.txt text eol=lf
+*.ps1 text eol=crlf
+
+*.slx binary
+*.png binary
+*.fig binary
+*.mat binary
+*.elf binary
+*.bin binary
+*.hex binary

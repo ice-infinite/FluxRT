@@ -1,0 +1,1959 @@
+{
+  "table": [
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.05,
+      "reliableSamples": 896,
+      "holdSpeedRmseRpm": 54.823510310120881,
+      "holdAngleRmseRad": 0.510957301808492,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.1,
+      "reliableSamples": 8467,
+      "holdSpeedRmseRpm": 73.031167330903912,
+      "holdAngleRmseRad": 0.34540447637661009,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.2,
+      "reliableSamples": 9699,
+      "holdSpeedRmseRpm": 82.065616195275581,
+      "holdAngleRmseRad": 0.27197789301940184,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.4,
+      "reliableSamples": 9075,
+      "holdSpeedRmseRpm": 84.61248508660087,
+      "holdAngleRmseRad": 0.23964219556409277,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.6,
+      "reliableSamples": 8915,
+      "holdSpeedRmseRpm": 85.0736104772095,
+      "holdAngleRmseRad": 0.22947050957606244,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.8,
+      "reliableSamples": 8899,
+      "holdSpeedRmseRpm": 85.389538706101035,
+      "holdAngleRmseRad": 0.22446973645890153,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.05,
+      "reliableSamples": 832,
+      "holdSpeedRmseRpm": 50.7049942844671,
+      "holdAngleRmseRad": 0.5261747467329827,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.1,
+      "reliableSamples": 9107,
+      "holdSpeedRmseRpm": 67.120377527908914,
+      "holdAngleRmseRad": 0.35960523876047468,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10003,
+      "holdSpeedRmseRpm": 75.152428970175222,
+      "holdAngleRmseRad": 0.28299242622715648,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10003,
+      "holdSpeedRmseRpm": 77.40466638553697,
+      "holdAngleRmseRad": 0.2481164620815734,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.6,
+      "reliableSamples": 9987,
+      "holdSpeedRmseRpm": 77.766630752861474,
+      "holdAngleRmseRad": 0.2370361077261339,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.8,
+      "reliableSamples": 9987,
+      "holdSpeedRmseRpm": 77.8769915530011,
+      "holdAngleRmseRad": 0.2316007284004506,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.05,
+      "reliableSamples": 496,
+      "holdSpeedRmseRpm": 42.274652798876367,
+      "holdAngleRmseRad": 0.54798954346581707,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.1,
+      "reliableSamples": 8176,
+      "holdSpeedRmseRpm": 55.328108623392488,
+      "holdAngleRmseRad": 0.37963729087691184,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10547,
+      "holdSpeedRmseRpm": 61.751976417257858,
+      "holdAngleRmseRad": 0.29826396190638393,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10547,
+      "holdSpeedRmseRpm": 63.632264690778193,
+      "holdAngleRmseRad": 0.25981760609082277,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10547,
+      "holdSpeedRmseRpm": 63.941754950282942,
+      "holdAngleRmseRad": 0.24742773078965843,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10547,
+      "holdSpeedRmseRpm": 64.032063579342761,
+      "holdAngleRmseRad": 0.24132257418439682,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.05,
+      "reliableSamples": 32,
+      "holdSpeedRmseRpm": 27.477664460062563,
+      "holdAngleRmseRad": 0.57357296743565056,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.1,
+      "reliableSamples": 6992,
+      "holdSpeedRmseRpm": 34.903550367258212,
+      "holdAngleRmseRad": 0.40215909678906542,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10451,
+      "holdSpeedRmseRpm": 38.59184257589726,
+      "holdAngleRmseRad": 0.31532696433552282,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10851,
+      "holdSpeedRmseRpm": 39.704151859219643,
+      "holdAngleRmseRad": 0.27309665756123819,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10851,
+      "holdSpeedRmseRpm": 39.883184081657205,
+      "holdAngleRmseRad": 0.25930589775407081,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.25,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10851,
+      "holdSpeedRmseRpm": 39.93053036524271,
+      "holdAngleRmseRad": 0.25247268148091667,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10675,
+      "holdSpeedRmseRpm": 34.226606218151744,
+      "holdAngleRmseRad": 0.46084289532301248,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10707,
+      "holdSpeedRmseRpm": 41.538771170357847,
+      "holdAngleRmseRad": 0.32211444436805248,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10707,
+      "holdSpeedRmseRpm": 44.74818661982215,
+      "holdAngleRmseRad": 0.25787093441097053,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10691,
+      "holdSpeedRmseRpm": 45.995606175987135,
+      "holdAngleRmseRad": 0.22857247590850019,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10691,
+      "holdSpeedRmseRpm": 46.456197212009243,
+      "holdAngleRmseRad": 0.21937940390902577,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.8,
+      "reliableSamples": 7811,
+      "holdSpeedRmseRpm": 104.42293599967562,
+      "holdAngleRmseRad": 0.22004275797232556,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10835,
+      "holdSpeedRmseRpm": 30.649016887383613,
+      "holdAngleRmseRad": 0.47238650766961149,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10835,
+      "holdSpeedRmseRpm": 36.686808786791069,
+      "holdAngleRmseRad": 0.33109709760314648,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10851,
+      "holdSpeedRmseRpm": 39.581606999794417,
+      "holdAngleRmseRad": 0.26476601456375576,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10851,
+      "holdSpeedRmseRpm": 40.453192293189055,
+      "holdAngleRmseRad": 0.23406584171665926,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10851,
+      "holdSpeedRmseRpm": 40.636062599747376,
+      "holdAngleRmseRad": 0.22423089598779103,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10851,
+      "holdSpeedRmseRpm": 40.793557734527461,
+      "holdAngleRmseRad": 0.21943140566041552,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10835,
+      "holdSpeedRmseRpm": 24.049882215862375,
+      "holdAngleRmseRad": 0.49234935913284938,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10851,
+      "holdSpeedRmseRpm": 27.905311448822083,
+      "holdAngleRmseRad": 0.346877093783231,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10851,
+      "holdSpeedRmseRpm": 29.507822083026358,
+      "holdAngleRmseRad": 0.27672631538167047,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10851,
+      "holdSpeedRmseRpm": 29.995949321670761,
+      "holdAngleRmseRad": 0.24337797397996147,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10851,
+      "holdSpeedRmseRpm": 30.10067549401294,
+      "holdAngleRmseRad": 0.23256308013539392,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10851,
+      "holdSpeedRmseRpm": 30.145383861420431,
+      "holdAngleRmseRad": 0.22722817551326957,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 12.853527459476018,
+      "holdAngleRmseRad": 0.52060176494965982,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 12.997333917781438,
+      "holdAngleRmseRad": 0.36966434602583875,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 12.991038063911498,
+      "holdAngleRmseRad": 0.29372466257225432,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 13.004778790509384,
+      "holdAngleRmseRad": 0.25660597005877656,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 13.03070829015414,
+      "holdAngleRmseRad": 0.24445299992573266,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.5,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 13.049822931590274,
+      "holdAngleRmseRad": 0.23842748044213052,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 17.232130473565284,
+      "holdAngleRmseRad": 0.43477100463438645,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 19.469424696242264,
+      "holdAngleRmseRad": 0.31177514308128507,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 27.968158533308518,
+      "holdAngleRmseRad": 0.25367359281591467,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 48.743608837411927,
+      "holdAngleRmseRad": 0.22614602069250267,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 39.320607992816683,
+      "holdAngleRmseRad": 0.21753633083322421,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 181.073487744847,
+      "holdAngleRmseRad": 0.22421359060364027,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 14.502684207713679,
+      "holdAngleRmseRad": 0.44202717150334675,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 13.73118980282689,
+      "holdAngleRmseRad": 0.31791429486623546,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 13.432540677758064,
+      "holdAngleRmseRad": 0.25804601676376537,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 13.505478734754231,
+      "holdAngleRmseRad": 0.229282573564843,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 13.84193301607286,
+      "holdAngleRmseRad": 0.22002671555194181,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 20.811994975986771,
+      "holdAngleRmseRad": 0.21614184996160204,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 9.8703504337795458,
+      "holdAngleRmseRad": 0.45973634601894514,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 8.5102222663945586,
+      "holdAngleRmseRad": 0.33098808488787762,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 8.144608297271219,
+      "holdAngleRmseRad": 0.26735588363362456,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 8.181966201403533,
+      "holdAngleRmseRad": 0.2363903964766837,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 8.29117191755256,
+      "holdAngleRmseRad": 0.22628792989451266,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 8.4523303910706424,
+      "holdAngleRmseRad": 0.2213180317420736,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.610187930478868,
+      "holdAngleRmseRad": 0.48819107368316234,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.3346142810745958,
+      "holdAngleRmseRad": 0.35061372316033285,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.4471287205315289,
+      "holdAngleRmseRad": 0.28142904725402768,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.5765104113209079,
+      "holdAngleRmseRad": 0.24745300721028593,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.6503552763189075,
+      "holdAngleRmseRad": 0.23628585375467426,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 0.75,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.7062492917622167,
+      "holdAngleRmseRad": 0.23074745150546758,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10803,
+      "holdSpeedRmseRpm": 11.756879430948322,
+      "holdAngleRmseRad": 0.42127512445351922,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 19.911168959934212,
+      "holdAngleRmseRad": 0.30717107870700572,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 39.608064218785387,
+      "holdAngleRmseRad": 0.25230414562629994,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.4,
+      "reliableSamples": 9715,
+      "holdSpeedRmseRpm": 96.075476695879559,
+      "holdAngleRmseRad": 0.22637403428766395,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.6,
+      "reliableSamples": 6195,
+      "holdSpeedRmseRpm": 190.62826249978804,
+      "holdAngleRmseRad": 0.24141608969843623,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 265.97698525076777,
+      "holdAngleRmseRad": 0.24726156442002142,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 8.4319390457167067,
+      "holdAngleRmseRad": 0.42702036158264123,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 14.147340114623583,
+      "holdAngleRmseRad": 0.31156309629431589,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 5.2357900816434384,
+      "holdAngleRmseRad": 0.25397943400402873,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 5.5490885679868187,
+      "holdAngleRmseRad": 0.22658585624633193,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 7.8688068820732964,
+      "holdAngleRmseRad": 0.21826213041759548,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 203.47482609489995,
+      "holdAngleRmseRad": 0.22800819809267134,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.1996190555296886,
+      "holdAngleRmseRad": 0.44143781883405625,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.3342235403409921,
+      "holdAngleRmseRad": 0.321289477473906,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.4614123456741179,
+      "holdAngleRmseRad": 0.26163480616584806,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.6368967780976149,
+      "holdAngleRmseRad": 0.23234632774928393,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.8169151433371065,
+      "holdAngleRmseRad": 0.22277211040464873,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 5.1747006691992645,
+      "holdAngleRmseRad": 0.21814726375959456,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.1915492831780519,
+      "holdAngleRmseRad": 0.46970135006493008,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.3490967560933358,
+      "holdAngleRmseRad": 0.33990405407061264,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.4506462057675176,
+      "holdAngleRmseRad": 0.27433747503900852,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.5732983281996429,
+      "holdAngleRmseRad": 0.24205517911020866,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.6500058249950404,
+      "holdAngleRmseRad": 0.231449982801047,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.71572634754958,
+      "holdAngleRmseRad": 0.22619714243289443,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10803,
+      "holdSpeedRmseRpm": 19.715310261204387,
+      "holdAngleRmseRad": 0.42355496109260143,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10803,
+      "holdSpeedRmseRpm": 35.150859621533819,
+      "holdAngleRmseRad": 0.31024761352589142,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10803,
+      "holdSpeedRmseRpm": 72.298329713568776,
+      "holdAngleRmseRad": 0.25380385009485712,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 207.45908598248141,
+      "holdAngleRmseRad": 0.23953906320857721,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.6,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 329.4832745322027,
+      "holdAngleRmseRad": 0.25868296500455407,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 383.06105829125283,
+      "holdAngleRmseRad": 0.27926627261343956,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 15.524832324772758,
+      "holdAngleRmseRad": 0.41946652387685968,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 28.052705088186134,
+      "holdAngleRmseRad": 0.30727163189745127,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 56.516985898842066,
+      "holdAngleRmseRad": 0.25242631733825488,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.4,
+      "reliableSamples": 8451,
+      "holdSpeedRmseRpm": 115.64789237495243,
+      "holdAngleRmseRad": 0.2246434634304133,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10179,
+      "holdSpeedRmseRpm": 110.54075328271215,
+      "holdAngleRmseRad": 0.23479820775232008,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 364.22550217802603,
+      "holdAngleRmseRad": 0.26760099789291619,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.2369558978358368,
+      "holdAngleRmseRad": 0.42799070688906476,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.3891512234831174,
+      "holdAngleRmseRad": 0.31362758220256309,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.5337392453418195,
+      "holdAngleRmseRad": 0.25642396223796637,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.7786608613691062,
+      "holdAngleRmseRad": 0.2284141348448944,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 5.1875975347869012,
+      "holdAngleRmseRad": 0.21940150095610389,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 20.845573894454979,
+      "holdAngleRmseRad": 0.21355244876591076,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.212057198171296,
+      "holdAngleRmseRad": 0.45082017032951094,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.3625155225900087,
+      "holdAngleRmseRad": 0.32796095531309932,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.4734271080831025,
+      "holdAngleRmseRad": 0.26618025419392066,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.6160210079842843,
+      "holdAngleRmseRad": 0.23581969056959221,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.7226059531703637,
+      "holdAngleRmseRad": 0.22586915165898019,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 1.5,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.8440998960701815,
+      "holdAngleRmseRad": 0.22097486395904295,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10867,
+      "holdSpeedRmseRpm": 28.57450558736425,
+      "holdAngleRmseRad": 0.42747653731162993,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 50.401319670454811,
+      "holdAngleRmseRad": 0.30813776702888568,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.2,
+      "reliableSamples": 8723,
+      "holdSpeedRmseRpm": 107.0690013035066,
+      "holdAngleRmseRad": 0.25339860146248433,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 287.1491772556339,
+      "holdAngleRmseRad": 0.25468293852281187,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.6,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 387.49499070343552,
+      "holdAngleRmseRad": 0.29392141963615021,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 602.66708593074668,
+      "holdAngleRmseRad": 1.4980089534641003,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 24.576311573248269,
+      "holdAngleRmseRad": 0.424693257143294,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 44.4520428090323,
+      "holdAngleRmseRad": 0.30832173889278008,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.2,
+      "reliableSamples": 9347,
+      "holdSpeedRmseRpm": 94.482488975602237,
+      "holdAngleRmseRad": 0.2554282261145519,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 251.22047392761198,
+      "holdAngleRmseRad": 0.24095023598937512,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.6,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 369.56996644401391,
+      "holdAngleRmseRad": 0.31339940465553318,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 431.93391758421416,
+      "holdAngleRmseRad": 0.54882848433650022,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 17.72668009679073,
+      "holdAngleRmseRad": 0.42399032963326783,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10883,
+      "holdSpeedRmseRpm": 35.503405914577016,
+      "holdAngleRmseRad": 0.3102684203183384,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.8334115995872873,
+      "holdAngleRmseRad": 0.25380194710946752,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 5.2206556210872757,
+      "holdAngleRmseRad": 0.2265104563911059,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 7.1329694834846062,
+      "holdAngleRmseRad": 0.21824382471641376,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 394.72066456769136,
+      "holdAngleRmseRad": 0.42198420894963051,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.2224831986960227,
+      "holdAngleRmseRad": 0.43997055235306226,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.3706430295727268,
+      "holdAngleRmseRad": 0.32113410552649835,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.4901247482606008,
+      "holdAngleRmseRad": 0.26152661940800059,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.655575948310398,
+      "holdAngleRmseRad": 0.23227122837735115,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.8072629004403282,
+      "holdAngleRmseRad": 0.22271478911160289,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 2,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 5.0773091907399914,
+      "holdAngleRmseRad": 0.2181048907066267,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10723,
+      "holdSpeedRmseRpm": 51.309738237566464,
+      "holdAngleRmseRad": 0.4174813164834571,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10371,
+      "holdSpeedRmseRpm": 88.570692914065958,
+      "holdAngleRmseRad": 0.29665406824221346,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.2,
+      "reliableSamples": 720,
+      "holdSpeedRmseRpm": 192.66456649746806,
+      "holdAngleRmseRad": 0.25563629904166957,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 372.52055428243955,
+      "holdAngleRmseRad": 0.27376955438292155,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.6,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 485.15358154894767,
+      "holdAngleRmseRad": 1.0461648522414688,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 720.69719413875328,
+      "holdAngleRmseRad": 1.7786476931519257,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10723,
+      "holdSpeedRmseRpm": 46.1896062546708,
+      "holdAngleRmseRad": 0.42305782104279233,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10563,
+      "holdSpeedRmseRpm": 81.962216298335775,
+      "holdAngleRmseRad": 0.3061581950059587,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.2,
+      "reliableSamples": 3408,
+      "holdSpeedRmseRpm": 174.66802355028432,
+      "holdAngleRmseRad": 0.26627701850720281,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 363.23683344429196,
+      "holdAngleRmseRad": 0.27040527228563277,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.6,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 432.008218461884,
+      "holdAngleRmseRad": 0.33320136862866556,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 721.77573423207673,
+      "holdAngleRmseRad": 1.7753888840669785,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10803,
+      "holdSpeedRmseRpm": 35.350938823139046,
+      "holdAngleRmseRad": 0.42656830584531569,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10739,
+      "holdSpeedRmseRpm": 67.616569161039934,
+      "holdAngleRmseRad": 0.30878264539485917,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.2,
+      "reliableSamples": 6883,
+      "holdSpeedRmseRpm": 150.11441184675348,
+      "holdAngleRmseRad": 0.25629775446686176,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 274.72696321766369,
+      "holdAngleRmseRad": 0.33312203766861326,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10595,
+      "holdSpeedRmseRpm": 55.557103308837291,
+      "holdAngleRmseRad": 0.23743979646401606,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 724.51636589200643,
+      "holdAngleRmseRad": 1.8062885300242673,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.05,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.2369558978358368,
+      "holdAngleRmseRad": 0.42799070688906476,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.1,
+      "reliableSamples": 10899,
+      "holdSpeedRmseRpm": 4.3891512234831174,
+      "holdAngleRmseRad": 0.31362758220256309,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.2,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.5337392453418195,
+      "holdAngleRmseRad": 0.25642396223796637,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.4,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 4.7786608613691062,
+      "holdAngleRmseRad": 0.2284141348448944,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 5.1875975347869012,
+      "holdAngleRmseRad": 0.21940150095610389,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 3,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.8,
+      "reliableSamples": 10915,
+      "holdSpeedRmseRpm": 20.845573894454979,
+      "holdAngleRmseRad": 0.21355244876591076,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.05,
+      "reliableSamples": 7011,
+      "holdSpeedRmseRpm": 251.79177964895641,
+      "holdAngleRmseRad": 0.73761090149546893,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.1,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 339.37670507628343,
+      "holdAngleRmseRad": 0.95331511332820784,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.2,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 490.26393402989578,
+      "holdAngleRmseRad": 1.2125466447608282,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 462.66533441128053,
+      "holdAngleRmseRad": 0.549234236750295,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.6,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 723.88472163716983,
+      "holdAngleRmseRad": 1.8104895845260442,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 714.339473880265,
+      "holdAngleRmseRad": 1.8084280693494477,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.05,
+      "reliableSamples": 7171,
+      "holdSpeedRmseRpm": 236.22139896725216,
+      "holdAngleRmseRad": 0.68902004620855328,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.1,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 350.97215902197297,
+      "holdAngleRmseRad": 0.97505268280388036,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.2,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 426.8274960600084,
+      "holdAngleRmseRad": 0.98721190272474679,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 460.9969847839763,
+      "holdAngleRmseRad": 0.6641810397149337,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.6,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 724.61257605309413,
+      "holdAngleRmseRad": 1.8015010326171703,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 713.7886598911366,
+      "holdAngleRmseRad": 1.8003436625209739,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.05,
+      "reliableSamples": 7955,
+      "holdSpeedRmseRpm": 215.52075040383005,
+      "holdAngleRmseRad": 0.67262518728422482,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.1,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 344.54568892865882,
+      "holdAngleRmseRad": 0.97175185577702339,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.2,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 476.94898662780128,
+      "holdAngleRmseRad": 1.2609142825641277,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 466.87144307730313,
+      "holdAngleRmseRad": 0.89982244116532817,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.6,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 711.96613580028463,
+      "holdAngleRmseRad": 1.8120526292154258,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 714.41809694110293,
+      "holdAngleRmseRad": 1.7941794718421959,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.05,
+      "reliableSamples": 9139,
+      "holdSpeedRmseRpm": 95.868644255141234,
+      "holdAngleRmseRad": 0.43625268870614703,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.1,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 264.57479560831649,
+      "holdAngleRmseRad": 0.73259808065981624,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.2,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 486.61433276375379,
+      "holdAngleRmseRad": 1.30611934394683,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 556.20302538758324,
+      "holdAngleRmseRad": 1.4677911137237478,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.6,
+      "reliableSamples": 10563,
+      "holdSpeedRmseRpm": 63.179596318544377,
+      "holdAngleRmseRad": 0.24614946643286184,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 6,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 725.04946591336557,
+      "holdAngleRmseRad": 1.8156182802786,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.05,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 665.339953599451,
+      "holdAngleRmseRad": 1.832189748640745,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.1,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 676.68102967627362,
+      "holdAngleRmseRad": 1.8374061834185338,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.2,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 715.50327223816907,
+      "holdAngleRmseRad": 1.8273561779998837,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 693.60148962088977,
+      "holdAngleRmseRad": 1.8132234904744284,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.6,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 706.31402509751513,
+      "holdAngleRmseRad": 1.7967696470927541,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.016,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 719.444789755576,
+      "holdAngleRmseRad": 1.8154439910817146,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.05,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 683.97577253040049,
+      "holdAngleRmseRad": 1.8099801714727732,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.1,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 683.06169892056994,
+      "holdAngleRmseRad": 1.8149134424477407,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.2,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 697.354353184755,
+      "holdAngleRmseRad": 1.8269374718666287,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 706.50707774274224,
+      "holdAngleRmseRad": 1.8104809883663475,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.6,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 715.3497615687744,
+      "holdAngleRmseRad": 1.8220262970916909,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.032,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 679.00732272359073,
+      "holdAngleRmseRad": 1.8106195366568816,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.05,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 686.76033737682224,
+      "holdAngleRmseRad": 1.8069085534408191,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.1,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 681.737493067941,
+      "holdAngleRmseRad": 1.8099387956479682,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.2,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 680.79711921014336,
+      "holdAngleRmseRad": 1.8102623319149027,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 713.36656814993012,
+      "holdAngleRmseRad": 1.817683952521749,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.6,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 732.03645724861394,
+      "holdAngleRmseRad": 1.8049833363183376,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.064,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 679.01246890567643,
+      "holdAngleRmseRad": 1.8106247697436071,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.05,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 674.82873447934048,
+      "holdAngleRmseRad": 1.7946837234376991,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.1,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 684.56854651635842,
+      "holdAngleRmseRad": 1.8087426579328034,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.2,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 681.30862980406027,
+      "holdAngleRmseRad": 1.8101469704792263,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.4,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 689.85990736694055,
+      "holdAngleRmseRad": 1.8163909818377575,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.6,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 717.25026022440807,
+      "holdAngleRmseRad": 1.7986597016041015,
+      "peakIqA": 0.19886521453651557
+    },
+    {
+      "kSlideV": 11.7,
+      "boundaryA": 0.128,
+      "emfAlpha": 0.8,
+      "reliableSamples": 0,
+      "holdSpeedRmseRpm": 719.4189970226164,
+      "holdAngleRmseRad": 1.8128961898153069,
+      "peakIqA": 0.19886521453651557
+    }
+  ],
+  "duration": 2.5,
+  "generatedAt": "2026-09-22T23:11:05",
+  "best": {
+    "kSlideV": 1.5,
+    "boundaryA": 0.064,
+    "emfAlpha": 0.8,
+    "reliableSamples": 10915,
+    "holdSpeedRmseRpm": 20.845573894454979,
+    "holdAngleRmseRad": 0.21355244876591076,
+    "peakIqA": 0.19886521453651557
+  }
+}

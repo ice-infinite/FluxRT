@@ -1,0 +1,12 @@
+[package]
+name = "foc-algorithm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "foc_algorithm"
+crate-type = ["rlib"]
+
+[dependencies]
+libm = { version = "0.2", default-features = false }

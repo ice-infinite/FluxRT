@@ -1,0 +1,21 @@
+mainmenu "FluxRT Configuration"
+
+BSP_DIR := .
+RTT_DIR := ../../rt-thread
+PKGS_DIR := packages
+
+config SOC_STM32G431RB
+    bool
+    select SOC_SERIES_STM32G4
+    select RT_USING_COMPONENTS_INIT
+    select RT_USING_USER_MAIN
+    default y
+
+config BOARD_FLUXRT_STM32G431_REFERENCE
+    bool
+    default y
+
+source "$(RTT_DIR)/Kconfig"
+osource "$PKGS_DIR/Kconfig"
+rsource "$(RTT_DIR)/bsp/stm32/libraries/Kconfig"
+rsource "board/Kconfig"

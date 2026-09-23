@@ -1,0 +1,12 @@
+from building import *
+
+cwd = GetCurrentDir()
+src = [
+    'board.c',
+    'stm32g4xx_hal_msp.c',
+]
+path = [cwd]
+
+group = DefineGroup('Board', src, depend=[''], CPPPATH=path)
+
+Return('group')

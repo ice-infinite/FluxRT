@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/foc-algorithm",
+    "crates/foc-control",
+    "crates/foc-rt-bridge",
+    "crates/foc-sim",
+]
+
+[profile.release]
+codegen-units = 1
+lto = true
+# The target runs the current loop in a 12 kHz ADC ISR. Prefer deterministic
+# execution time here; LTO still removes unused algorithm-library code.
+opt-level = 3
+panic = "abort"

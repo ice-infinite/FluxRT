@@ -1,0 +1,13 @@
+{
+  "cmake.sourceDirectory": "${workspaceFolder}",
+  "cmake.buildDirectory": "${workspaceFolder}/cmake-build",
+  "cmake.generator": "Ninja",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/cmake-build/compile_commands.json",
+  "rust-analyzer.linkedProjects": [
+    "${workspaceFolder}/rust/Cargo.toml"
+  ],
+  "rust-analyzer.check.command": "clippy",
+  "files.associations": {
+    "*.h": "c"
+  }
+}

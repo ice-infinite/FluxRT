@@ -1,0 +1,42 @@
+import os
+
+from building import *
+
+cwd = GetCurrentDir()
+hal_src = os.path.abspath(os.path.join(
+    cwd,
+    '..',
+    'packages',
+    'stm32g4_hal_driver-latest',
+    'Src',
+))
+src = [
+    'platform/stm32g431/foc_platform_stm32g431.c',
+    'platform/stm32g431/foc_math_accel_stm32g431.c',
+    os.path.join(hal_src, 'stm32g4xx_hal_adc.c'),
+    os.path.join(hal_src, 'stm32g4xx_hal_adc_ex.c'),
+    os.path.join(hal_src, 'stm32g4xx_hal_tim.c'),
+    os.path.join(hal_src, 'stm32g4xx_hal_tim_ex.c'),
+]
+path = [
+    cwd + '/include',
+]
+rust_lib_path = os.path.abspath(os.path.join(
+    cwd,
+    '..',
+    'build',
+    'rust-target',
+    'thumbv7em-none-eabihf',
+    'release',
+))
+
+group = DefineGroup(
+    'FOC',
+    src,
+    depend=[''],
+    CPPPATH=path,
+    LIBPATH=[rust_lib_path],
+    LIBS=['foc_rt_bridge'],
+)
+
+Return('group')

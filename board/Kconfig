@@ -1,0 +1,46 @@
+menu "Hardware Drivers Config"
+
+menu "Bring-up peripherals"
+
+config BSP_USING_GPIO
+    bool "Enable GPIO"
+    select RT_USING_PIN
+    default y
+
+menuconfig BSP_USING_UART
+    bool "Enable UART"
+    select RT_USING_SERIAL
+    default y
+
+if BSP_USING_UART
+    config BSP_STM32_UART_V1_TX_TIMEOUT
+        int "UART TX timeout"
+        default 2000
+        depends on RT_USING_SERIAL_V1
+
+    config BSP_USING_LPUART1
+        bool "Enable LPUART1 on PA2/PA3 (temporary bring-up mapping)"
+        default y
+endif
+
+endmenu
+
+menu "FOC math backend"
+
+config FOC_MATH_BACKEND_STM32G4_CORDIC
+    bool "Use STM32G4 CORDIC for current-loop sin/cos and vector magnitude"
+    depends on SOC_STM32G431RB
+    default y
+    help
+        Build the STM32G4 CORDIC adapter and select it after platform init.
+        Every accelerated operation has an automatic Rust CpuMath fallback.
+        Disable this when porting to a chip without CORDIC; the FOC algorithm
+        and host simulation remain unchanged.
+
+endmenu
+
+comment "FOC PWM, ADC, comparator, encoder and gate-driver peripherals are intentionally disabled"
+
+source "$(RTT_DIR)/bsp/stm32/libraries/HAL_Drivers/drivers/Kconfig"
+
+endmenu

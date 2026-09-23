@@ -1,0 +1,213 @@
+# FOC 仿真与实机相关性验证
+
+## 1. 结论先行
+
+当前工程已经建立了可重复的“同控制代码、同场景、同字段”对比链路。本文第 1～7 节
+保留 2026-09-22 的 16 kHz 历史基线；2026-09-23 当前配置和短时闭环结果见第 8 节。
+首轮 16 kHz、12.3 V、582 rpm、0.8 A、空载对比说明：
+
+- Rev-Up 状态切换一致：1.00 s 从 alignment 进入 open-loop-ramp，2.18 s 进入
+  open-loop-hold；
+- Iq 跟踪吻合：仿真自身跟踪 RMSE 为 0.0007 A，最终实机为 0.0103 A；同一时刻
+  实机与仿真的 Iq RMSE 约 0.0103 A；
+- 最终 50 Hz CSV 中相电流峰值为仿真 0.801 A、实机 0.817 A；固件高速
+  峰值锁存为约 0.896 A，CSV 不会捕获每个 16 kHz 瞬时峰值；
+- SMO 首轮失败能够在 PC 上复现；调谐后的最终默认配置在 2.5～5.0 s 保持段中，
+  仿真和实机均为 126/126 个样本可靠；
+- 保持段估速均值/标准差为仿真 581.9/9.3 rpm、实机 582.3/22.3 rpm；观察角相对
+  强制角的抖动 RMSE 为仿真 0.065 rad、实机 0.054 rad；
+- 实机没有编码器或测速仪真值，因此只能确认电流环、启动时序和调制趋势，暂时不能
+  声称机械转速曲线与仿真一致。
+
+这已经比“仿真能跑、实机也能转”更严格，但还不是完成模型辨识或量产验证。
+
+## 2. 为什么旧仿真不能直接对比
+
+旧的 `foc-sim` 场景使用理想转子角度运行速度闭环，适合验证 PI、SVPWM、PMSM
+方程和故障接口，却绕过了实机正在执行的 alignment、强制角度 ramp、open-loop hold
+和 SMO。因此旧场景与当前实机不是同一控制拓扑，数值不能直接比较。
+
+现在保留两条仿真：
+
+| 入口 | 用途 | 转子反馈 |
+|---|---|---|
+| `foc-sim` | 理想反馈闭环与负载阶跃回归 | plant 真值 |
+| `foc-bringup-sim` | 与固件启动路径逐步对标 | Rev-Up 强制角度 + 实际 SMO |
+
+`foc-bringup-sim` 直接调用目标固件相同的 `foc_rust_init()`、
+`foc_rust_configure()`、`foc_rust_start_realtime()` 和
+`foc_rust_realtime_step()`，不是另写一套近似控制器。
+
+## 3. 数据链
+
+```text
+PC PMSM plant ─┐
+               ├─ 相同 Rust C-ABI 快环 ─→ 标准 CSV ─┐
+STM32 ADC/PWM ─┘                                      ├─ Python 数值比较
+                                                      └─ MATLAB 叠加绘图
+```
+
+固件 ISR 只按固定分频把关键量转换成定长样本并写入 64 项环形缓冲；RT-Thread 普通
+线程负责串口输出，ISR 不打印。采样默认 50 Hz、最高 100 Hz，不改变 16 kHz 控制
+计算频率。本次采样 `dropped=0`，带采样时 `ISRmax=9220/9800 cycles`、deadline
+miss 为 0。采样功能用于调试，正式版本应关闭以回收时序裕量和 Flash。
+
+ABI 0x00070000 把三个角度明确分开，并把 SMO/PLL、可靠性门和闭环接管参数加入
+版本化配置：
+
+- `control_angle_rad`：本次 Park/逆 Park 真正使用的角度；
+- `forced_angle_rad`：Rev-Up 强制角度；
+- `observer_angle_rad`：SMO/PLL 估算角度。
+
+这样不会再把“控制角度”和“观察器角度”混成一个字段。
+
+## 4. 重复运行
+
+### 4.1 生成同构 PC 仿真
+
+```powershell
+cd E:\File\RT-Thread\projects\FluxRT\rust
+& "$env:USERPROFILE\.cargo\bin\cargo.exe" run --release `
+    -p foc-sim --bin foc-bringup-sim -- `
+    --csv ..\simulation\results\bringup_sim_582rpm_12v3_default_final.csv `
+    --duration 5 --target-rpm 582 --bus-voltage 12.3 `
+    --load-torque 0 --sample-every 320
+```
+
+### 4.2 采集实机
+
+确认电机空载可自由旋转、电源限流正确、COM 口无其他软件占用，再执行：
+
+```powershell
+cd E:\File\RT-Thread\projects\FluxRT
+py .\simulation\capture_hardware_trace.py `
+    --port COM6 --duration 5 --target-rpm 582 --rate-hz 50 `
+    --output .\simulation\results\hardware_582rpm_12v3_default_final.csv
+```
+
+脚本先发送 `foc_stop`，启动 trace 后运行有界场景，并在 `finally` 路径先停电机、再停
+trace；无论数据解析是否成功都优先关闭功率级。原始串口同时保存为 `.log`。
+
+### 4.3 数值比较与 MATLAB 图
+
+```powershell
+py .\simulation\compare_traces.py `
+    --simulation .\simulation\results\bringup_sim_582rpm_12v3_default_final.csv `
+    --hardware .\simulation\results\hardware_582rpm_12v3_default_final.csv `
+    --json .\simulation\results\comparison_582rpm_12v3_default_final.json `
+    --markdown .\docs\simulation\comparison_582rpm_12v3_default_final.md
+
+.\simulation\run_matlab_correlation.ps1
+```
+
+输出包括：
+
+- `simulation/results/foc_sim_vs_hardware.png`：六联叠加图；
+- `simulation/results/foc_sim_vs_hardware.fig`：MATLAB 可编辑图；
+- `simulation/results/foc_sim_vs_hardware.mat`：两份 table 与摘要；
+- `simulation/results/foc_sim_vs_hardware_summary.csv`：核心指标；
+- `docs/simulation/comparison_582rpm_12v3.md`：自动生成的文字表格。
+
+## 5. 如何解释首轮误差
+
+电流跟踪接近说明 ADC 换算、强制角度电流环和参考参数的大方向正确。Vd/Vq 与 duty
+仍有明显误差，常见来源是：实际初始转子位置、绕组 Rs/Ls 偏差、MOSFET/驱动死区、
+母线纹波、ADC 零偏与噪声，以及平均值逆变器没有开关器件模型。不能为了让曲线好看
+直接调 PI；应先分别辨识和补偿这些物理项。
+
+首轮参数（11.7 V、0.064 A、滤波 0.05、PLL 220/12000）在仿真和实机都不可靠。
+最终默认基线改为 4.0 V、0.16 A、0.05、80/1000；可靠性 FIFO 也由错误的 4 ms
+窗口修正为 1 kHz 下的 64 ms 窗口，方差门收紧为均值平方的 1%。闭环切换现已改为
+“观察器可靠后才开始”的 25 ms 最短路径角度和 Iq 渐变；进入速度环时按参考工程
+`PID_SPEED_INTEGRAL_INIT_DIV=0` 默认零预装，并用 32 A/s 的 Iq 限速器消除单周期阶跃。
+观察器 500 ms 内不收敛或闭环后连续失锁 50 ms，都会锁存故障并请求关闭 PWM。
+
+这些改进仍不能替代独立真值。闭环保持 `closed_loop_enable=0`，直到以下条件同时满足：
+
+1. 仿真使用 plant 真值证明观察角度和速度在 ramp/hold 段收敛（当前已完成）；
+2. 实机具有编码器、霍尔、测速仪或反电势交叉验证中的一种独立真值；
+3. 多次冷启动的方向、平均误差、方差和可靠标志稳定；
+4. 观察角度接管先经过限幅、连续性与超时保护测试（PC 同构仿真和两轮 5 秒实机试验已完成；长时间、多工况仍待做）。
+
+## 6. 下一轮校准顺序
+
+1. 先在同构仿真里整定 SMO/PLL，使其对 plant 真值收敛（当前已完成首轮）；
+2. 实测相电阻、相电感、空载电流和母线纹波，替换临时 Workbench 参数；
+3. 增加独立转速真值，校准惯量与摩擦；
+4. PC 平均值逆变器已经加入可配置死区模型、PWM 前馈补偿和观测器电压重构补偿；下一步继续加入器件压降、母线纹波及 ADC 量化/噪声，再复跑同一 CSV 对比；
+5. 已在低电流限制下完成两轮 5 秒观察角度接管；下一步先增加独立真值和故障注入，不直接修改上电默认闭环开关。
+
+## 7. 30 秒持续运行对比（2026-09-22）
+
+使用最终默认参数，在 16 kHz、约 12.3 V、582 rpm、0.8 A、空载条件下继续运行
+30 秒。实机脚本在结束和异常路径都会先执行 `foc_stop`。
+
+| 指标 | 30 秒仿真 | 30 秒实机 |
+|---|---:|---:|
+| CSV 样本 | 1,501 | 1,500 |
+| 控制步 | 480,000 | 480,113 |
+| 控制错误 / deadline miss | 0 / 0 | 0 / 0 |
+| 保持段可靠样本 | 1,376/1,376 | 1,376/1,376 |
+| 保持段估速均值 | 581.99 rpm | 582.03 rpm |
+| 保持段估速标准差 | 2.92 rpm | 15.65 rpm |
+| 观察角减强制角 | 1.284 rad | 1.084 rad |
+| 角度抖动 RMSE | 0.020 rad | 0.035 rad |
+| Iq 跟踪 RMSE | 0.0003 A | 0.0075 A |
+| Id 跟踪 RMSE | 0.0001 A | 0.0072 A |
+| 50 Hz 相电流峰值 | 0.801 A | 0.822 A |
+| 固件高速峰值锁存 | — | 约 0.904 A |
+
+实机 5～10 秒与 25～30 秒的估速均值分别为 581.91 和 581.98 rpm，标准差分别为
+14.52 和 13.85 rpm，没有随时间发散；Iq 均值始终约 0.800 A。Vq 均值从
+4.638 V 缓慢升至 4.765 V，增幅约 2.7%，可能来自绕组温升导致的 Rs 上升，也可能
+包含逆变器压降/母线量化误差。当前 trace 未记录绕组温度，不能把该推断当作温升实测。
+
+实机全过程 flags 只有 `0x0000735e`，trace dropped=0；停止后恢复
+`0x0000231f`、duty=500/500/500。开启 trace 时 ISR 最坏 9,536/9,800 cycles；正式
+运行默认关闭 trace，不承担这部分调试开销。
+
+结果文件：
+
+- `simulation/results/bringup_sim_582rpm_12v3_30s.csv`
+- `simulation/results/hardware_582rpm_12v3_30s.csv` 与同名 `.log`
+- `simulation/results/comparison_582rpm_12v3_30s.json`
+- `docs/simulation/comparison_582rpm_12v3_30s.md`
+- `simulation/results/foc_sim_vs_hardware_30s.png/.fig/.mat`
+- `simulation/results/foc_sim_vs_hardware_30s_summary.csv`
+
+30 秒结果进一步证明电流环、Rev-Up 和观察器内部一致性没有短时漂移，但实机曲线中的
+“速度”仍是 SMO 估算值，不是编码器/测速仪真值，不能据此直接开放闭环接管。
+
+## 8. 12 kHz 仿真与短时闭环实机结果（2026-09-23）
+
+为消除 16 kHz 下出现的 9,806/9,800 和 9,810/9,800 cycles 截止超限，当前统一将
+Rust、MATLAB 和固件快环改为 12 kHz，软件截止改为 12,500 cycles。连续时间 PI
+参数不变，离散时间统一为 `1/12000 s`。
+
+### 8.1 PC 和 MATLAB
+
+Rust 10 秒闭环三组结果：
+
+| 工况 | 4～5 s 速度 RMSE | 8～10 s 观察器 RMSE | Iq/Id RMSE |
+|---|---:|---:|---:|
+| 理想逆变器 | 3.189 rpm | 10.780 rpm | 0.000671/0.000139 A |
+| 550 ns 死区、无补偿 | 3.423 rpm | 11.281 rpm | 0.011551/0.011612 A |
+| 550 ns 死区、双补偿 | 3.283 rpm | 10.798 rpm | 0.006650/0.006922 A |
+
+MATLAB 10 秒死区对照中，补偿把过渡段速度 RMSE 从 6.9932 降到 3.1622 rpm，
+Iq/Id RMSE 从 0.012805/0.010747 降到 0.001814/0.004434 A；但稳态速度标准差从
+0.0472 增至 0.0892 rpm。说明补偿方向对电流误差有效，但不能把单一名义死区模型
+直接视为全部指标和真实硬件都更优。
+
+### 8.2 实机
+
+两轮 5 秒开环和两轮 5 秒闭环都为正方向持续运行，控制错误和 deadline miss 均为 0。
+两轮闭环都在约 2.10 s 进入 transition、约 2.12 s 进入状态 7 并保持到结束；最坏 ISR
+为 10,083/12,500 cycles。3～5 s 的 SMO 估速分别为 580.87±22.95 和
+581.35±20.90 rpm，闭环段 Iq/Id RMSE 分别为 0.00677/0.00615 A 和
+0.00676/0.00670 A。
+
+仿真和实机在状态顺序、接管时间、目标转速量级、电流误差量级和无故障完成方面大体
+一致，但实机估速抖动远高于平均值 plant。由于实机没有轴端独立真值，目前不能计算
+真实转速/角度误差，也不能用 SMO 自己的输出证明 SMO 准确。固件因此仍默认
+`closed_loop_enable=0`。

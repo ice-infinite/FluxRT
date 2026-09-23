@@ -1,0 +1,22 @@
+[package]
+name = "foc-sim"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+foc-algorithm = { path = "../foc-algorithm" }
+foc-control = { path = "../foc-control" }
+foc-rt-bridge = { path = "../foc-rt-bridge" }
+
+[lib]
+name = "foc_sim"
+path = "src/lib.rs"
+
+[[bin]]
+name = "foc-sim"
+path = "src/main.rs"
+
+[[bin]]
+name = "foc-bringup-sim"
+path = "src/bringup_main.rs"

@@ -1,0 +1,368 @@
+# NUCLEO-G431RB 实机烧录记录（2026-09-22）
+
+## 1. 本次范围与结论
+
+本次已经把当前 RT-Thread + Rust 固件实际烧入连接的 NUCLEO-G431RB，并通过
+ST-LINK、Flash 校验、串口日志和外设寄存器回读确认固件正在运行。
+
+本次完成了三个安全阶段：先验证完全空的平台骨架，再烧录 monitor-only 外设版本，
+最后接通 TIM1-ADC 同步采样和一次需要 Shell 显式触发的短时低压开环试转。默认启动
+仍不输出 PWM；试转结束后也自动恢复安全失能。STO-PLL 和闭环切换尚未接入，因此
+仍不能与 PC 闭环仿真的转速/电流曲线做“实机一致”结论。
+
+## 2. 识别到的硬件
+
+| 项目 | 实测结果 |
+|---|---|
+| ST-LINK | V3J9M3 |
+| ST-LINK SN | `00400027544B500120343637` |
+| 板名 | `NUCLEO-G431RB` |
+| 目标 | STM32G43x/G44x，Cortex-M4，128 KiB Flash |
+| Device ID / Revision | `0x468` / Rev X |
+| 调试电压 | 3.30～3.31 V |
+| 虚拟串口 | COM6，115200 8N1 |
+| 启动配置 | RDP Level 0，正常从 Flash 启动，无写保护 |
+
+## 3. 可恢复备份与烧录镜像
+
+烧录前完整读取了 128 KiB 内部 Flash：
+
+```text
+build/device-backup/nucleo_g431rb_pre_rtthread_20260922.bin
+SHA-256 62FF11F688986103A1DA74EEECB0D356F682297A4E7A7A21445F2C59C1801864
+```
+
+先前 monitor-only 烧录镜像：
+
+```text
+cmake-build/stm32g431_foc.bin
+73,620 bytes
+SHA-256 0735D1B4FA7D9DD0D18AE4F8792CEB4AF1A5F1248B5AB614F27DE2683DFA8C05
+```
+
+STM32CubeProgrammer 2.19.0 完成下载、读回校验和软件复位，均成功。
+
+## 4. 先前 monitor-only 串口运行证据
+
+复位后的实机日志：
+
+```text
+STM32G431 RT-Thread + Rust FOC skeleton
+Rust ABI: 0x00020000, init: 0, context: 192/256 bytes
+FOC outputs: DISABLED, platform: 2, start: 2, speed: 1, step: 1
+FOC math backend: STM32G4 CORDIC (1); CPU fallback is always available.
+CORDIC self-test: sincos=1 sin=479/1000 cos=877/1000 magnitude=1 value=5000/1000.
+FOC monitor: feedback=2 flags=0x1f PWM=30000Hz ARR=2833; outputs remain disabled.
+ADC raw U/V/W=1950/1931/1954 offsets=1950/1932/1952 Vbus=952 (~12275mV) Temp=809 Pot=2844
+Monitor-only bring-up: TIM1 CEN/CCER/MOE=0 and PB13..PB15=0.
+msh >FOC monitor alive; Rust=1 feedback=2 flags=0x1f VbusRaw=951, PWM disabled.
+```
+
+`flags=0x1f` 表示：栅极安全、TIM1 已配置、ADC 已配置、ADC 校准完成、三相静态
+零点在有效范围内；Driver Protection 没有故障，输出没有激活。母线换算值约
+12.28 V，说明本次回读时功率板母线实际上已经带电，但驱动输出始终关闭。
+
+CORDIC 实机自检同时验证了 `sin(0.5)≈0.479`、`cos(0.5)≈0.878` 和
+`sqrt(3²+4²)=5.000`；这比只检查 CORDIC 时钟使能更进一步，但仍不代表整个电机
+控制环已经通过实机验证。
+
+连续时间戳测量得到心跳约为 4.941 s、9.943 s、14.948 s，即约 5 秒一次，说明
+RT-Thread tick 与当前 170 MHz 时钟配置没有出现明显倍频错误。
+
+## 5. 功率级安全状态回读
+
+烧录前补齐了 ST 官方 IHM16M1 引脚的主动关断：PB13/PB14/PB15 分别为 U/V/W
+栅极使能，初始化和紧急关断均配置为下拉推挽输出并写低。
+
+运行中通过 SWD Hot Plug 回读：
+
+| 寄存器 | 值 | 结论 |
+|---|---:|---|
+| GPIOB MODER | `0x57FFFEBF` | PB13～PB15 均为输出模式 |
+| GPIOB ODR | `0x00000000` | 三个栅极使能均为低 |
+| GPIOA IDR | `0x0000C80C` | PA11/DP 为高，无 active-low 驱动器故障 |
+| TIM1 CR1 | `0x00000120` | 中心对齐配置存在，CEN=0，TIM1 未运行 |
+| TIM1 CCER | `0x00000000` | 三相 PWM 通道未使能 |
+| TIM1 ARR / CCR1～3 | `2833` / `0,0,0` | 30 kHz 周期已配置，占空比为零 |
+| TIM1 BDTR | `0x03302C00` | Break2 已配置，MOE=0 |
+
+所以当前实机不会主动驱动电机。这是有寄存器证据的安全失能，不只是软件状态打印。
+
+## 6. 为什么 monitor-only 阶段不能判断“与仿真一致”
+
+PC 仿真给 Rust 控制器提供理想且同步的三相电流、母线电压、电角度和机械速度；
+当时的实机阶段只有静态软件触发 ADC 监测。要形成可比较闭环，当时至少还缺：
+
+1. 启动 TIM1 30 kHz 快环、预装载和 Break 中断验证；IHM16M1/STSPIN830 的
+   550 ns 是功率板硬件死区，因此当前 TIM1 BDTR dead-time 为 0，与 ST 生成工程一致；
+2. 把 ADC1/ADC2 从静态软件触发改成 TIM1 TRGO 同步注入采样，并验证采样窗口；
+3. PB13～PB15 只有在所有自检通过后才能按状态机使能；
+4. 开环定向/升速、BEMF STO-PLL 收敛和电角度切换；
+5. 欠压、过压、过流、采样丢失和算法超时的硬件关断；
+6. 实验电源限流、相序/电流符号确认和无机械危险负载的低压步骤测试。
+
+在这些条件完成前，不应把平台状态从 `FOC_STATUS_NOT_CONFIGURED` 改成 OK，也不应
+为了“看电机转”绕过栅极关断。
+
+## 7. TIM1-ADC 同步采样阶段
+
+ADC1/ADC2 已改为 TIM1 TRGO 触发的 injected sequence，ADC1 JEOS 中断读取 U/V/W。
+实机连续 5 秒增量为约 `150018`，对应约 30.0 kHz。默认状态寄存器回读为：
+
+| 项目 | 默认值 | 结论 |
+|---|---:|---|
+| flags | `0x031f` | 同步采样运行且有效，无故障，功率级安全 |
+| GPIOB ODR | `0x00000000` | PB13～PB15 三相使能均低 |
+| TIM1 CR1 | `0x00000121` | CEN=1，仅运行内部采样时基 |
+| TIM1 CCER | `0x00001000` | 只有 CH4 内部触发打开，CH1～3 关闭 |
+| TIM1 CCR1～3 | `0,0,0` | 三相命令为零 |
+| TIM1 BDTR | `0x03302C00` | MOE=0，Break2 配置保留 |
+
+## 8. 受保护的首次空载开环试转
+
+### 8.1 固件和限制
+
+```text
+cmake-build/stm32g431_foc.bin
+81,008 bytes
+SHA-256 BCCFE01BE4A9A4B4580C0BA38092F65B087497B887E62C5201A411295A6FAD1D
+```
+
+STM32CubeProgrammer 2.19.0 下载、读回校验和复位成功。默认上电不会试转，必须在
+COM6/115200 运行一次 `foc_trial`。固定测试包络为：
+
+- 总时长 2.3 s，机械速度命令从 0 缓升到 80 rpm；7 极对换算为电角速度。
+- Rust 电压矢量从 0.05 V 缓升，最高 0.55 V，再降为 0。
+- Rust 限制矢量不超过母线的 8%，C 再限制三相 duty 为 44%～56%。
+- 软件过流临时阈值 220 ADC counts，按参考 Rshunt/gain 折算约 351 mA。
+- DP、Break、ADC 错误、越界 duty、Rust 错误、超时或 `foc_stop` 都会关断。
+
+### 8.2 实机日志摘要
+
+```text
+FOC trial ARMED: bus=12288mV, software trip=220 counts (~351mA).
+FOC trial t=500ms speed=16rpm vector=310mV duty=514/520/479 peak=31 flags=0x135e
+FOC trial t=1000ms speed=56rpm vector=460mV duty=516/531/468 peak=51 flags=0x135e
+FOC trial t=1500ms speed=80rpm vector=550mV duty=465/534/470 peak=66 flags=0x135e
+FOC trial t=2000ms speed=80rpm vector=550mV duty=537/462/515 peak=70 flags=0x135e
+FOC trial stopped: profile complete status=0 flags=0x031f applies=2218 peak=70 counts (~112mA).
+Power stage is DISABLED.
+```
+
+`0x135e` 表示试转期间 TIM1/ADC/同步采样有效、输出已激活且 trial 已 arm；没有
+Driver Fault、Break Latch、ADC Error 或 Current Trip。2218 次更新约等于 2.3 秒的
+1 kHz 管理环（串口日志带来少量调度误差）。峰值 70 counts 约 112 mA，明显低于
+临时软件阈值。结束后的 SWD 回读再次确认：
+
+- GPIOB ODR=`0x00000000`；
+- TIM1 CCER=`0x00001000`，只有 CH4 采样触发保留；
+- TIM1 CCR1～3=`0,0,0`；
+- TIM1 BDTR=`0x03302C00`，MOE=0；
+- flags 恢复 `0x031f`，Rust 恢复 `DISABLED`。
+
+### 8.3 与 PC 仿真的边界
+
+PC 测试是带理想速度/电角度反馈的 524 rpm 闭环仿真，得到最终 534.51 rpm、峰值
+相电流 0.093 A；本次实机是最高 80 rpm **命令值** 的开环电压矢量，未测量真实
+转速，峰值约 0.112 A。二者工况和可观测量不同，只能说明 C/Rust/PWM/采样/保护
+链已经贯通，不能用数值接近来声称仿真实机一致。
+
+进入下一阶段前需要现场确认电机是否实际转动及方向，再用示波器核对三相波形、
+相序和采样点；随后进行 Break/过流故障注入，最后才接入 Rev-Up 与 STO-PLL 闭环。
+
+## 9. 16 kHz Rust 电流环与 SMO 遥测阶段
+
+后续固件已不再使用早期 `foc_trial` 包络，而是由 ADC ISR 独占调用
+`foc_rust_realtime_step()`。为容纳 Rust SMO、PLL、Id/Iq PI、圆限幅和 SVPWM，TIM1
+由参考工程的 30 kHz 改为约 16 kHz；参考 PI 的连续时间增益保留，离散采样时间同步
+改为 `1/16000 s`。
+
+### 9.1 当前配置
+
+```text
+observer=rust-smo-pll run/div=1/1 closed_loop=0
+startup=582 rpm / 800 mA, align=1000 ms, ramp=1164 ms
+voltage utilization=900/1000
+software current trip=1150 mA
+duty window=30..970/1000
+ISR software deadline=9800 cycles
+```
+
+空闲状态同步计数 5 秒增量约 `80103`，对应约 16.02 kHz。母线约
+12.24～12.28 V，U/V/W 零点约 1951/1933/1953 counts。
+
+### 9.2 电流环结果
+
+- 强制角度启动能够完成 alignment、open-loop-ramp 并进入 open-loop-hold。
+- 5 秒保持测试累计 97,569 个实时步，`errors=0`、`misses=0`。
+- 800 mA Iq 指令的实测快照约为 760～817 mA，峰值约 904 mA。
+- ISR 最坏 7417～7428 cycles；其中 Rust 控制步最坏约 6847～6858 cycles，低于
+  9800-cycle 软件截止，也低于约 10625-cycle 物理周期。
+- `foc_stop` 后 flags 恢复 `0x0000231f`，三相 ADC 回到零点，PWM 和栅极均关闭。
+
+### 9.3 SMO 结果与闭环禁用原因
+
+SMO 与电流环已能在每个 16 kHz 周期同时执行，但当前估速没有收敛。在强制机械
+转速 582 rpm 的保持段抓到 `-88、1286、179、387 rpm` 等结果，且
+`observer_reliable` 始终为 0。可能因素包括 Rs/Ls 实物偏差、由占空比重构实际相电压
+的误差、死区/母线补偿、相序符号及 SMO/PLL 增益。
+
+因此当前固件虽然默认运行 SMO 遥测，但仍固定 `closed_loop_enable=0`。在估速方向、
+误差和方差连续通过可靠性门之前，不得执行观测角度接管；ST STO-PLL 仅保留后端接口，
+不是当前工程的必需库依赖。
+
+## 10. 同工况仿真—实机首轮相关性
+
+ABI 0x00050000 固件增加了可关闭的 10～100 Hz 环形遥测，并明确区分控制角、强制角
+和观察角。本次烧录镜像为 123,252 bytes（ROM 94.03%），SHA-256：
+
+```text
+41A18CAEF44D58066F2F27F043BAF9B92276881191550620A7EACB516F302973
+```
+
+在 16 kHz、12.3 V、582 rpm、0.8 A、空载下，同时运行固件同构 PC 仿真与 5 秒实机
+采样：
+
+| 指标 | PC 同构仿真 | 实机 |
+|---|---:|---:|
+| alignment → ramp | 1.00 s | 1.00 s |
+| ramp → hold | 2.18 s | 2.18 s |
+| Iq 跟踪 RMSE | 0.0007 A | 0.0127 A |
+| 50 Hz CSV 相电流峰值 | 0.801 A | 0.862 A |
+| observer reliable 样本 | 0 / 251 | 0 / 250 |
+
+实机 80,051 个控制步 `errors=0`、deadline `misses=0`；带 trace 时 ISR 最坏
+9,220/9,800 cycles，固件高速峰值锁存约 0.896 A。停止后 flags=`0x0000231f`、
+duty=500/500/500，实时输出与栅极已关闭。
+
+这证明 Rev-Up 与电流环已经能按同一场景定量比较，也证明 SMO 不可靠可在仿真复现；
+但没有独立实机测速真值，不能把 plant 的最终约 573 rpm 当作实测转速。完整流程和
+结果解释见 `docs/SIMULATION_HARDWARE_CORRELATION.md`。
+
+## 11. SMO/PLL 调谐与最终默认固件
+
+首轮同构对比定位到共同问题后，把滑模增益、边界层、EMF 滤波和 PLL Kp/Ki 全部
+加入 `foc_runtime_config_t`，可在停机状态通过 `foc_cfg` 修改；C/Rust ABI 升为
+`0x00060000`、配置版本升为 3。最终默认值为：
+
+```text
+SMO slide=4.0 V
+SMO boundary=0.16 A
+EMF filter alpha=0.05
+PLL Kp=80
+PLL Ki=1000
+```
+
+可靠性窗口同时从“16 kHz 下 64 点、实际只有 4 ms”修正为先按 1 kHz 抽取再保存
+64 点，即 64 ms；速度方差门由均值平方的 4% 收紧为 1%。未来允许接管时，控制角
+会在 25 ms 内沿最短角差从强制角渐变到观察角，不再瞬时跳变。
+
+最终默认配置在相同 16 kHz、约 12.3 V、582 rpm、0.8 A、空载下复测：
+
+| 指标 | 同构仿真 | 最终实机 |
+|---|---:|---:|
+| 2.5～5.0 s 可靠样本 | 126/126 | 126/126 |
+| 观察速度均值 | 581.9 rpm | 582.3 rpm |
+| 观察速度标准差 | 9.3 rpm | 22.3 rpm |
+| 观察角减强制角 | 1.284 rad | 1.127 rad |
+| 角度抖动 RMSE | 0.065 rad | 0.054 rad |
+| Iq 跟踪 RMSE | 0.0007 A | 0.0103 A |
+| 50 Hz 相电流峰值 | 0.801 A | 0.817 A |
+
+实机 80,246 个控制步错误 0、deadline miss 0、trace dropped 0；开启 trace 时 ISR
+最坏 9,532/9,800 cycles，默认 trace 关闭后不承担这部分调试开销。停止后
+flags=`0x0000231f`、duty=500/500/500，功率输出已关闭。
+
+最终烧录并读回校验成功的镜像：
+
+```text
+cmake-build/stm32g431_foc.bin
+124,420 bytes，ROM 94.92%
+SHA-256 1DA3BC443B1436E668CC683D08CBCBC6C352AADF27F05051339779A9B3BB503C
+```
+
+`observer_reliable=1` 只是内部一致性门。当前实机仍没有编码器/霍尔/测速仪真值，且
+观察器可能部分受强制旋转电压场牵引，所以最终固件继续保持 `closed_loop=0`；不能仅
+凭均值接近 582 rpm 就打开速度闭环。
+
+## 12. 最终默认配置 30 秒持续运行
+
+在相同空载硬件条件下执行 30 秒自动采集，脚本正常结束并自动关断功率输出：
+
+```text
+samples=1500, elapsed=29.980 s
+realtime steps=480113, errors=0, deadline misses=0
+trace dropped=0
+ISR max=9536/9800 cycles
+latched phase-current peak≈0.904 A
+post-stop flags=0x0000231f, duty=500/500/500
+```
+
+保持段 1,376/1,376 个样本可靠，观察速度均值 582.03 rpm、标准差 15.65 rpm；
+50 Hz CSV 相电流峰值 0.822 A，Iq 跟踪 RMSE 0.0075 A。实机 5～10 秒和
+25～30 秒的估速统计没有恶化，Vq 均值缓慢上升约 2.7%，需要在后续温度/Rs 辨识中
+继续检查。
+
+MATLAB 已生成 30 秒叠加图、FIG、MAT 和摘要 CSV；完整指标与文件路径见
+`docs/SIMULATION_HARDWARE_CORRELATION.md` 第 7 节。当前电机已停止，trace 已关闭。
+
+## 13. 闭环无扰接管补齐（尚未实机烧录）
+
+按参考工程 `START → SWITCH_OVER → RUN` 补齐了当前 Rust 状态机：观察器达到可靠门后
+才启动 25 ms 角度/Iq 渐变；切换时把观察坐标系实测 Iq 作为渐变端点；速度参考先同步
+到观察速度，再以 500 rpm/s 走向命令速度。参考工程的
+`PID_SPEED_INTEGRAL_INIT_DIV=0` 表明本项目应默认零预装速度 PI；应用 Iq 另外经过
+32 A/s 限速，避免一次 PWM 周期内从切换电流跳到速度 PI 输出。预装比例和限速均可在
+停机状态通过 `foc_cfg preload`、`foc_cfg islew` 修改。
+
+同构闭环仿真在 12.3 V、582 rpm、空载下运行 10 s：2.085 s 左右进入 transition，
+约 2.110 s 进入 closed-loop，最终真值/观察速度均为约 582 rpm；8～10 s 平均 Iq
+参考约 0.010 A。16 kHz 原始采样下，接管区 Iq 单步最大约 0.002 A，占空比单步最大
+约 0.018。观察器未收敛和闭环失锁两条测试均会锁存 Rust 故障并返回零输出。
+
+新镜像已完成目标构建，ABI 为 `0x00070000`，ROM 为 127,052/131,072 bytes
+（96.93%）。本次检查时系统未检测到 ST-LINK，也没有 COM6，因此没有覆盖上一节已经
+实机验证的镜像；实机闭环验证仍为待办，上电默认仍是 `closed_loop=0`。
+
+## 14. 12 kHz WCET 修正与首次短时无感闭环（2026-09-23）
+
+第 13 节记录的是当时尚未烧录的历史状态。随后 16 kHz 实机运行出现
+9,806/9,800 和 9,810/9,800 cycles 的软件截止超限，因此将 PWM、ADC 同步采样、
+电流环和 SMO 统一改为 12 kHz，并保持连续时间 PI 参数不变，由实际
+`ts=1/12000 s` 完成离散积分。软件截止改为 12,500 cycles；170 MHz 下物理周期约
+14,167 cycles。
+
+新镜像已经完成 Rust/C 主机测试、Cortex-M4F CPU/CORDIC 交叉构建和最终固件链接：
+
+- ABI：`0x00070000`
+- BIN：127,060 bytes，ROM 96.94%，RAM 35.62%
+- SHA-256：`AD8D21919183DC55BD4C447237C6CD31EDCA389A0E494C2C2C29345C12506E3C`
+- MATLAB/Rust/固件 PWM 频率均为 12 kHz，速度环保持 1 kHz
+
+烧录校验和复位后，板端上报 `PWM=12000 Hz`、`deadline=12500`、
+`closed_loop=0`。先完成两轮默认开环，再仅在停机状态临时执行
+`foc_cfg closedloop 1` 完成两轮短时接管：
+
+| 试验 | 结果 | 观察器/电流 | ISR |
+|---|---|---|---|
+| 开环 1，5 s | 正方向持续运行，0 错误、0 超时 | 稳态 126/126 可靠；582.23±31.40 rpm；Iq/Id RMSE 0.00919/0.00887 A | 9,844/12,500 cycles |
+| 开环 2，5 s | 正方向持续运行，0 错误、0 超时 | 稳态 126/126 可靠；581.90 rpm；Iq/Id RMSE 0.01492/0.01078 A | 9,848/12,500 cycles |
+| 闭环 1，5 s | 约 2.10 s transition，约 2.12 s 状态 7，保持到结束 | 闭环可靠 143/145；3～5 s 估速 580.87±22.95 rpm；Iq/Id RMSE 0.00677/0.00615 A | 10,065/12,500 cycles |
+| 闭环 2，5 s | 约 2.10 s transition，约 2.12 s 状态 7，保持到结束 | 闭环可靠 143/145；3～5 s 估速 581.35±20.90 rpm；Iq/Id RMSE 0.00676/0.00670 A | 10,083/12,500 cycles |
+
+两次闭环在刚进入状态 7 后都只出现一个约 20 ms 的短暂 `reliable=0` 样本，随后在
+50 ms 失锁保护期限内恢复，没有触发故障。闭环最坏软件余量为 2,417 cycles，约
+14.2 us；相对 12 kHz 物理周期仍余约 4,084 cycles，约 24.0 us。四轮试验都没有
+deadline miss，说明把快环降到 12 kHz 已解决本轮观察到的截止超限。
+
+结果文件：
+
+- `simulation/results/hardware_582rpm_12v3_12khz_openloop_run1_20260923.csv/.log`
+- `simulation/results/hardware_582rpm_12v3_12khz_openloop_run2_20260923.csv/.log`
+- `simulation/results/hardware_582rpm_12v3_12khz_closedloop_trial1_20260923.csv/.log`
+- `simulation/results/hardware_582rpm_12v3_12khz_closedloop_trial2_20260923.csv/.log`
+
+最后已执行 `foc_stop`，关闭 gate、TIM1 三相输出并恢复 `closedloop 0`。串口状态中的
+`state=closed-loop` 只是最后一次运行快照；配置回读和 500/500/500 duty 才是停机后的
+有效状态。当前结论是“短时无感接管能够运行”，不是“轴端速度已被独立验证”。在加入
+编码器/测速仪、完成多次冷启动、负载、温升和故障注入前，不修改安全默认值。

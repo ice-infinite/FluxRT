@@ -1,0 +1,34 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "FluxRT: 增量编译",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\build.ps1", "-BuildOnly"],
+      "group": {"kind": "build", "isDefault": true},
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "FluxRT: 重新生成并完整编译",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\build.ps1", "-Regenerate"],
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "FluxRT: C + Rust 全部测试",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\test.ps1"],
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "FluxRT: Rust Clippy",
+      "type": "shell",
+      "command": "${env:USERPROFILE}\\.cargo\\bin\\cargo.exe",
+      "args": ["clippy", "--manifest-path", "${workspaceFolder}\\rust\\Cargo.toml", "--workspace", "--all-targets", "--", "-D", "warnings"],
+      "problemMatcher": "$rustc"
+    }
+  ]
+}
