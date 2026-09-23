@@ -20,13 +20,13 @@
 
 | 项目 | 当前状态 |
 |---|---|
-| 最近记录 | `LOG-20260923-005` |
-| 工程阶段 | 路线阶段 1.1 构建优化矩阵与分档完成；架构工作包 A1 尚未开始，下一步优化共享 Clarke 和 CORDIC 事务 |
+| 最近记录 | `LOG-20260923-006` |
+| 工程阶段 | 路线阶段 1.2 已完成共享电流 Clarke 的结构落位；尚未取得 WCET 降幅，下一步单独优化 CORDIC 事务 |
 | 当前默认安全状态 | `closed_loop_enable=0`，新增补偿/相电压/HFI 等功能均未默认启用 |
-| 当前固件基线 | 板上为 Diagnostic + Rust `s`：BIN 122,812 B；开环完整 ISR 8,257/12,500 cycles |
-| Git 状态 | `main` 连接 `https://github.com/ice-infinite/FluxRT.git`；本批修改待由 `LOG-20260923-005` 所在提交追踪 |
-| 当前可恢复点 | `5e3b85f` A0 基线、GitHub `main`、本条记录所在提交及对应固件 SHA-256 |
-| 下一建议动作 | 在 12 kHz 和 Rust `s` 不变时复用 Clarke/中间量并减少 CORDIC 事务；闭环观察器失锁另立整改项 |
+| 当前固件基线 | 板上为 Diagnostic + Rust `s` 共享 Clarke 版：BIN 122,788 B；三次开环完整 ISR 均为 8,267/12,500 cycles |
+| Git 状态 | `main` 连接 `https://github.com/ice-infinite/FluxRT.git`；本批修改待由 `LOG-20260923-006` 所在提交追踪 |
+| 当前可恢复点 | `6bb6afd` 阶段 1.1 基线、GitHub `main`、本条记录所在提交及对应固件 SHA-256 |
+| 下一建议动作 | 保持 12 kHz、Rust `s`、默认开环和保护阈值不变，建立 CORDIC 分项基准并减少无效 magnitude 事务 |
 | 禁止误读 | 文档中“规划新增”的文件和功能尚未实现 |
 
 ## 3. 强制记录规则
@@ -148,6 +148,67 @@ git revert <bad-commit>
 ```
 
 ## 5. 操作记录
+
+### LOG-20260923-006｜阶段 1.2 共享电流 Clarke
+
+- 时间：2026-09-23 14:07 +08:00
+- 负责人：User + Codex
+- 状态：部分完成；数据流去重和实机回归通过，WCET 降低验收未通过
+- 类型：代码 / 测试 / 构建 / 烧录 / 实机 / 文档
+- 目标：同一 ADC 电流快照只执行一次 Clarke，并让观察器、无感接管和电流环复用，不修改控制公式和安全配置。
+- 开始基线：`main`，`6bb6afd4f58124e7044e9e03a5b1543b3214aa23`。
+- 关联提交：本条记录所在提交。
+
+#### 修改内容
+
+| 路径/对象 | 类型 | 修改说明 |
+|---|---|---|
+| `rust/crates/foc-control/src/controller.rs` | 接口/测试 | 增加接收预计算 αβ 的电流环入口；原入口保留；增加与原路径逐值相等测试 |
+| `rust/crates/foc-control/src/observer.rs` | 接口 | 观察器 trait 和两个后端增加预计算 αβ 入口；独立调用入口仍自行 Clarke |
+| `rust/crates/foc-rt-bridge/src/lib.rs` | 实时组合 | 每拍 Clarke 一次，并把结果交给观察器、handoff `Iq` 和电流环 |
+| `docs/performance/2026-09-23-a2-shared-current-clarke.md` | 新增 | 记录数据流、尺寸、三次实机 WCET、证据边界和下一步 |
+| 整改路线、操作记录 | 文档 | 更新阶段状态；明确结构完成不等于 WCET 验收通过 |
+
+#### 关键参数变化
+
+| 参数 | 修改前 | 修改后 | 原因 |
+|---|---:|---:|---|
+| 实时电流 Clarke | 观察器 1 次 + 电流环 1 次；接管瞬间再 1 次 | 桥接层每拍 1 次并共享 | 消除同一 ADC 快照的重复变换 |
+| Diagnostic BIN | 122,812 B | 122,788 B | LTO 后净减少 24 B |
+| 完整 ISR WCET | 8,257 cycles | 三次均为 8,267 cycles | 未测得性能收益；+10 cycles 记录为未通过降幅门，而非改善 |
+| PWM/控制/观察器 | 12 kHz / 12 kHz / divider 1 | 未改 | 本批只做结构复用 |
+| 默认闭环/保护 | `0` / 原阈值 | 未改 | 不越过观察器和安全验收门 |
+
+#### 验证与证据
+
+| 等级 | 命令/场景 | 结果 | 产物/记录 |
+|---|---|---|---|
+| S0 | 实时调用链检查 | PASS；电流 αβ 在 bridge 计算一次；电压 Clarke 和兼容入口不误计为重复实时调用 | 阶段 1.2 报告 |
+| S1 | `test.ps1` | PASS；Rust 95 项、格式、Clippy、CPU/CORDIC 交叉库、C Host 1/1 和 PMSM 仿真通过 | 控制台记录 |
+| S2 | Diagnostic + Rust `s` | PASS；BIN 122,788 B，RAM 11,728 B | `cmake-build/fluxrt.*` |
+| S4 | SWD 下载、verify、reset | PASS；NUCLEO-G431RB / STM32G43x/G44x | STM32CubeProgrammer 2.19.0 |
+| S5 | 默认开环、582 rpm、trace off、3 × 5 s | PASS；三次 WCET 均 8,267，全部 0 invalid/miss/error/fault | ignored results + 阶段 1.2 报告 |
+| S6 | 示波器、编码器、故障注入、长测 | 未执行 | 不得视为闭环或生产证明 |
+
+最终板上 Diagnostic + Rust `s` 共享 Clarke 固件：
+
+- `fluxrt.bin`：122,788 B，`DD91427930F050A584F85E2BD75DFE960B9F12D3E2436CFBC27189CFBDFE6B6B`
+- `fluxrt.hex`：`31D8F79544E28E8CC3CF9AE9AC2A02578263C2EB5648415B54E64C7FBC1E30C6`
+- `rtthread.elf`：`CC5D358D699EC1576218D7C78247893AE3CEB3DFE4962D7B39982EE20AA6FF37`
+
+#### 实机条件
+
+- 板卡：NUCLEO-G431RB + X-NUCLEO-IHM16M1；电机：GBM2804H-100T；空载自由旋转。
+- 电源：板端约 12.24～12.28 V；用户电源上限 2 A；软件 trip 1.15 A。
+- 命令：三次均为默认开环 `foc_start 582`，trace 关闭，每次 5 秒，脚本每组和最终均执行 `foc_stop`。
+- 结果：观察器可靠位为 1；全部 0 deadline miss、0 error、0 fault；结束回读确认 TIM1 输出和门极已关闭。
+
+#### 风险、回退与遗留
+
+- 风险：共享中间量扩大了 αβ 值的存活区间；实机结果固定增加 10 cycles，不能声称它降低了 WCET。
+- 回退：`6bb6afd` 是本批前基线；提交后用 `git revert <本条记录所在提交>`，不使用破坏性 reset。
+- 未完成：CORDIC 分项基准与事务优化、闭环观察器失锁、独立真值、故障注入和长测。
+- 下一步：单独优化无需限幅时的 magnitude 事务，并保留 CORDIC 超时/CPU 回退，再重复相同验收。
 
 ### LOG-20260923-005｜阶段 1.1 优化等级矩阵与构建分档
 

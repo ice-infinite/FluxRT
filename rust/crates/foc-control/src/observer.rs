@@ -1,6 +1,6 @@
 use foc_algorithm::{
-    clamp, wrap_angle_0_to_2pi, wrap_angle_minus_pi_to_pi, BemfInput, BemfParam, BemfPllParam,
-    BemfPllState, PllParam, SmoInput, SmoParam, SmoPllParam, SmoPllState,
+    clamp, clarke, wrap_angle_0_to_2pi, wrap_angle_minus_pi_to_pi, Abc, AlphaBeta, BemfInput,
+    BemfParam, BemfPllParam, BemfPllState, PllParam, SmoInput, SmoParam, SmoPllParam, SmoPllState,
 };
 
 use crate::{
@@ -10,12 +10,32 @@ use crate::{
 
 pub trait RotorEstimator {
     fn reset(&mut self, initial_electrical_angle_rad: f32);
+    fn update_from_alpha_beta_with_math<M: ControlMath>(
+        &mut self,
+        currents_and_bus: &FeedbackSnapshot,
+        current_alpha_beta: AlphaBeta,
+        previous_pwm: PwmCommand,
+        math: &mut M,
+    ) -> RotorFeedback;
+
     fn update_with_math<M: ControlMath>(
         &mut self,
         currents_and_bus: &FeedbackSnapshot,
         previous_pwm: PwmCommand,
         math: &mut M,
-    ) -> RotorFeedback;
+    ) -> RotorFeedback {
+        let current_alpha_beta = clarke(Abc {
+            a: currents_and_bus.currents.a,
+            b: currents_and_bus.currents.b,
+            c: currents_and_bus.currents.c,
+        });
+        self.update_from_alpha_beta_with_math(
+            currents_and_bus,
+            current_alpha_beta,
+            previous_pwm,
+            math,
+        )
+    }
 
     fn update(
         &mut self,
@@ -257,18 +277,14 @@ impl RotorEstimator for SmoPllEstimator {
         self.reliability_decimator = 0;
     }
 
-    fn update_with_math<M: ControlMath>(
+    fn update_from_alpha_beta_with_math<M: ControlMath>(
         &mut self,
         feedback: &FeedbackSnapshot,
+        current: AlphaBeta,
         previous_pwm: PwmCommand,
         math: &mut M,
     ) -> RotorFeedback {
         let voltage = pwm_to_alpha_beta(previous_pwm, feedback.dc_bus_voltage);
-        let current = foc_algorithm::clarke(foc_algorithm::Abc {
-            a: feedback.currents.a,
-            b: feedback.currents.b,
-            c: feedback.currents.c,
-        });
         self.state.emf = self
             .state
             .smo
@@ -359,18 +375,14 @@ impl RotorEstimator for BemfPllEstimator {
         self.valid_samples = 0;
     }
 
-    fn update_with_math<M: ControlMath>(
+    fn update_from_alpha_beta_with_math<M: ControlMath>(
         &mut self,
         feedback: &FeedbackSnapshot,
+        current: AlphaBeta,
         previous_pwm: PwmCommand,
         _math: &mut M,
     ) -> RotorFeedback {
         let voltage = pwm_to_alpha_beta(previous_pwm, feedback.dc_bus_voltage);
-        let current = foc_algorithm::clarke(foc_algorithm::Abc {
-            a: feedback.currents.a,
-            b: feedback.currents.b,
-            c: feedback.currents.c,
-        });
         let electrical_angle_rad = self
             .state
             .update(&self.params, &BemfInput { voltage, current });
@@ -456,17 +468,23 @@ impl RotorEstimator for ConfigurableObserver {
         }
     }
 
-    fn update_with_math<M: ControlMath>(
+    fn update_from_alpha_beta_with_math<M: ControlMath>(
         &mut self,
         feedback: &FeedbackSnapshot,
+        current_alpha_beta: AlphaBeta,
         previous_pwm: PwmCommand,
         math: &mut M,
     ) -> RotorFeedback {
         match self.backend {
-            ObserverBackend::SmoPll => self.smo.update_with_math(feedback, previous_pwm, math),
-            ObserverBackend::StStoPll | ObserverBackend::FloatBemfPll => {
-                self.bemf.update_with_math(feedback, previous_pwm, math)
-            }
+            ObserverBackend::SmoPll => self.smo.update_from_alpha_beta_with_math(
+                feedback,
+                current_alpha_beta,
+                previous_pwm,
+                math,
+            ),
+            ObserverBackend::StStoPll | ObserverBackend::FloatBemfPll => self
+                .bemf
+                .update_from_alpha_beta_with_math(feedback, current_alpha_beta, previous_pwm, math),
         }
     }
 

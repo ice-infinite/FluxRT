@@ -43,6 +43,21 @@ impl CurrentLoop {
             b: feedback.currents.b,
             c: feedback.currents.c,
         });
+        self.update_from_alpha_beta_with_math(params, feedback, current_alpha_beta, reference, math)
+    }
+
+    /// Runs one current-loop sample from a Clarke result already calculated by
+    /// the realtime composition layer. This keeps Clarke a once-per-sample
+    /// operation when the observer and current controller consume the same ADC
+    /// snapshot.
+    pub fn update_from_alpha_beta_with_math<M: ControlMath>(
+        &mut self,
+        params: &ControlParameters,
+        feedback: &FeedbackSnapshot,
+        current_alpha_beta: AlphaBeta,
+        reference: CurrentCommand,
+        math: &mut M,
+    ) -> (PwmCommand, ControlTelemetry) {
         // One sin/cos pair is shared by Park and inverse Park. This reduces the
         // CPU fallback cost as well as the number of accelerator transactions.
         let (sin, cos) = math.sin_cos(feedback.rotor.electrical_angle_rad);
@@ -310,6 +325,44 @@ mod tests {
         let _ = loop_.update_with_math(&params, &feedback, CurrentCommand::default(), &mut math);
         assert_eq!(math.sin_cos_calls, 1);
         assert_eq!(math.magnitude_calls, 1);
+    }
+
+    #[test]
+    fn precomputed_clarke_path_matches_regular_current_loop() {
+        let params = st_gbm2804_reference_parameters();
+        let feedback = FeedbackSnapshot {
+            currents: PhaseCurrents {
+                a: 0.37,
+                b: -0.22,
+                c: -0.15,
+            },
+            dc_bus_voltage: 13.0,
+            rotor: RotorFeedback {
+                electrical_angle_rad: 1.25,
+                mechanical_speed_rad_s: 41.0,
+            },
+        };
+        let reference = CurrentCommand {
+            id_ref_a: 0.1,
+            iq_ref_a: 0.6,
+        };
+        let current_alpha_beta = clarke(Abc {
+            a: feedback.currents.a,
+            b: feedback.currents.b,
+            c: feedback.currents.c,
+        });
+        let mut regular = CurrentLoop::default();
+        let mut precomputed = CurrentLoop::default();
+        let regular_output = regular.update(&params, &feedback, reference);
+        let precomputed_output = precomputed.update_from_alpha_beta_with_math(
+            &params,
+            &feedback,
+            current_alpha_beta,
+            reference,
+            &mut CpuMath,
+        );
+
+        assert_eq!(precomputed_output, regular_output);
     }
 
     #[test]

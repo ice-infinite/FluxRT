@@ -957,6 +957,13 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
         rotor: RotorFeedback::default(),
     };
     let mut math = PlatformMath::default();
+    // One ADC current snapshot has exactly one Clarke transform. The observer,
+    // handoff initializer and current loop all consume this shared result.
+    let current_alpha_beta = clarke(Abc {
+        a: feedback.phase_current_a,
+        b: feedback.phase_current_b,
+        c: feedback.phase_current_c,
+    });
     let dt_s = 1.0 / controller.params.pwm_frequency_hz as f32;
     let observer_enabled = controller.runtime_config.observer_enable != 0;
     let observer_due = observer_enabled && controller.observer_counter == 0;
@@ -969,10 +976,12 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
         );
         #[cfg(target_os = "none")]
         let observer_pwm = controller.previous_pwm;
-        controller.observer_feedback =
-            controller
-                .observer
-                .update_with_math(&snapshot, observer_pwm, &mut math);
+        controller.observer_feedback = controller.observer.update_from_alpha_beta_with_math(
+            &snapshot,
+            current_alpha_beta,
+            observer_pwm,
+            &mut math,
+        );
         controller.observer_reliable = controller.observer.is_reliable();
     }
     if observer_enabled {
@@ -989,13 +998,8 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
             controller.state,
             FocState::ObserverTransition | FocState::ClosedLoop
         ) {
-        let current = clarke(Abc {
-            a: feedback.phase_current_a,
-            b: feedback.phase_current_b,
-            c: feedback.phase_current_c,
-        });
         let (sin, cos) = math.sin_cos(observer_feedback.electrical_angle_rad);
-        -current.alpha * sin + current.beta * cos
+        -current_alpha_beta.alpha * sin + current_alpha_beta.beta * cos
     } else {
         controller.current_reference.iq_ref_a
     };
@@ -1149,9 +1153,10 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
         return FocStatus::Ok;
     }
 
-    let (pwm, control) = controller.current_loop.update_with_math(
+    let (pwm, control) = controller.current_loop.update_from_alpha_beta_with_math(
         &controller.params,
         &snapshot,
+        current_alpha_beta,
         controller.current_reference,
         &mut math,
     );
