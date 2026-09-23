@@ -20,13 +20,13 @@
 
 | 项目 | 当前状态 |
 |---|---|
-| 最近记录 | `LOG-20260923-004` |
-| 工程阶段 | A0 关联 WCET、size/map 和板端 DWT 基线已完成；PA5 示波器对拍与独立轴端真值未完成 |
+| 最近记录 | `LOG-20260923-005` |
+| 工程阶段 | 路线阶段 1.1 构建优化矩阵与分档完成；架构工作包 A1 尚未开始，下一步优化共享 Clarke 和 CORDIC 事务 |
 | 当前默认安全状态 | `closed_loop_enable=0`，新增补偿/相电压/HFI 等功能均未默认启用 |
-| 当前固件基线 | `cmake-build/fluxrt.bin` 127,820 B；12 kHz PWM/控制环；最终固件实测完整 ISR 最大 10,209/12,500 cycles |
-| Git 状态 | `main` 连接 `https://github.com/ice-infinite/FluxRT.git`；A0 本批修改由本记录所在提交追踪 |
-| 当前可恢复点 | `e870792` 首次源码基线、GitHub `main`、本条记录所在提交及对应固件 SHA-256 |
-| 下一建议动作 | 完成 `O3/Os/Oz` size+WCET 对比和 production/diagnostic 构建档；闭环观察器失锁另立整改项 |
+| 当前固件基线 | 板上为 Diagnostic + Rust `s`：BIN 122,812 B；开环完整 ISR 8,257/12,500 cycles |
+| Git 状态 | `main` 连接 `https://github.com/ice-infinite/FluxRT.git`；本批修改待由 `LOG-20260923-005` 所在提交追踪 |
+| 当前可恢复点 | `5e3b85f` A0 基线、GitHub `main`、本条记录所在提交及对应固件 SHA-256 |
+| 下一建议动作 | 在 12 kHz 和 Rust `s` 不变时复用 Clarke/中间量并减少 CORDIC 事务；闭环观察器失锁另立整改项 |
 | 禁止误读 | 文档中“规划新增”的文件和功能尚未实现 |
 
 ## 3. 强制记录规则
@@ -148,6 +148,78 @@ git revert <bad-commit>
 ```
 
 ## 5. 操作记录
+
+### LOG-20260923-005｜阶段 1.1 优化等级矩阵与构建分档
+
+- 时间：2026-09-23 13:42 +08:00
+- 负责人：User + Codex
+- 状态：完成；构建分档和低功率实机矩阵通过，生产全工况验收未执行
+- 类型：代码 / 构建系统 / 测试 / 烧录 / 实机 / 文档
+- 目标：实测 Rust `3/s/z` 的 Flash/WCET 取舍，建立不会混用静态库的 Diagnostic/Production 构建档，并回收生产候选固件空间。
+- 开始基线：`main`，`5e3b85fd84b2d09f08c896acdd312b3e286afd81`。
+- 关联提交：本条记录所在提交。
+
+#### 修改内容
+
+| 路径/对象 | 类型 | 修改说明 |
+|---|---|---|
+| `rust/Cargo.toml` | 参数 | 默认 release `opt-level` 由 `3` 改为实机选出的 `s`，LTO/单 codegen unit/abort 保持不变 |
+| `custom.cmake` | 构建 | 增加 `FLUXRT_BUILD_PROFILE` 和 `FLUXRT_RUST_OPT_LEVEL`；各优化档独立 target 目录并覆盖生成的旧链接路径 |
+| `build.ps1` | 构建 | 增加 Diagnostic/Production、`3/s/z` 参数、cache 一致性检查、独立输出目录和进程环境恢复 |
+| `applications/main.c` | 构建档 | 显示构建身份；Production 保留 start/stop/status，裁掉在线浮点配置和 trace Shell/输出 |
+| `foc/platform/stm32g431/foc_platform_stm32g431.c` | 构建档 | Production 裁掉 trace 缓冲与 ISR 采集，保留控制、保护、关联 WCET 和 deadline |
+| `simulation/capture_timing_baseline.py` | 工具 | 增加构建档参数；Production 只允许 trace-off，避免调用已裁剪命令 |
+| `.vscode/tasks.json`、`.gitignore` | 工具 | 增加 Production 构建任务并忽略独立构建目录 |
+| `docs/BUILD_PROFILES.md`、`docs/performance/2026-09-23-a1-build-profile-matrix.md` | 新增 | 固化使用方法、矩阵、哈希、裁剪边界和证据等级 |
+| `README.md`、整改路线 | 文档 | 更新默认优化档、闭环风险、Production 边界和阶段状态 |
+
+#### 关键参数变化
+
+| 参数 | 修改前 | 修改后 | 原因 |
+|---|---:|---:|---|
+| Rust 默认 `opt-level` | `3` | `s` | Diagnostic 回收 5,080 B，WCET 仅从 8,098 增至 8,257 cycles |
+| Diagnostic BIN | 127,892 B（同版 `3`） | 122,812 B（`s`） | 日常调试至少恢复约 8 KiB Flash 余量 |
+| Production BIN | 无独立档 | 93,004 B | 裁掉在线浮点调参和 trace，Flash 余量 29.04% |
+| Production RAM | 无独立档 | 8,000 B | trace 缓冲和相关状态被裁掉 |
+| PWM/控制/安全阈值 | 12 kHz / 12 kHz / 原值 | 未改 | 本批只改构建与诊断能力，不混入控制律调整 |
+| 默认闭环 | `0` | `0` | 构建优化不能越过观察器稳定性门 |
+
+#### 验证与证据
+
+| 等级 | 命令/场景 | 结果 | 产物/记录 |
+|---|---|---|---|
+| S0 | map/nm 检查 | Production 不含 trace、`foc_cfg`、`strtod/strtof`、`vfiprintf`；仍含 start/stop/status、ISR 和平台启停 | 阶段 1.1 报告 |
+| S1 | `.\test.ps1` | PASS；Rust 94 项、格式、Clippy、CPU/CORDIC 交叉库、C Host 1/1 和 PMSM 仿真通过 | 控制台记录 |
+| S1 | Python 编译、profile 参数拒绝、PowerShell PATH 前后对比 | PASS；Production 非零 trace 频率被拒绝；构建后仍解析到同一个 Python/pyserial | 控制台记录 |
+| S2 | Diagnostic `3/s/z`、Production `s` | 全部构建通过；尺寸见阶段 1.1 报告 | 两个 CMake 输出目录 |
+| S4 | 四档 SWD 下载、verify、reset | PASS | NUCLEO-G431RB / STM32G43x/G44x |
+| S5 | 四档默认开环，582 rpm，各 5 s | PASS；WCET 8,098 / 8,257 / 8,857 / 8,160，全部 0 error、0 miss、0 fault | ignored results + 阶段 1.1 报告 |
+| S6 | 示波器、编码器、故障注入、长测、多板多电机 | 未执行 | Production 仍只是候选构建档 |
+
+最终板上 Diagnostic + `s` 固件：
+
+- `fluxrt.bin`：122,812 B，`EF66C0A1FAE31F32C183A3351F6C1DA36526A81D9DF45B0807F44DAD8E4FD9A1`
+- `fluxrt.hex`：`CDBFB76B45395BAECE7DF424080181AF753C50191D13D8147C5BC35265AA15E7`
+- `rtthread.elf`：`0B9EF74B0BF4EE98FE7848DDA84AEDDBD13E89DAE1B4457419E964A64E640543`
+
+Production + `s` 候选 BIN：93,004 B，
+`7FFB36F867E39058F1EDE4EC797DF5513D11A429DCB8E1159FD64CDCE0A0B28E`。
+
+#### 实机条件
+
+- 板卡：NUCLEO-G431RB + X-NUCLEO-IHM16M1；电机：GBM2804H-100T；空载自由旋转。
+- 电源：板端约 12.28 V，用户电源上限 2 A，软件 trip 1.15 A。
+- 命令：四档均为 582 rpm、默认开环、trace 关闭、5 秒；每组由脚本停机收尾。
+- 结束状态：重新烧录 Diagnostic + `s`；回读 `closed_loop=0`、`steps=0`、`errors=0`、duty 0/0/0，trace 已停止。
+
+#### 风险、回退与遗留
+
+- 风险：Production 仍保留 Finsh 基础 Shell，并非最终最小产品镜像；后续正式通信/参数存储接口完成后还可继续裁剪。
+- 纠正：首次参数化 `O3` 构建发现生成 CMake 仍链接旧 `build/rust-target`；未将错误标签纳入结果，修复链接目录后重建、重烧并重新实测三档。
+- 纠正：同一 PowerShell 中构建脚本曾泄漏 PATH，导致随后 Python 缺少 pyserial；现已恢复进程环境并验证前后解释器一致。
+- 回退：`5e3b85f` 是本批前 A0 基线；提交后使用 `git revert <本条记录所在提交>`。
+- 未完成：闭环观察器失锁、PA5 示波器对拍、独立真值、故障注入和长测。
+- 下一步：保持 Rust `s` 和 12 kHz，开始共享 Clarke/中间量与 CORDIC 事务优化，并重新执行相同 WCET 门。
 
 ### LOG-20260923-004｜A0 完整 ISR 关联 WCET 与首轮实机基线
 

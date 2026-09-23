@@ -17,6 +17,13 @@
       "problemMatcher": "$gcc"
     },
     {
+      "label": "FluxRT: Production 候选完整编译",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\build.ps1", "-Regenerate", "-Profile", "Production", "-RustOptLevel", "s"],
+      "problemMatcher": "$gcc"
+    },
+    {
       "label": "FluxRT: C + Rust 全部测试",
       "type": "shell",
       "command": "powershell",

@@ -195,6 +195,12 @@ docs/performance/<date>-<commit>-baseline.md
 - trace 关闭时完整 ISR WCET 不高于 12 kHz 物理周期的 70%；
 - 所有安全测试、仿真和短时实机基线不退化。
 
+构建配置 A/B、map 审计和 Diagnostic/Production 分档已完成，结果见
+[`performance/2026-09-23-a1-build-profile-matrix.md`](performance/2026-09-23-a1-build-profile-matrix.md)。
+当前默认 Rust `s`；Production 候选剩余 29.04% Flash，且 trace 关闭时完整 ISR 为
+8,160 cycles。阶段 1 尚未完成共享 Clarke、中间量复用和 CORDIC 事务优化，不能把本次
+构建分档标记为整个阶段 1 完成。
+
 #### 1.2 数据流复用
 
 目标快环数据流：

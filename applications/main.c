@@ -7,9 +7,18 @@
 #include "foc_platform.h"
 #include "foc_rust_bridge.h"
 
+#ifndef FLUXRT_BUILD_PROFILE_NAME
+#define FLUXRT_BUILD_PROFILE_NAME "diagnostic"
+#endif
+#ifndef FLUXRT_RUST_OPT_LEVEL_NAME
+#define FLUXRT_RUST_OPT_LEVEL_NAME "s"
+#endif
+
 static foc_rust_context_t g_foc_controller;
 static foc_runtime_config_t g_foc_runtime_config;
+#if !defined(FLUXRT_PRODUCTION_BUILD)
 static uint32_t g_foc_trace_rate_hz;
+#endif
 static foc_platform_config_t g_foc_platform_config =
 {
     sizeof(foc_platform_config_t),
@@ -66,7 +75,11 @@ static int foc_start(int argc, char **argv)
     }
     if (argc == 2)
     {
+#if defined(FLUXRT_PRODUCTION_BUILD)
+        target_rpm = (float)strtol(argv[1], RT_NULL, 10);
+#else
         target_rpm = strtof(argv[1], RT_NULL);
+#endif
     }
     status = foc_platform_control_start(target_rpm);
     if (status != FOC_STATUS_OK)
@@ -204,6 +217,7 @@ static int foc_status(int argc, char **argv)
 }
 MSH_CMD_EXPORT(foc_status, show FOC state observer and realtime diagnostics);
 
+#if !defined(FLUXRT_PRODUCTION_BUILD)
 static int foc_trace(int argc, char **argv)
 {
     foc_platform_diagnostics_t diagnostics = {0};
@@ -448,6 +462,7 @@ static int foc_cfg(int argc, char **argv)
     return 0;
 }
 MSH_CMD_EXPORT(foc_cfg, show or change disabled FOC configuration);
+#endif
 
 int main(void)
 {
@@ -493,6 +508,9 @@ int main(void)
     heartbeat_ms = (uint32_t)rt_tick_get_millisecond();
 
     rt_kprintf("STM32G431 RT-Thread + Rust FOC realtime bring-up\n");
+    rt_kprintf("Build profile=%s Rust opt-level=%s.\n",
+               FLUXRT_BUILD_PROFILE_NAME,
+               FLUXRT_RUST_OPT_LEVEL_NAME);
     rt_kprintf("Rust ABI=0x%08x context=%u/%u init/config=%u; platform cfg/init/bind=%u/%u/%u.\n",
                (unsigned int)foc_rust_abi_version(),
                (unsigned int)foc_rust_context_required_size(),
@@ -511,12 +529,19 @@ int main(void)
                (foc_math_accel_backend() == FOC_MATH_BACKEND_CORDIC) ? "STM32G4-CORDIC" : "CPU",
                foc_observer_name(g_foc_runtime_config.observer_backend),
                (unsigned int)g_foc_runtime_config.closed_loop_enable);
+#if defined(FLUXRT_PRODUCTION_BUILD)
+    rt_kprintf("Commands: foc_status, foc_start, foc_stop. Runtime tuning and trace are compiled out.\n");
+#else
     rt_kprintf("Commands: foc_status, foc_cfg show, foc_trace, foc_start, foc_stop.\n");
+#endif
 
     while (1)
     {
+#if !defined(FLUXRT_PRODUCTION_BUILD)
         foc_trace_sample_t trace_sample;
+#endif
         uint32_t now_ms = (uint32_t)rt_tick_get_millisecond();
+#if !defined(FLUXRT_PRODUCTION_BUILD)
         while (foc_platform_trace_pop(&trace_sample) != 0U)
         {
             rt_kprintf("FTR,%u,%u,%d,%d,%d,%d,%d,%d,%d,%d,%d,%u,%u,%u,%u,%d,%d,%d,%d,%u,%u\n",
@@ -542,8 +567,13 @@ int main(void)
                        (unsigned int)trace_sample.observer_reliable,
                        (unsigned int)trace_sample.flags);
         }
+#endif
         if (((now_ms - heartbeat_ms) >= 5000U) &&
+#if !defined(FLUXRT_PRODUCTION_BUILD)
             (foc_platform_trace_is_enabled() == 0U))
+#else
+            1)
+#endif
         {
             heartbeat_ms = now_ms;
             (void)foc_platform_get_diagnostics(&diagnostics);

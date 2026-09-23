@@ -21,6 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--duration", type=float, default=5.0)
     parser.add_argument("--target-rpm", type=float, default=582.0)
     parser.add_argument("--rates", default="0,10,50")
+    parser.add_argument("--profile", choices=("diagnostic", "production"), default="diagnostic")
     parser.add_argument("--closed-loop", action="store_true")
     parser.add_argument("--allow-motor-run", action="store_true")
     parser.add_argument("--output", type=pathlib.Path, required=True)
@@ -102,12 +103,14 @@ def run_scenario(
     rate_hz: int,
     duration: float,
     target_rpm: float,
+    trace_supported: bool,
     raw: list[str],
 ) -> dict[str, object]:
     label = f"trace-{rate_hz}Hz" if rate_hz else "trace-off"
     raw.append(f"[{label}] BEGIN")
     send(port, "foc_stop")
-    send(port, "foc_trace stop")
+    if trace_supported:
+        send(port, "foc_trace stop")
     collect_for(port, 0.2, raw, label)
     if rate_hz:
         send(port, f"foc_trace start {rate_hz}")
@@ -129,8 +132,9 @@ def run_scenario(
         (parsed for line in reversed(timing_lines) if (parsed := parse_timing(line)) is not None),
         None,
     )
-    send(port, "foc_trace stop")
-    collect_for(port, 0.1, raw, label)
+    if trace_supported:
+        send(port, "foc_trace stop")
+        collect_for(port, 0.1, raw, label)
     if timing is None:
         raise RuntimeError(f"{label}: no FTIMING record received")
     issues: list[str] = []
@@ -164,6 +168,8 @@ def main() -> int:
         raise SystemExit("refusing to energize the motor without --allow-motor-run")
     if args.duration <= 0 or not rates or any(rate not in (0, 10, 50) for rate in rates):
         raise SystemExit("duration must be positive; rates must be selected from 0,10,50")
+    if args.profile == "production" and any(rate != 0 for rate in rates):
+        raise SystemExit("production profile compiles trace out; only --rates 0 is valid")
 
     project = pathlib.Path(__file__).resolve().parents[1]
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -174,18 +180,27 @@ def main() -> int:
         time.sleep(0.25)
         port.reset_input_buffer()
         send(port, "foc_stop")
-        send(port, "foc_trace stop")
+        if args.profile == "diagnostic":
+            send(port, "foc_trace stop")
         if args.closed_loop:
             send(port, "foc_cfg closedloop 1")
         collect_for(port, 0.25, raw, "setup")
         try:
             for rate_hz in rates:
                 scenarios.append(
-                    run_scenario(port, rate_hz, args.duration, args.target_rpm, raw)
+                    run_scenario(
+                        port,
+                        rate_hz,
+                        args.duration,
+                        args.target_rpm,
+                        args.profile == "diagnostic",
+                        raw,
+                    )
                 )
         finally:
             send(port, "foc_stop")
-            send(port, "foc_trace stop")
+            if args.profile == "diagnostic":
+                send(port, "foc_trace stop")
             if args.closed_loop:
                 send(port, "foc_cfg closedloop 0")
             collect_for(port, 0.25, raw, "cleanup")
@@ -197,6 +212,7 @@ def main() -> int:
         "port": args.port,
         "baud": args.baud,
         "closed_loop_requested": args.closed_loop,
+        "build_profile": args.profile,
         "scenarios": scenarios,
     }
     args.output.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")

@@ -3,7 +3,11 @@ param(
     [switch]$UpdatePackages,
     [switch]$ConfigureOnly,
     [switch]$BuildOnly,
-    [switch]$Clean
+    [switch]$Clean,
+    [ValidateSet('Diagnostic', 'Production')]
+    [string]$Profile = 'Diagnostic',
+    [ValidateSet('3', 's', 'z')]
+    [string]$RustOptLevel = 's'
 )
 
 Set-StrictMode -Version Latest
@@ -12,7 +16,9 @@ $ErrorActionPreference = 'Stop'
 $projectDir = $PSScriptRoot
 $workspaceDir = Split-Path -Parent (Split-Path -Parent $projectDir)
 $rttRoot = Join-Path $workspaceDir 'rt-thread'
-$buildDir = Join-Path $projectDir 'cmake-build'
+$profileName = $Profile.ToLowerInvariant()
+$buildDirectoryName = if ($Profile -eq 'Production') { 'cmake-build-production' } else { 'cmake-build' }
+$buildDir = Join-Path $projectDir $buildDirectoryName
 $envRoot = 'D:\Environment\env-windows-latest'
 $envScripts = Join-Path $envRoot '.venv\Scripts'
 
@@ -43,6 +49,24 @@ $gcc = Find-Tool 'arm-none-eabi-gcc' @(
 $toolchainDir = Split-Path -Parent $gcc
 $ninjaDir = Split-Path -Parent $ninja
 $cargoDir = Split-Path -Parent $cargo
+$previousProcessEnvironment = @{
+    RTT_ROOT = [Environment]::GetEnvironmentVariable('RTT_ROOT', 'Process')
+    RTT_CC = [Environment]::GetEnvironmentVariable('RTT_CC', 'Process')
+    RTT_EXEC_PATH = [Environment]::GetEnvironmentVariable('RTT_EXEC_PATH', 'Process')
+    PATH = [Environment]::GetEnvironmentVariable('PATH', 'Process')
+    ENV_ROOT = [Environment]::GetEnvironmentVariable('ENV_ROOT', 'Process')
+    PKGS_ROOT = [Environment]::GetEnvironmentVariable('PKGS_ROOT', 'Process')
+    PKGS_DIR = [Environment]::GetEnvironmentVariable('PKGS_DIR', 'Process')
+}
+
+function Restore-ProcessEnvironment
+{
+    foreach ($entry in $previousProcessEnvironment.GetEnumerator())
+    {
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
+    }
+}
+
 $env:RTT_ROOT = $rttRoot
 $env:RTT_CC = 'gcc'
 $env:RTT_EXEC_PATH = $toolchainDir
@@ -53,18 +77,19 @@ $env:PKGS_DIR = $env:PKGS_ROOT
 
 if ($Clean)
 {
-    $expected = Join-Path $projectDir 'cmake-build'
+    $expected = Join-Path $projectDir $buildDirectoryName
     if ((Test-Path -LiteralPath $buildDir) -and ($buildDir -eq $expected))
     {
         Remove-Item -LiteralPath $buildDir -Recurse -Force
     }
-    $rustBuildDir = Join-Path $projectDir 'build\rust-target'
-    $expectedRustBuildDir = Join-Path $projectDir 'build\rust-target'
+    $rustBuildDir = Join-Path $projectDir "build\rust-target-$RustOptLevel"
+    $expectedRustBuildDir = Join-Path $projectDir "build\rust-target-$RustOptLevel"
     if ((Test-Path -LiteralPath $rustBuildDir) -and ($rustBuildDir -eq $expectedRustBuildDir))
     {
         Remove-Item -LiteralPath $rustBuildDir -Recurse -Force
     }
-    Write-Host '[Clean] cmake-build and build\rust-target removed.' -ForegroundColor Green
+    Write-Host "[Clean] $buildDirectoryName and build\rust-target-$RustOptLevel removed." -ForegroundColor Green
+    Restore-ProcessEnvironment
     exit 0
 }
 
@@ -72,6 +97,7 @@ Push-Location $projectDir
 try
 {
     Write-Host '[Tools]' -ForegroundColor Cyan
+    Write-Host "Profile=$profileName RustOptLevel=$RustOptLevel BuildDir=$buildDirectoryName"
     & $cmake --version | Select-Object -First 1
     & $ninja --version
     & $scons --version | Select-Object -First 1
@@ -108,10 +134,26 @@ try
     }
 
     $cache = Join-Path $buildDir 'CMakeCache.txt'
+    if ($BuildOnly -and (Test-Path -LiteralPath $cache))
+    {
+        $cacheContent = Get-Content -LiteralPath $cache -Raw
+        if (($cacheContent -notmatch "(?m)^FLUXRT_BUILD_PROFILE:STRING=$profileName\r?$") -or
+            ($cacheContent -notmatch "(?m)^FLUXRT_RUST_OPT_LEVEL:STRING=$RustOptLevel\r?$"))
+        {
+            throw 'BuildOnly profile does not match CMake cache. Run build.ps1 -Regenerate with the requested profile and RustOptLevel.'
+        }
+    }
     if (-not $BuildOnly -or -not (Test-Path -LiteralPath $cache))
     {
         Write-Host '[Configure] CMake + Ninja ...' -ForegroundColor Cyan
-        $args = @('-S', $projectDir, '-B', $buildDir, '-G', 'Ninja', "-DCMAKE_MAKE_PROGRAM=$ninja")
+        $args = @(
+            '-S', $projectDir,
+            '-B', $buildDir,
+            '-G', 'Ninja',
+            "-DCMAKE_MAKE_PROGRAM=$ninja",
+            "-DFLUXRT_BUILD_PROFILE=$profileName",
+            "-DFLUXRT_RUST_OPT_LEVEL=$RustOptLevel"
+        )
         if ($Regenerate) { $args = @('--fresh') + $args }
         & $cmake @args
         if ($LASTEXITCODE -ne 0) { throw "CMake configure failed: $LASTEXITCODE" }
@@ -132,4 +174,5 @@ try
 finally
 {
     Pop-Location
+    Restore-ProcessEnvironment
 }

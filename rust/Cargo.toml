@@ -10,7 +10,8 @@ members = [
 [profile.release]
 codegen-units = 1
 lto = true
-# The target runs the current loop in a 12 kHz ADC ISR. Prefer deterministic
-# execution time here; LTO still removes unused algorithm-library code.
-opt-level = 3
+# STM32G431 size/speed measurements selected `s`: it saved 5,080 bytes over
+# `3` while increasing open-loop ISR WCET by about 2%. CMake can override
+# this for reproducible 3/s/z comparisons.
+opt-level = "s"
 panic = "abort"

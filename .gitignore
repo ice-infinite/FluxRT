@@ -1,5 +1,6 @@
 /build/
 /cmake-build/
+/cmake-build-*/
 /rust/target/
 /packages/
 /CMakeLists.txt

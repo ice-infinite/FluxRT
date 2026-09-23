@@ -41,8 +41,10 @@ static foc_realtime_timing_stats_t g_foc_timing_stats;
 #define FOC_CURRENT_COUNTS_PER_AMP       ((FOC_ADC_FULL_SCALE * FOC_CURRENT_SHUNT_OHM * \
                                            FOC_CURRENT_AMPLIFIER_GAIN) / \
                                           FOC_ADC_REFERENCE_VOLTAGE)
+#if !defined(FLUXRT_PRODUCTION_BUILD)
 #define FOC_TRACE_CAPACITY               (64U)
 #define FOC_TRACE_MIN_DIVIDER            (120U)
+#endif
 #if defined(FOC_ISR_TIMING_PROBE)
 #define FOC_TIMING_PROBE_PORT            GPIOA
 #define FOC_TIMING_PROBE_PIN             GPIO_PIN_5
@@ -72,6 +74,7 @@ static volatile foc_platform_diagnostics_t g_foc_diagnostics;
 static volatile uint32_t g_foc_control_armed;
 static foc_rust_context_t *g_foc_controller;
 static volatile foc_telemetry_t g_foc_telemetry;
+#if !defined(FLUXRT_PRODUCTION_BUILD)
 static volatile foc_trace_sample_t g_foc_trace_buffer[FOC_TRACE_CAPACITY];
 static volatile uint32_t g_foc_trace_head;
 static volatile uint32_t g_foc_trace_tail;
@@ -165,6 +168,7 @@ static uint32_t foc_platform_trace_capture(const foc_feedback_t *feedback,
     g_foc_trace_head = next;
     return 1U;
 }
+#endif
 
 static uint16_t foc_platform_current_trip_counts(void)
 {
@@ -725,7 +729,11 @@ void ADC1_2_IRQHandler(void)
     uint32_t control_cycle_end = cycle_start;
     uint32_t control_executed = 0U;
     uint32_t timing_active = 0U;
+#if !defined(FLUXRT_PRODUCTION_BUILD)
     uint32_t trace_enabled = g_foc_trace_enabled;
+#else
+    uint32_t trace_enabled = 0U;
+#endif
     uint32_t trace_sampled = 0U;
     int32_t current_u_counts;
     int32_t current_v_counts;
@@ -847,7 +855,9 @@ void ADC1_2_IRQHandler(void)
                     TIM1->CCR3 = (uint32_t)(output.duty_c * (float)FOC_PWM_PERIOD_TICKS + 0.5f);
                     g_foc_telemetry = telemetry;
                     ++g_foc_diagnostics.realtime_step_count;
+#if !defined(FLUXRT_PRODUCTION_BUILD)
                     trace_sampled = foc_platform_trace_capture(&feedback, &output, &telemetry);
+#endif
                 }
             }
             if (control_executed == 0U)
@@ -1149,7 +1159,7 @@ foc_status_t foc_platform_get_telemetry(foc_telemetry_t *telemetry)
 
 foc_status_t foc_platform_trace_start(uint32_t sample_divider)
 {
-#if defined(FOC_TARGET_STM32G431)
+#if defined(FOC_TARGET_STM32G431) && !defined(FLUXRT_PRODUCTION_BUILD)
     uint32_t primask;
     if (sample_divider < FOC_TRACE_MIN_DIVIDER)
     {
@@ -1176,14 +1186,14 @@ foc_status_t foc_platform_trace_start(uint32_t sample_divider)
 
 void foc_platform_trace_stop(void)
 {
-#if defined(FOC_TARGET_STM32G431)
+#if defined(FOC_TARGET_STM32G431) && !defined(FLUXRT_PRODUCTION_BUILD)
     g_foc_trace_enabled = 0U;
 #endif
 }
 
 uint32_t foc_platform_trace_is_enabled(void)
 {
-#if defined(FOC_TARGET_STM32G431)
+#if defined(FOC_TARGET_STM32G431) && !defined(FLUXRT_PRODUCTION_BUILD)
     return g_foc_trace_enabled;
 #else
     return 0U;
@@ -1192,7 +1202,7 @@ uint32_t foc_platform_trace_is_enabled(void)
 
 uint32_t foc_platform_trace_pop(foc_trace_sample_t *sample)
 {
-#if defined(FOC_TARGET_STM32G431)
+#if defined(FOC_TARGET_STM32G431) && !defined(FLUXRT_PRODUCTION_BUILD)
     uint32_t primask;
     uint32_t tail;
     if (sample == 0)
@@ -1225,7 +1235,7 @@ uint32_t foc_platform_trace_pop(foc_trace_sample_t *sample)
 
 uint32_t foc_platform_trace_dropped(void)
 {
-#if defined(FOC_TARGET_STM32G431)
+#if defined(FOC_TARGET_STM32G431) && !defined(FLUXRT_PRODUCTION_BUILD)
     return g_foc_trace_dropped_count;
 #else
     return 0U;

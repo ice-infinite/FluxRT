@@ -207,6 +207,12 @@ FluxRT/
 `main.c` 最终只保留“初始化顺序”，业务命令移入 `foc_shell.c`，应用协调移入
 `foc_app_service.c`。
 
+构建能力也按职责隔离：`build.ps1` 与 `custom.cmake` 选择 Diagnostic/Production 和
+Rust 优化等级；应用层据此裁剪在线调参/trace 命令，平台层只裁剪 trace 缓冲与采集。
+Production 不能借构建宏删除启停、输出复核、deadline 或硬件保护。当前实现和命令见
+[`BUILD_PROFILES.md`](BUILD_PROFILES.md)。这项“路线阶段 1.1”工作不等于下表的架构
+工作包 A1 已完成。
+
 ### 5.2 通用实时监督层：`foc/runtime/`
 
 这一层是当前平台文件中应抽出的板级无关胶水。它接收平台已经整理好的物理量快照，

@@ -17,9 +17,11 @@
 - TIM1 已按中心对齐 12 kHz 运行，ADC1/ADC2 由 TIM1 TRGO 同步注入采样；PA11/Break2、1.15 A 软件过流和驱动器故障关断已接入。
 - 默认上电保持 CH1～CH3、MOE 和 PB13/PB14/PB15 关闭；只有串口显式执行 `foc_start` 才会 arm，`foc_stop` 立即关断。
 - Rust 已运行对齐、强制角度升速、Id/Iq PI、圆限幅、SVPWM 和 SMO。默认 `SMO=启用`、`closed_loop=0`；闭环只能在停机后通过 Shell 临时打开。
-- 12 kHz 实机已完成两轮 5 秒开环和两轮 5 秒无感闭环试验。两轮均在约 2.10 s 开始接管、约 2.12 s 进入状态 7，0 控制错误、0 deadline miss；闭环 ISR 最坏 10,083/12,500 cycles。
+- 已建立完整 ISR 同拍 WCET，并完成 Rust `3/s/z` 实机矩阵；默认改为 `s`，Diagnostic BIN 为 122,812 B，开环 WCET 为 8,257/12,500 cycles。
+- 已建立 Diagnostic 与 Production 两个构建档。Production + `s` 裁掉在线浮点调参和 trace 后 BIN 为 93,004 B，开环 WCET 为 8,160/12,500 cycles；安全启停、状态和保护仍保留。
+- 闭环重复性仍未通过：同条件复测存在 `OBSERVER_LOST`，因此该问题与构建优化分开处理，默认闭环继续关闭。
 
-> 当前已短时跑通无感速度闭环，但没有编码器/测速仪独立真值，也未完成故障注入和长时间多工况验证；上电默认仍为 `closedloop 0`，不得用于正常或高功率运行。
+> 当前只证明低压、限流、空载短时运行和构建档 WCET；没有编码器/测速仪独立真值，也未完成故障注入和长时间多工况验证。上电默认仍为 `closedloop 0`，Production 只是候选构建档，不得误读为量产通过。
 
 ## 初始验证硬件
 
@@ -63,6 +65,16 @@ cd E:\File\RT-Thread\projects\FluxRT
 .\build.ps1 -BuildOnly
 ```
 
+Production 候选构建：
+
+```powershell
+.\build.ps1 -Regenerate -Profile Production -RustOptLevel s
+```
+
+Diagnostic 输出位于 `cmake-build`，Production 输出位于
+`cmake-build-production`。默认 Rust 优化等级为实机比较后的 `s`；`3` 和 `z` 仅用于
+回归矩阵。详见[构建档与优化等级](docs/BUILD_PROFILES.md)。
+
 Rust 算法/桥接、Clippy、交叉编译和 C 平台安全测试：
 
 ```powershell
@@ -88,6 +100,8 @@ Rust 算法/桥接、Clippy、交叉编译和 C 平台安全测试：
 详细说明：
 
 - [项目操作记录、当前交接与 Git 追溯规则](docs/PROJECT_OPERATION_LOG.md)
+- [Diagnostic / Production 构建档与 Rust 优化等级](docs/BUILD_PROFILES.md)
+- [阶段 1.1 构建优化矩阵与 Production 候选报告](docs/performance/2026-09-23-a1-build-profile-matrix.md)
 - [C / Rust FOC 混合架构与后续开发规则](docs/RUST_C_FOC_ARCHITECTURE.md)
 - [FOC 算法组合、应用场景与工程落地指南](docs/FOC_ALGORITHM_COMBINATIONS_AND_SCENARIOS.md)
 - [FOC 整改工程架构分配与代码落位规范](docs/REMEDIATION_ARCHITECTURE_ALLOCATION.md)
