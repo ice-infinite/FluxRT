@@ -20,13 +20,13 @@
 
 | 项目 | 当前状态 |
 |---|---|
-| 最近记录 | `LOG-20260923-003` |
-| 工程阶段 | FluxRT 已接入 GitHub `main`；尚未开始 A0/A1 源码结构整改 |
+| 最近记录 | `LOG-20260923-004` |
+| 工程阶段 | A0 关联 WCET、size/map 和板端 DWT 基线已完成；PA5 示波器对拍与独立轴端真值未完成 |
 | 当前默认安全状态 | `closed_loop_enable=0`，新增补偿/相电压/HFI 等功能均未默认启用 |
-| 当前固件基线 | `cmake-build/fluxrt.bin` 127,052 B；12 kHz PWM/控制环；闭环历史最大约 10,083/12,500 cycles |
-| Git 状态 | `main` 连接 `https://github.com/ice-infinite/FluxRT.git`；本记录随首次源码提交推送 |
-| 当前可恢复点 | GitHub `main`、本条记录所在提交、新构建的 `fluxrt.*` 和根目录改名前历史固件 |
-| 下一建议动作 | 让 MATLAB 释放旧空目录；以当前 GitHub 基线创建后续整改分支并执行 A0 |
+| 当前固件基线 | `cmake-build/fluxrt.bin` 127,820 B；12 kHz PWM/控制环；最终固件实测完整 ISR 最大 10,209/12,500 cycles |
+| Git 状态 | `main` 连接 `https://github.com/ice-infinite/FluxRT.git`；A0 本批修改由本记录所在提交追踪 |
+| 当前可恢复点 | `e870792` 首次源码基线、GitHub `main`、本条记录所在提交及对应固件 SHA-256 |
+| 下一建议动作 | 完成 `O3/Os/Oz` size+WCET 对比和 production/diagnostic 构建档；闭环观察器失锁另立整改项 |
 | 禁止误读 | 文档中“规划新增”的文件和功能尚未实现 |
 
 ## 3. 强制记录规则
@@ -148,6 +148,76 @@ git revert <bad-commit>
 ```
 
 ## 5. 操作记录
+
+### LOG-20260923-004｜A0 完整 ISR 关联 WCET 与首轮实机基线
+
+- 时间：2026-09-23 12:59 +08:00
+- 负责人：User + Codex
+- 状态：部分完成；DWT/size/实机基线完成，PA5 示波器对拍和独立轴端真值待补
+- 类型：代码 / 配置 / 构建 / 测试 / 烧录 / 实机 / 文档
+- 目标：修正旧 WCET 区间不完整、分段最大值不关联的问题，建立 trace 关闭/10 Hz/50 Hz 的可重复板端基线。
+- 开始基线：`main`，`e87079286070155a85ff85540b4d924c91060d1e`。
+- 关联提交：本条记录所在提交。
+
+#### 修改内容
+
+| 路径/对象 | 类型 | 修改说明 |
+|---|---|---|
+| `foc/include/foc_realtime_timing.h`、`foc/runtime/foc_realtime_timing.c` | 新增 | 保存同一控制拍的 total/pre/control/post、trace 状态、独立段峰值及无效样本计数 |
+| `foc/platform/stm32g431/foc_platform_stm32g431.c` | 修改 | DWT 区间前移到 ADC IRQ 入口并延长到 ADC flags 清理后；截止判断改用完整区间 |
+| `foc/include/foc_platform.h` | 修改 | 增加只读关联时序统计接口 |
+| `applications/main.c` | 修改 | `foc_status` 输出可读 WCET 和机器可读 `FTIMING`，明确独立段峰值禁止相加 |
+| `board/Kconfig`、`.config`、`rtconfig.h` | 修改 | 增加默认关闭的 `FOC_ISR_TIMING_PROBE`，启用时在 PA5 输出同区间示波器脉冲 |
+| `tests/host/*` | 修改 | 加入同拍恒等式、WCET 替换、独立段峰值和无效样本测试 |
+| `simulation/capture_timing_baseline.py` | 新增 | 有显式电机运行许可、每组停机和最终恢复的 trace-off/10/50 自动采集脚本 |
+| `docs/performance/2026-09-23-a0-correlated-wcet-baseline.md` | 新增 | 固化尺寸、哈希、实机条件、开环/闭环结果和证据边界 |
+| `docs/ST_VESC_ENGINEERING_IMPROVEMENT_ROADMAP.md` | 修改 | 更新阶段 0 已完成项，并保留 GPIO/独立真值未完成状态 |
+
+#### 关键参数变化
+
+| 参数 | 修改前 | 修改后 | 原因 |
+|---|---:|---:|---|
+| ISR `total` 起点 | 电流预处理之后 | `ADC1_2_IRQHandler` 入口 | 覆盖真实中断前段开销 |
+| ISR `total` 终点 | ADC flags 清理之前 | ADC1/ADC2 injected flags 清理之后 | 覆盖完整正常 ISR 路径 |
+| 分段最大值 | 三个独立最大值，无关联拍 | 同拍 WCET 分段 + 独立段峰值并存 | 禁止错误相加并保留热点定位能力 |
+| PA5 测量脉冲 | 无 | 可选，默认 `n` | 后续用示波器校验 DWT；不改变生产默认行为 |
+| PWM/控制/失锁阈值 | 12 kHz / 12 kHz / 50 ms | 未改 | 本批只修证据链，不混入控制律或阈值调参 |
+| 默认闭环 | `0` | `0` | 闭环重复稳定前不提高权限 |
+
+#### 验证与证据
+
+| 等级 | 命令/场景 | 结果 | 产物/记录 |
+|---|---|---|---|
+| S0 | 源码和旧日志口径检查 | 旧 total 区间和独立峰值问题已定位并修正 | 本记录与性能报告 |
+| S1 | `.\test.ps1` | PASS；Rust 94 项、格式、Clippy、CPU/CORDIC 交叉库和 C Host 1/1 通过 | 控制台记录 |
+| S2 | 默认构建及临时 `FOC_ISR_TIMING_PROBE=y` 构建 | PASS；默认 ROM 127,820 B、RAM 11,728 B；探针版 ROM 127,908 B；最终已恢复默认关闭并重建 | `cmake-build/fluxrt.*`、`rtthread.elf` |
+| S3 | `test.ps1` 闭环 PMSM 仿真 | PASS；`final_rpm=534.52`，目标 524 rpm | `FOC_SIM_PASS` |
+| S4 | STM32CubeProgrammer SWD 下载、verify、reset | PASS；识别 NUCLEO-G431RB / STM32G43x/G44x | 最终固件 SHA-256 如下 |
+| S5 | 默认开环，582 rpm，trace off/10/50，各 5 s | PASS；完整 ISR 8,161/10,000/10,030 cycles，均 0 error、0 miss | 性能报告和本机 ignored results |
+| S5 | 临时闭环，582 rpm，trace off/10/50，各 5 s | FAIL/PARTIAL；off 和 10 Hz 约 2.3 s 后 `OBSERVER_LOST`，50 Hz 跑满；三组均 0 deadline miss | 性能报告和本机 ignored results |
+| S6 | 示波器 DWT 对拍、编码器真值、故障注入和长测 | 未执行 | 不得视为闭环稳定或量产证明 |
+
+最终烧录固件：
+
+- `fluxrt.bin`：127,820 B，`FEE8CFB8E98B0AB382A6FE2E49ECF2C7D398134C9FBE7D48B7DC7720996CBE75`
+- `fluxrt.hex`：`AA5EA5A9797BC69E62643556354F89DF2790916DA1F16D604696098BEA6572D7`
+- `rtthread.elf`：`2BB7068D2BCD8894602390A131B2F0969CC510095505A0A8601A33E33DBBD32F`
+
+#### 实机条件
+
+- 板卡：NUCLEO-G431RB + X-NUCLEO-IHM16M1；电机：GBM2804H-100T；空载自由旋转。
+- 电源：板端回读约 12.26～12.31 V；用户设定最大输出 2 A；软件 trip 1.15 A。
+- 命令：`capture_timing_baseline.py`，582 rpm，每种 trace 状态 5 s；闭环只在脚本期间临时打开。
+- 保护结果：所有试验均 0 deadline miss；两次观察器失锁均进入故障关断。
+- 结束状态：已执行 `foc_stop`、`foc_trace stop`，回读 `closed_loop=0`，功率级关闭。
+
+#### 风险、回退与遗留
+
+- 风险：Flash 已用 97.52%，只余 3,252 B；关联时序相对旧基线增加 768 B ROM、56 B RAM。
+- 风险：闭环在相同硬件条件下重复性不足，不能因某个 trace 频率偶然通过就判断其稳定。
+- 回退：`e870792` 是本批前基线；提交后可用 `git revert <本条记录所在提交>` 恢复，不使用破坏性 reset。
+- 未完成：PA5 示波器与 DWT 对拍、`O3/Os/Oz` 对比、production 配置、独立速度/角度真值、闭环失锁根因。
+- 下一步：先做 A0 编译优化矩阵与 Flash 裁剪；观察器问题保持安全阈值不变，另行对比失锁前 BEMF、速度方差和角度误差。
 
 ### LOG-20260923-003｜接入 GitHub 并建立首次源码基线
 

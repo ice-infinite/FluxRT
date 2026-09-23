@@ -140,14 +140,19 @@ TIM1 ARR，否则 PI、观察器、Rev-Up、trace 分频和死区补偿都会使
 
 在改算法之前先保存可回退基线：
 
-- [ ] 保存当前 ELF/BIN/HEX/map、Git 提交和配置摘要；
-- [ ] 分别记录 trace 关闭、10 Hz、50 Hz 时的完整 ISR WCET；
-- [ ] WCET 从中断入口测到退出前，包含诊断计数和 ADC 标志清理；
-- [ ] 每拍保存一组关联的 `total/pre/control/post`，禁止相加四个独立最大值；
-- [ ] 记录 `text/data/bss`，不使用 ELF 文件本身体积代替 Flash load；
-- [ ] 保留当前 12 kHz、`closed_loop_enable=0` 和全部安全阈值；
-- [ ] 用现有 PC、Clippy、交叉构建和 C 平台测试作为回归门；
-- [ ] 接入独立速度/角度真值之前，不提高默认闭环权限。
+- [x] 保存当前 ELF/BIN/HEX/map、Git 提交和配置摘要；
+- [x] 分别记录 trace 关闭、10 Hz、50 Hz 时的完整 ISR WCET；
+- [x] WCET 从中断入口测到 ADC 标志清理后，包含正常路径诊断计数；
+- [x] 每拍保存一组关联的 `total/pre/control/post`，禁止相加四个独立最大值；
+- [x] 记录 `text/data/bss`，不使用 ELF 文件本身体积代替 Flash load；
+- [x] 保留当前 12 kHz、`closed_loop_enable=0` 和全部安全阈值；
+- [x] 用现有 PC、Clippy、交叉构建和 C 平台测试作为回归门；
+- [x] 接入独立速度/角度真值之前，不提高默认闭环权限。
+
+本轮 DWT、size/map 和实机结果见
+[`performance/2026-09-23-a0-correlated-wcet-baseline.md`](performance/2026-09-23-a0-correlated-wcet-baseline.md)。
+PA5 示波器对拍与独立轴端真值仍未完成，因此阶段 0 只完成软件和板端 DWT 基线，不能
+标记为完整硬件验收。
 
 建议新增自动生成的基线报告：
 

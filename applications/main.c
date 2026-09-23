@@ -105,6 +105,42 @@ static int foc_stop(int argc, char **argv)
 }
 MSH_CMD_EXPORT(foc_stop, stop FOC and disable the power stage);
 
+static void foc_print_timing(const foc_platform_diagnostics_t *diagnostics)
+{
+    foc_realtime_timing_stats_t timing = {0};
+
+    (void)foc_platform_get_timing(&timing);
+    rt_kprintf("FOC WCET step=%u total=%u pre/control/post=%u/%u/%u trace=%u/%u samples=%u invalid=%u.\n",
+               (unsigned int)timing.wcet.step,
+               (unsigned int)timing.wcet.total_cycles,
+               (unsigned int)timing.wcet.precontrol_cycles,
+               (unsigned int)timing.wcet.control_cycles,
+               (unsigned int)timing.wcet.postcontrol_cycles,
+               (unsigned int)timing.wcet.trace_enabled,
+               (unsigned int)timing.wcet.trace_sampled,
+               (unsigned int)timing.sample_count,
+               (unsigned int)timing.invalid_sample_count);
+    rt_kprintf("FTIMING,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+               (unsigned int)timing.version,
+               (unsigned int)timing.sample_count,
+               (unsigned int)timing.invalid_sample_count,
+               (unsigned int)timing.wcet.step,
+               (unsigned int)timing.wcet.total_cycles,
+               (unsigned int)timing.wcet.precontrol_cycles,
+               (unsigned int)timing.wcet.control_cycles,
+               (unsigned int)timing.wcet.postcontrol_cycles,
+               (unsigned int)timing.wcet.trace_enabled,
+               (unsigned int)timing.wcet.trace_sampled,
+               (unsigned int)timing.peak_precontrol_cycles,
+               (unsigned int)timing.peak_control_cycles,
+               (unsigned int)timing.peak_postcontrol_cycles,
+               (unsigned int)g_foc_platform_config.isr_deadline_cycles,
+               (unsigned int)diagnostics->deadline_miss_count,
+               (unsigned int)diagnostics->realtime_error_count,
+               (unsigned int)diagnostics->control_fault_flags,
+               (unsigned int)diagnostics->flags);
+}
+
 static int foc_status(int argc, char **argv)
 {
     foc_platform_diagnostics_t diagnostics = {0};
@@ -143,10 +179,11 @@ static int foc_status(int argc, char **argv)
                (unsigned int)diagnostics.deadline_miss_count,
                (unsigned int)diagnostics.peak_current_delta_counts,
                (unsigned int)peak_current_ma);
-    rt_kprintf("FOC timing max pre/control/post=%u/%u/%u cycles.\n",
+    rt_kprintf("FOC timing independent peaks pre/control/post=%u/%u/%u cycles; do not sum.\n",
                (unsigned int)diagnostics.maximum_precontrol_cycles,
                (unsigned int)diagnostics.maximum_control_cycles,
                (unsigned int)diagnostics.maximum_postcontrol_cycles);
+    foc_print_timing(&diagnostics);
     rt_kprintf("FOC last status=%u rust_fault=0x%08x duty=%u/%u/%u per-mille.\n",
                (unsigned int)diagnostics.last_control_status,
                (unsigned int)diagnostics.control_fault_flags,

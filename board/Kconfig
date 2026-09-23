@@ -39,6 +39,20 @@ config FOC_MATH_BACKEND_STM32G4_CORDIC
 
 endmenu
 
+menu "FOC diagnostics"
+
+config FOC_ISR_TIMING_PROBE
+    bool "Pulse PA5 high across the measured ADC/FOC ISR span"
+    depends on SOC_STM32G431RB
+    default n
+    help
+        Drive NUCLEO-G431RB PA5 (LD2/D13) high at ADC1_2 IRQ entry and
+        low after ADC injected flags are cleared. Enable only for an
+        oscilloscope or logic-analyzer WCET cross-check. The production
+        default remains disabled and no control behavior depends on it.
+
+endmenu
+
 comment "FOC PWM, ADC, comparator, encoder and gate-driver peripherals are intentionally disabled"
 
 source "$(RTT_DIR)/bsp/stm32/libraries/HAL_Drivers/drivers/Kconfig"

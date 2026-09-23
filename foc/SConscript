@@ -11,6 +11,7 @@ hal_src = os.path.abspath(os.path.join(
     'Src',
 ))
 src = [
+    'runtime/foc_realtime_timing.c',
     'platform/stm32g431/foc_platform_stm32g431.c',
     'platform/stm32g431/foc_math_accel_stm32g431.c',
     os.path.join(hal_src, 'stm32g4xx_hal_adc.c'),

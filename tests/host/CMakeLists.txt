@@ -5,6 +5,7 @@ enable_testing()
 
 add_executable(foc_platform_tests
     test_foc_platform.c
+    ../../foc/runtime/foc_realtime_timing.c
     ../../foc/platform/stm32g431/foc_platform_stm32g431.c
     ../../foc/platform/stm32g431/foc_math_accel_stm32g431.c
 )

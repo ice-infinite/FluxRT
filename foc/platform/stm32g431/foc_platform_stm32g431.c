@@ -12,8 +12,10 @@ static foc_platform_config_t g_foc_platform_config =
     0.97f,
     FOC_DEFAULT_ISR_DEADLINE_CYCLES,
 };
+static foc_realtime_timing_stats_t g_foc_timing_stats;
 
 #if defined(FOC_TARGET_STM32G431)
+#include "rtconfig.h"
 #include "stm32g4xx_hal.h"
 
 /* ST reference: NUCLEO-G431RB + X-NUCLEO-IHM16M1. */
@@ -41,6 +43,15 @@ static foc_platform_config_t g_foc_platform_config =
                                           FOC_ADC_REFERENCE_VOLTAGE)
 #define FOC_TRACE_CAPACITY               (64U)
 #define FOC_TRACE_MIN_DIVIDER            (120U)
+#if defined(FOC_ISR_TIMING_PROBE)
+#define FOC_TIMING_PROBE_PORT            GPIOA
+#define FOC_TIMING_PROBE_PIN             GPIO_PIN_5
+#define FOC_TIMING_PROBE_HIGH()          (FOC_TIMING_PROBE_PORT->BSRR = FOC_TIMING_PROBE_PIN)
+#define FOC_TIMING_PROBE_LOW()           (FOC_TIMING_PROBE_PORT->BSRR = ((uint32_t)FOC_TIMING_PROBE_PIN << 16U))
+#else
+#define FOC_TIMING_PROBE_HIGH()          ((void)0)
+#define FOC_TIMING_PROBE_LOW()           ((void)0)
+#endif
 #define FOC_TRIAL_REQUIRED_FLAGS          (FOC_PLATFORM_DIAG_TIM1_CONFIGURED | \
                                            FOC_PLATFORM_DIAG_ADC_CONFIGURED | \
                                            FOC_PLATFORM_DIAG_ADC_CALIBRATED | \
@@ -97,9 +108,9 @@ static uint16_t foc_trace_scaled_u16(float value, float scale)
     return (uint16_t)(scaled + 0.5f);
 }
 
-static void foc_platform_trace_capture(const foc_feedback_t *feedback,
-                                       const foc_output_t *output,
-                                       const foc_telemetry_t *telemetry)
+static uint32_t foc_platform_trace_capture(const foc_feedback_t *feedback,
+                                           const foc_output_t *output,
+                                           const foc_telemetry_t *telemetry)
 {
     foc_trace_sample_t sample;
     uint32_t head;
@@ -107,12 +118,12 @@ static void foc_platform_trace_capture(const foc_feedback_t *feedback,
 
     if (g_foc_trace_enabled == 0U)
     {
-        return;
+        return 0U;
     }
     ++g_foc_trace_counter;
     if (g_foc_trace_counter < g_foc_trace_divider)
     {
-        return;
+        return 0U;
     }
     g_foc_trace_counter = 0U;
 
@@ -147,11 +158,12 @@ static void foc_platform_trace_capture(const foc_feedback_t *feedback,
     if (next == g_foc_trace_tail)
     {
         ++g_foc_trace_dropped_count;
-        return;
+        return 0U;
     }
     g_foc_trace_buffer[head] = sample;
     __DMB();
     g_foc_trace_head = next;
+    return 1U;
 }
 
 static uint16_t foc_platform_current_trip_counts(void)
@@ -254,6 +266,16 @@ static uint32_t foc_platform_init_timer_disabled(void)
     __HAL_RCC_TIM1_CLK_ENABLE();
     __HAL_RCC_TIM1_FORCE_RESET();
     __HAL_RCC_TIM1_RELEASE_RESET();
+
+#if defined(FOC_ISR_TIMING_PROBE)
+    FOC_TIMING_PROBE_LOW();
+    gpio.Pin = FOC_TIMING_PROBE_PIN;
+    gpio.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    gpio.Alternate = 0U;
+    HAL_GPIO_Init(FOC_TIMING_PROBE_PORT, &gpio);
+#endif
 
     gpio.Pin = FOC_DRIVER_PROTECTION_PIN;
     gpio.Mode = GPIO_MODE_AF_OD;
@@ -593,6 +615,7 @@ static uint32_t foc_platform_init_adc_monitor(void)
 foc_status_t foc_platform_init(void)
 {
     foc_platform_emergency_stop();
+    foc_realtime_timing_reset(&g_foc_timing_stats);
     (void)foc_math_accel_init();
 #if defined(FOC_TARGET_STM32G431)
     if ((foc_platform_init_timer_disabled() == 0U) ||
@@ -696,6 +719,14 @@ void foc_platform_emergency_stop(void)
 #if defined(FOC_TARGET_STM32G431)
 void ADC1_2_IRQHandler(void)
 {
+    uint32_t cycle_start = DWT->CYCCNT;
+    uint32_t cycle_end;
+    uint32_t control_cycle_start = cycle_start;
+    uint32_t control_cycle_end = cycle_start;
+    uint32_t control_executed = 0U;
+    uint32_t timing_active = 0U;
+    uint32_t trace_enabled = g_foc_trace_enabled;
+    uint32_t trace_sampled = 0U;
     int32_t current_u_counts;
     int32_t current_v_counts;
     int32_t current_w_counts;
@@ -706,6 +737,7 @@ void ADC1_2_IRQHandler(void)
     uint16_t peak;
     uint16_t trip_counts;
 
+    FOC_TIMING_PROBE_HIGH();
     if ((ADC1->ISR & ADC_ISR_JEOS) != 0U)
     {
         g_foc_diagnostics.phase_u_raw = (uint16_t)ADC1->JDR1;
@@ -729,15 +761,12 @@ void ADC1_2_IRQHandler(void)
         g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_SYNC_SAMPLES_VALID;
         if (g_foc_control_armed != 0U)
         {
-            uint32_t cycle_start = DWT->CYCCNT;
-            uint32_t cycle_count;
-            uint32_t control_cycle_start = cycle_start;
-            uint32_t control_cycle_end = cycle_start;
             foc_status_t control_status;
             foc_feedback_t feedback;
             foc_output_t output;
             foc_telemetry_t telemetry;
 
+            timing_active = 1U;
             delta_u = (uint16_t)((current_u_counts < 0) ? -current_u_counts : current_u_counts);
             delta_v = (uint16_t)((current_v_counts < 0) ? -current_v_counts : current_v_counts);
             delta_w = (uint16_t)((current_w_counts < 0) ? -current_w_counts : current_w_counts);
@@ -771,6 +800,7 @@ void ADC1_2_IRQHandler(void)
                     (FOC_ADC_FULL_SCALE * FOC_BUS_PARTITIONING_FACTOR);
                 feedback.electrical_angle_rad = 0.0f;
                 control_cycle_start = DWT->CYCCNT;
+                control_executed = 1U;
                 control_status = foc_rust_realtime_step(g_foc_controller,
                                                         &feedback,
                                                         &output,
@@ -817,41 +847,52 @@ void ADC1_2_IRQHandler(void)
                     TIM1->CCR3 = (uint32_t)(output.duty_c * (float)FOC_PWM_PERIOD_TICKS + 0.5f);
                     g_foc_telemetry = telemetry;
                     ++g_foc_diagnostics.realtime_step_count;
-                    foc_platform_trace_capture(&feedback, &output, &telemetry);
+                    trace_sampled = foc_platform_trace_capture(&feedback, &output, &telemetry);
                 }
             }
-            cycle_count = DWT->CYCCNT - cycle_start;
-            if ((control_cycle_start - cycle_start) >
-                g_foc_diagnostics.maximum_precontrol_cycles)
+            if (control_executed == 0U)
             {
-                g_foc_diagnostics.maximum_precontrol_cycles =
-                    control_cycle_start - cycle_start;
+                control_cycle_start = DWT->CYCCNT;
+                control_cycle_end = control_cycle_start;
             }
-            if ((control_cycle_end - control_cycle_start) >
-                g_foc_diagnostics.maximum_control_cycles)
-            {
-                g_foc_diagnostics.maximum_control_cycles =
-                    control_cycle_end - control_cycle_start;
-            }
-            if ((DWT->CYCCNT - control_cycle_end) >
-                g_foc_diagnostics.maximum_postcontrol_cycles)
-            {
-                g_foc_diagnostics.maximum_postcontrol_cycles =
-                    DWT->CYCCNT - control_cycle_end;
-            }
-            if (cycle_count > g_foc_diagnostics.maximum_isr_cycles)
-            {
-                g_foc_diagnostics.maximum_isr_cycles = cycle_count;
-            }
-            if (cycle_count > g_foc_platform_config.isr_deadline_cycles)
+        }
+        ADC1->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
+        ADC2->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
+        FOC_TIMING_PROBE_LOW();
+        if (timing_active != 0U)
+        {
+            foc_realtime_timing_sample_t timing_sample;
+
+            cycle_end = DWT->CYCCNT;
+            timing_sample.step = g_foc_diagnostics.realtime_step_count;
+            timing_sample.total_cycles = cycle_end - cycle_start;
+            timing_sample.precontrol_cycles = control_cycle_start - cycle_start;
+            timing_sample.control_cycles = control_cycle_end - control_cycle_start;
+            timing_sample.postcontrol_cycles = cycle_end - control_cycle_end;
+            timing_sample.trace_enabled = (trace_enabled != 0U) ? 1U : 0U;
+            timing_sample.trace_sampled = trace_sampled;
+            (void)foc_realtime_timing_record(&g_foc_timing_stats, &timing_sample);
+
+            /* Compatibility fields remain independent peaks; never add them. */
+            g_foc_diagnostics.maximum_isr_cycles =
+                g_foc_timing_stats.wcet.total_cycles;
+            g_foc_diagnostics.maximum_precontrol_cycles =
+                g_foc_timing_stats.peak_precontrol_cycles;
+            g_foc_diagnostics.maximum_control_cycles =
+                g_foc_timing_stats.peak_control_cycles;
+            g_foc_diagnostics.maximum_postcontrol_cycles =
+                g_foc_timing_stats.peak_postcontrol_cycles;
+            if (timing_sample.total_cycles > g_foc_platform_config.isr_deadline_cycles)
             {
                 ++g_foc_diagnostics.deadline_miss_count;
                 g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_DEADLINE_MISSED;
                 foc_platform_disable_power_fast();
             }
         }
-        ADC1->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
-        ADC2->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
+    }
+    else
+    {
+        FOC_TIMING_PROBE_LOW();
     }
 }
 
@@ -1008,6 +1049,7 @@ foc_status_t foc_platform_control_start(float target_speed_rpm)
     g_foc_diagnostics.trial_apply_count = 0U;
     g_foc_diagnostics.realtime_step_count = 0U;
     g_foc_diagnostics.realtime_error_count = 0U;
+    foc_realtime_timing_reset(&g_foc_timing_stats);
     g_foc_diagnostics.maximum_isr_cycles = 0U;
     g_foc_diagnostics.maximum_precontrol_cycles = 0U;
     g_foc_diagnostics.maximum_control_cycles = 0U;
@@ -1197,13 +1239,46 @@ foc_status_t foc_platform_get_diagnostics(foc_platform_diagnostics_t *diagnostic
         return FOC_STATUS_INVALID_ARGUMENT;
     }
 #if defined(FOC_TARGET_STM32G431)
-    foc_platform_refresh_safety_flags();
-    *diagnostics = g_foc_diagnostics;
+    {
+        uint32_t primask;
+
+        primask = __get_PRIMASK();
+        __disable_irq();
+        foc_platform_refresh_safety_flags();
+        *diagnostics = g_foc_diagnostics;
+        if (primask == 0U)
+        {
+            __enable_irq();
+        }
+    }
 #else
     {
         foc_platform_diagnostics_t empty = {0};
         *diagnostics = empty;
     }
+#endif
+    return FOC_STATUS_OK;
+}
+
+foc_status_t foc_platform_get_timing(foc_realtime_timing_stats_t *timing)
+{
+    if (timing == 0)
+    {
+        return FOC_STATUS_INVALID_ARGUMENT;
+    }
+#if defined(FOC_TARGET_STM32G431)
+    {
+        uint32_t primask = __get_PRIMASK();
+
+        __disable_irq();
+        *timing = g_foc_timing_stats;
+        if (primask == 0U)
+        {
+            __enable_irq();
+        }
+    }
+#else
+    *timing = g_foc_timing_stats;
 #endif
     return FOC_STATUS_OK;
 }

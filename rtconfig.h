@@ -444,6 +444,10 @@
 #define FOC_MATH_BACKEND_STM32G4_CORDIC
 /* end of FOC math backend */
 
+/* FOC diagnostics */
+
+/* end of FOC diagnostics */
+
 /* FOC PWM, ADC, comparator, encoder and gate-driver peripherals are intentionally disabled */
 
 /* end of Hardware Drivers Config */

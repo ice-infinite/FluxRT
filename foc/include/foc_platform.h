@@ -2,6 +2,7 @@
 #define FOC_PLATFORM_H
 
 #include "foc_rust_bridge.h"
+#include "foc_realtime_timing.h"
 #include "foc_types.h"
 
 #define FOC_PLATFORM_CONFIG_VERSION (1UL)
@@ -118,6 +119,7 @@ foc_status_t foc_platform_read_feedback(foc_feedback_t *feedback);
 foc_status_t foc_platform_apply_output(const foc_output_t *output);
 foc_status_t foc_platform_get_diagnostics(foc_platform_diagnostics_t *diagnostics);
 foc_status_t foc_platform_get_telemetry(foc_telemetry_t *telemetry);
+foc_status_t foc_platform_get_timing(foc_realtime_timing_stats_t *timing);
 foc_status_t foc_platform_trace_start(uint32_t sample_divider);
 void foc_platform_trace_stop(void);
 uint32_t foc_platform_trace_is_enabled(void);
