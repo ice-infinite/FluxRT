@@ -226,22 +226,46 @@ Windows 侧一次写入 8 字节实测耗时约 **170–210 µs**，远高于 8 
   无显著变化。
 - **不是能力协商问题**：多种能力值都能拿到回应。
 
-## 5. 根因：板上固件的 ASPEP 未初始化
+## 5. 根因：`aspepOverUartA.Capabilities` 在启动后被清零
 
-这是排查的最终结论，**问题不在控制端**。用 OpenOCD + GDB 直接读目标内存得到：
+这是排查的最终结论，**问题不在控制端**。
 
-| 观测 | 值 | 含义 |
+### 5.1 诊断链（每一步都有调试器实测）
+
+| 步骤 | 观测 | 结论 |
 |---|---|---|
-| `aspepOverUartA.Capabilities` | **全 0**（`0/0/0/0/0`） | 与 `mcp_config.c` 的静态初始化值 `0/7/7/32/0` 不符 |
-| `aspepOverUartA.maxRXPayload` | **0** | 该字段只在 `ASPEP_start()` 的处理分支里赋值 |
-| `aspepOverUartA.ASPEP_State` | **0 (IDLE)**，发任何 BEACON 后都不变 | 状态机没有推进 |
-| `fASPEP_HWInit` / `ASPEPIp` / `rxBuffer` | 非 0、有效 | 静态初始化器生效，**不是整个结构没初始化** |
+| 1 | 设备 `Capabilities` 全 0（期望 `0/7/7/32/0`） | 能力协商恒失败 |
+| 2 | `maxRXPayload = 0` | 该字段只在 `ASPEP_start()` 处理分支里赋值 |
+| 3 | `ASPEP_State` 恒为 0 (IDLE) | 状态机没有推进 |
+| 4 | ELF 向量表前 16 字节 == 板上 Flash 前 16 字节 | 板上固件**确实是这份 ELF 构建的** |
+| 5 | ELF 的 `.data` 初值 = `0/7/7/32/0` | 静态初始化器本身是对的 |
+| 6 | 断点停在 `main()` 入口：`Capabilities = 0/7/7/32/0`、`ASPEPIp = 0x20000a54` | **startup 的 `.data` 拷贝正常执行** |
+| 7 | 断点停在 `MCboot()` 入口：仍为 `0/7/7/32` | `HAL_Init` 阶段未清零 |
+| 8 | 断点停在 `ASPEP_start()` 入口：仍为 `0/7/7/32`，调用栈 `main → MX_MotorControl_Init → MCboot → ASPEP_start` | 调用链正常 |
+| 9 | `finish` 返回后：**仍为 `0/7/7/32`** | **`ASPEP_start` 没有清零它** |
 
-`ASPEP_CheckBeacon` 里做的是 `MIN(pHandle->Capabilities.X, Master.X)`。当
+**结论**：`.data` 初值正确、startup 拷贝正常、`ASPEP_start` 也没问题，但程序**自由运行
+一段时间后** `Capabilities` 变成全 0。清零发生在 `ASPEP_start` 返回之后。
+
+### 5.2 一个高度可疑的内存布局事实
+
+`Capabilities` 是 `ASPEP_Handle_t`（116 字节）的**最后一个成员**，偏移 **108**：
+
+```text
+0x20000a68  aspepOverUartA      116 字节, 到 0x20000adc 结束
+0x20000ad4    └─ Capabilities   偏移 108, 最后 8 字节  <<< 紧贴结构末尾
+0x20000adc  MCP_Over_UartA      紧随其后
+```
+
+也就是说，**任何越界写只要超过 `aspepOverUartA` 末尾 8 字节以内就会精确覆盖
+`Capabilities`，而不会破坏其它任何字段**。这与"只有 `Capabilities` 变零、其余字段
+正常"的观测完全吻合（`ASPEPIp`、`rxBuffer`、函数指针都仍然有效）。
+
+`ASPEP_CheckBeacon` 做的是 `MIN(pHandle->Capabilities.X, Master.X)`。当
 `Capabilities` 全 0 时，`TXS` 与 `TXA` 的严格相等判定恒不成立，**因此控制端无论发
-什么能力值都谈不成**。这与实测完全吻合：发官方值 `7/7/32` 或发全 `0` 都不改变状态。
+什么能力值都谈不成**。这与实测吻合：发官方值 `7/7/32` 或发全 `0` 都不改变状态。
 
-### 5.1 客户端侧已被排除的因素
+### 5.3 客户端侧已被排除的因素
 
 | 项 | 证据 |
 |---|---|
@@ -257,30 +281,37 @@ Windows 侧一次写入 8 字节实测耗时约 **170–210 µs**，远高于 8 
 建立过连接**。"连不上"不是本客户端的特有问题。
 
 <details>
-<summary>排查中一个容易踩的坑：DMA 通道号</summary>
+<summary>排查中两个容易踩的坑</summary>
 
-枚举 DMA 通道时**不能假设通道号**。本设备接收用 **DMA1 通道 0**，而
-`usart_aspep_driver.c` 的代码顺序容易让人以为是通道 1。判定方法：
-看 `PAR` 是否等于 `USART2->RDR`、`MAR` 是否等于 `rxHeader` 的地址。
+**DMA 通道号不能假设。** 本设备接收用 **DMA1 通道 0**，而 `usart_aspep_driver.c`
+的代码顺序容易让人以为是通道 1。判定方法：看 `PAR` 是否等于 `USART2->RDR`、
+`MAR` 是否等于 `rxHeader` 的地址。误看通道会得出"接收 DMA 未武装"的错误结论。
 
-误看通道会得到"接收 DMA 未武装"的错误结论，进而把排查引向错误方向。
+**ST-Link 的硬件断点槽很有限**，且 `monitor reset` 不清除它们。多次 GDB 会话后
+`watch` 会插入失败（`Could not insert hardware watchpoint`）。排查时要么重启
+OpenOCD，要么改用"分段断点 + 打印"的方式，不要依赖硬件监视点。
 </details>
 
 ## 6. 建议的下一步
 
-**重建并重烧 Motor_Profiler 固件**，排除"板上跑的不是这份工程构建出的固件"。
-工程内已有 `build\Debug\Motor_Profiler.elf`，但需确认它与板上固件一致；不一致时
-一切协议推断都建立在错误的基线上。
+**重建并重烧 Motor_Profiler 固件**。虽然已确认板上固件就是这份 ELF 构建的，但
+`Capabilities` 被清零说明存在**内存越界写**，而这类问题常常与"板上跑的不是最新
+构建"混在一起，先用一次干净的重烧排除后者。
 
-重烧后用只读探针再试握手：
+重烧后：
 
 ```powershell
 python tools/motor_profiler_probe.py --port COM6 --all
 ```
 
-若握手通过（`ASPEP_State` 变成 1 或 2），再继续 `--read` 与 Profiler 启动命令的实测。
-若仍失败，则问题在该工程的配置而非构建产物，届时应抓一次真实上位机的完整对话
-逐字节对比。
+若 `Capabilities` 仍被清零，则应在**该工程内部**继续定位越界写，建议做法：
+
+1. 给 `aspepOverUartA` 前后各加一段哨兵字节（如 `0xDEADBEEF`），在 `main` 循环里
+   周期检查哨兵是否被破坏——这能把"越界写"变成可观测事件。
+2. 把 `Capabilities` 从结构末尾挪到结构中部（临时改动），若问题消失即确认是
+   越界写而不是逻辑清零。
+3. 检查 `MCP_Over_UartA`（紧随其后）与 `MCPSyncRXBuff` 的边界，以及
+   `usart_aspep_driver.c` 的 DMA 长度配置。
 
 ### 一个必须记住的操作教训
 
