@@ -1,0 +1,17 @@
+{
+  "id": "GBM2804H-100T",
+  "label": "GBM2804H-100T",
+  "hardwareFamily": "MOTOR",
+  "description": "gimbal motor, ST Workbench database reference values",
+  "compatibility": ["FOC", "sixStep"],
+  "polePairs": 7,
+  "nominalDCVoltage": 12.3,
+  "nominalCurrent": 0.8,
+  "maxRatedSpeed": 1572,
+  "rs": 5.292,
+  "ls": 0.001058,
+  "magneticStructure": { "type": "SM-PMSM" },
+  "BEmfConstant": 4.964,
+  "inertia": 29.1,
+  "friction": 9.37
+}

@@ -313,6 +313,72 @@ class BuildCandidateTests(unittest.TestCase):
         self.assertIn("ke-phph-rms", text)
 
 
+class WorkedExampleTests(unittest.TestCase):
+    """用仓库内的样例导出把整条流水线端到端钉住。
+    Pin the whole pipeline end to end using the example export in the repo.
+
+    样例用的是 ST Workbench 数据库参考值，**不是实物辨识结果**，所以它的作用是
+    证明工具链可用与量纲口径可复现，而不是提供一份可用参数。
+    The example uses ST Workbench database reference values, NOT identified data, so
+    it proves the toolchain works and the convention is reproducible rather than
+    providing usable parameters.
+    """
+
+    EXAMPLE = (Path(__file__).resolve().parents[2]
+               / "profiles" / "examples" / "motor_pilot_export_reference.json")
+
+    def test_example_export_exists_and_parses(self) -> None:
+        """样例导出必须存在、可解析、且具备全部必需字段。
+        The example export must exist, parse, and carry every required field."""
+        self.assertTrue(self.EXAMPLE.is_file(), f"缺少样例 / missing: {self.EXAMPLE}")
+        payload = json.loads(self.EXAMPLE.read_text(encoding="utf-8"))
+        for field in mpc.REQUIRED_EXPORT_FIELDS:
+            with self.subTest(field=field):
+                self.assertIn(field, payload)
+        measured = mpc.parse_profiler_export(payload)
+        self.assertEqual(measured["pole_pairs"], 7)
+        self.assertEqual(measured["magnetic_structure"], "SM-PMSM")
+
+    def test_example_reproduces_the_seven_times_flux_factor(self) -> None:
+        """样例必须精确复现 7.00 倍磁链偏差——这个数字是本次调查的核心结论。
+        The example must reproduce the 7.00x flux factor exactly; that number is the
+        core finding of this investigation.
+
+        参考值 `Ke = 4.964 Vrms/kRPM(ph-ph)` 按官方单位应得 `0.0387041 Wb`，而
+        工程现值为 `0.005529026 Wb`，比值 `7.0002`。
+        The reference `Ke` yields `0.0387041 Wb` under the official unit while the
+        firmware holds `0.005529026 Wb`, a ratio of `7.0002`.
+        """
+        payload = json.loads(self.EXAMPLE.read_text(encoding="utf-8"))
+        measured = mpc.parse_profiler_export(payload)
+        baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
+        _candidate, report = mpc.build_candidate(
+            measured, baseline, "ke-phph-rms", 2, "worked example"
+        )
+        # 因子随 Ke 线性变化：Ke=4.964 得 7.0002，Ke=5.0 得 7.0509。
+        # The factor scales linearly with Ke: 7.0002 at Ke=4.964, 7.0509 at Ke=5.0.
+        self.assertAlmostEqual(report["baseline_flux_factor"], 7.0002, places=4)
+        self.assertAlmostEqual(report["flux_wb"], 0.038704149, places=9)
+        # 无论用哪个 Ke，偏差都在 7 倍量级，这才是要钉住的结论。
+        # Either Ke lands the discrepancy in the 7x range, which is the point.
+        self.assertGreater(report["baseline_flux_factor"], 6.9)
+        self.assertLess(report["baseline_flux_factor"], 7.1)
+
+    def test_worked_example_report_warns(self) -> None:
+        """样例转换必须给出磁链偏差与口径歧义两条警告。
+        Converting the example must emit both the flux-factor and the convention
+        ambiguity warnings."""
+        payload = json.loads(self.EXAMPLE.read_text(encoding="utf-8"))
+        measured = mpc.parse_profiler_export(payload)
+        baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
+        _candidate, report = mpc.build_candidate(
+            measured, baseline, "ke-phph-rms", 2, "worked example"
+        )
+        joined = " ".join(report["warnings"])
+        self.assertIn("7.00 倍", joined)
+        self.assertIn("歧义", joined)
+
+
 class CliTests(unittest.TestCase):
     """命令行接口。 / Command-line interface."""
 

@@ -1,0 +1,113 @@
+{
+  "format_version": 1,
+  "name": "Rev2 candidate from reference values (NOT hardware-identified)",
+  "profile": {
+    "revision": 2,
+    "board_id": "0x43116001",
+    "board_name": "NUCLEO-G431RB + X-NUCLEO-IHM16M1",
+    "motor_id": "0x28041007",
+    "motor_name": "GBM2804H-100T"
+  },
+  "runtime_config": {
+    "struct_size": 284,
+    "config_version": 8,
+    "observer_backend": 0,
+    "observer_enable": 1,
+    "closed_loop_enable": 0,
+    "observer_update_divider": 1,
+    "id_pi": {
+      "kp": 7.1978154,
+      "ki": 35989.074,
+      "ts": 8.333333e-05,
+      "out_min": -7.1302757,
+      "out_max": 7.1302757,
+      "integrator_min": -7.1302757,
+      "integrator_max": 7.1302757
+    },
+    "iq_pi": {
+      "kp": 7.1978154,
+      "ki": 35989.074,
+      "ts": 8.333333e-05,
+      "out_min": -7.1302757,
+      "out_max": 7.1302757,
+      "integrator_min": -7.1302757,
+      "integrator_max": 7.1302757
+    },
+    "speed_pi": {
+      "kp": 0.0016926664,
+      "ki": 0.005444589,
+      "ts": 0.001,
+      "out_min": -0.8,
+      "out_max": 0.8,
+      "integrator_min": -0.8,
+      "integrator_max": 0.8
+    },
+    "pole_pairs": 7,
+    "pwm_frequency_hz": 12000,
+    "speed_loop_frequency_hz": 1000,
+    "stator_resistance_ohm": 5.292,
+    "stator_inductance_h": 0.001058,
+    "flux_linkage_wb": 0.0387041492132397,
+    "rated_current_a": 0.8,
+    "max_speed_rpm": 1572.0,
+    "nominal_bus_voltage_v": 12.3,
+    "voltage_utilization": 0.9,
+    "default_target_speed_rpm": 524.0,
+    "alignment_duration_s": 1.0,
+    "open_loop_ramp_duration_s": 1.164,
+    "observer_transition_duration_s": 0.025,
+    "startup_final_speed_rpm": 582.0,
+    "startup_current_a": 0.8,
+    "observer_smo_k_slide_v": 4.0,
+    "observer_smo_boundary_a": 0.16000001,
+    "observer_emf_filter_alpha": 0.03,
+    "observer_pll_kp": 80.0,
+    "observer_acquisition_pll_kp_ratio": 0.5,
+    "observer_pll_ki": 1000.0,
+    "observer_minimum_speed_rpm": 524.0,
+    "observer_minimum_bemf_v": 0.25,
+    "observer_speed_variance_ratio": 0.01,
+    "observer_consecutive_samples": 2,
+    "observer_acquisition_timeout_s": 0.5,
+    "observer_loss_timeout_s": 0.05,
+    "closed_loop_speed_ramp_rpm_per_s": 500.0,
+    "speed_pi_preload_ratio": 0.0,
+    "closed_loop_current_slew_a_per_s": 32.0,
+    "observer_run_reliability": {
+      "minimum_speed_rpm": 0.0,
+      "maximum_phase_error_rad": 0.5235988
+    },
+    "angle_compensation": {
+      "park_prediction_ticks": 0.0,
+      "reverse_park_prediction_ticks": 0.0
+    },
+    "inverter_voltage_model": {
+      "enabled": 0,
+      "observer_voltage_correction_enable": 0,
+      "pwm_feedforward_enable": 0,
+      "pwm_carrier_frequency_hz": 12000,
+      "dead_time_s": 5.5e-07,
+      "compensation_gain": 1.0,
+      "current_zero_band_a": 0.005,
+      "current_sign_filter_alpha": 1.0,
+      "device_drop_v": 0.0
+    }
+  },
+  "approval": {
+    "parameters": {
+      "approved": false,
+      "approved_runtime_config_crc32": null,
+      "reviewer": null,
+      "approved_at_utc": null,
+      "evidence": []
+    },
+    "closed_loop": {
+      "approved": false,
+      "approved_runtime_config_crc32": null,
+      "reviewer": null,
+      "approved_at_utc": null,
+      "evidence": []
+    }
+  },
+  "expected": {}
+}
