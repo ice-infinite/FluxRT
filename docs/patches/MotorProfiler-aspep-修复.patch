@@ -1,0 +1,63 @@
+warning: in the working copy of '<Motor_Profiler>\Src\aspep.c', CRLF will be replaced by LF the next time Git touches it
+diff --git "a/C:\\Users\\y2389_4rq4ld9\\.st_workbench\\Projects2\\Motor_Profiler\\Src\\aspep.c.orig-backup" "b/C:\\Users\\y2389_4rq4ld9\\.st_workbench\\Projects2\\Motor_Profiler\\Src\\aspep.c"
+index 3598f83..d55d088 100644
+--- "a/C:\\Users\\y2389_4rq4ld9\\.st_workbench\\Projects2\\Motor_Profiler\\Src\\aspep.c.orig-backup"
++++ "b/C:\\Users\\y2389_4rq4ld9\\.st_workbench\\Projects2\\Motor_Profiler\\Src\\aspep.c"
+@@ -26,6 +26,7 @@
+ /* Local definition */
+ #define MIN(a,b) ( ((a) < (b)) ? (a) : (b) )
+ 
++
+ /* Local functions */
+ static bool ASPEP_CheckBeacon (ASPEP_Handle_t *pHandle);
+ static uint8_t ASPEP_TXframeProcess(ASPEP_Handle_t *pHandle, uint8_t packetType, void *txBuffer, uint16_t bufferLength);
+@@ -357,12 +358,23 @@ bool ASPEP_CheckBeacon (ASPEP_Handle_t *pHandle)
+   bool result = true;
+ 
+   uint32_t packetHeader = *((uint32_t *)pHandle->rxHeader); //cstat !MISRAC2012-Rule-11.3
++  (void)packetHeader;
++  /* The controller's capabilities travel in the BEACON PAYLOAD (see
++   * ASPEP_sendBeacon, which builds the very same layout into its control buffer),
++   * not in the frame header. Reading them out of rxHeader cannot work: the header's
++   * bits 4..16 are the 13-bit length field, which overlaps the version / DATA_CRC /
++   * RX_maxSize positions and therefore decodes to garbage. That made the handshake
++   * unsatisfiable for any conforming controller (e.g. Motor Pilot).
++   * Read the payload instead. */
++  const uint8_t *peerBeacon = pHandle->rxBuffer;
+   ASPEP_Capabilities_def MasterCapabilities;
+-  MasterCapabilities.version = (uint8_t)((packetHeader &0x70U)>> 4U);           /*Bits 4 to 6*/
+-  MasterCapabilities.DATA_CRC = pHandle->rxHeader[0] >> 7U ;                     /*Bit 7 */
+-  MasterCapabilities.RX_maxSize = pHandle->rxHeader[1] &0x3FU;                  /*Bits 8 to  13*/
+-  MasterCapabilities.TXS_maxSize = (uint8_t)((packetHeader&0x01FC000U)  >> 14); /*Bits 14 to 20 */
+-  MasterCapabilities.TXA_maxSize = (uint8_t)((packetHeader&0xFE00000U) >> 21);  /*Bits 21 to 27  */
++  MasterCapabilities.version = (uint8_t)(peerBeacon[0] >> 4U);        /*Byte 0 bits 4..6*/
++  MasterCapabilities.DATA_CRC = (uint8_t)(peerBeacon[0] >> 7U);       /*Byte 0 bit 7 */
++  MasterCapabilities.RX_maxSize = (uint8_t)(peerBeacon[1] & 0x3FU);   /*Byte 1 bits 0..5*/
++  MasterCapabilities.TXS_maxSize = (uint8_t)((uint16_t)peerBeacon[1] >> 6U)
++                                 | (uint8_t)((uint16_t)peerBeacon[2] << 2U); /*Bytes 1..2*/
++  MasterCapabilities.TXA_maxSize = (uint8_t)((uint32_t)peerBeacon[2] >> 5U)
++                                 | (uint8_t)((uint32_t)peerBeacon[3] << 3U); /*Bytes 2..3*/
+ 
+   pHandle->Capabilities.DATA_CRC = MIN(pHandle->Capabilities.DATA_CRC ,MasterCapabilities.DATA_CRC);
+   pHandle->Capabilities.RX_maxSize = MIN(pHandle->Capabilities.RX_maxSize, MasterCapabilities.RX_maxSize);
+@@ -878,9 +890,17 @@ void ASPEP_HWDataReceivedIT(ASPEP_Handle_t *pHandle)
+             case BEACON:
+             case PING:
+             {
+-              pHandle->NewPacketAvailable = true;
+-              /* The receiver is not reconfigure right now on purpose to avoid race condition when the packet will be
+-                * processed in ASPEP_RXframeProcess */
++              /* Control frames carry a fixed ASPEP_CTRL_SIZE payload (the capability
++                * set for BEACON, the c/n/ip/packet-number word for PING). Arm the
++                * payload reception exactly like the DATA_PACKET path does, otherwise
++                * the payload stays in the USART receive register and is thrown away
++                * when ASPEP_RXframeProcess re-arms the header reception at the end of
++                * its run. Without this, rxBuffer is always zero, ASPEP_CheckBeacon
++                * compares against zeros and the handshake can never complete.
++                * The WAITING_PAYLOAD branch below then flags the packet as available. */
++              pHandle->rxLengthASPEP = (uint16_t)ASPEP_CTRL_SIZE;
++              pHandle->fASPEP_cfg_recept(pHandle->ASPEPIp, pHandle->rxBuffer, ASPEP_CTRL_SIZE);
++              pHandle->ASPEP_TL_State = WAITING_PAYLOAD;
+               break;
+             }
+ 
