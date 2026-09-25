@@ -1,3 +1,16 @@
+# FluxRT —— 板级构建描述（SCons 侧）。
+# FluxRT - board build description (SCons side).
+#
+# 职责 / Responsibility:
+#   - 只编入两个板级文件：board.c（时钟树与编译期晶振检查）与
+#     stm32g4xx_hal_msp.c（HAL 底层初始化钩子）。
+#   - Compiles exactly two board files: board.c (clock tree and the compile-time crystal
+#     checks) and stm32g4xx_hal_msp.c (the HAL MSP init hooks).
+#
+# 边界 / Boundary: 链接脚本不在这里指定，它由 rtconfig.py 的 LFLAGS 通过
+# `-T board/linker_scripts/link.lds` 传入；HAL 的 ADC/TIM 源文件在 foc/SConscript 里。
+# The linker script is not selected here; rtconfig.py passes it through LFLAGS as
+# `-T board/linker_scripts/link.lds`. The HAL ADC/TIM sources belong to foc/SConscript.
 from building import *
 
 cwd = GetCurrentDir()

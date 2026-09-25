@@ -8,9 +8,9 @@ These rules apply to this project directory and all descendants.
 
 Before making a material change, read:
 
-1. `docs/PROJECT_OPERATION_LOG.md` current handoff and latest record;
-2. `docs/REMEDIATION_ARCHITECTURE_ALLOCATION.md` for code ownership;
-3. `docs/ST_VESC_ENGINEERING_IMPROVEMENT_ROADMAP.md` for priority and acceptance gates;
+1. `docs/工程操作日志.md` current handoff and latest record;
+2. `docs/整改架构与职责分配.md` for code ownership;
+3. `docs/ST与VESC工程改进路线图.md` for priority and acceptance gates;
 4. the current source and configuration files affected by the task.
 
 Current source code is authoritative when a document and the implementation disagree. Record the
@@ -19,7 +19,7 @@ discrepancy and update the relevant document in the same task when appropriate.
 ## Mandatory operation log
 
 Before reporting completion of any material project operation, update
-`docs/PROJECT_OPERATION_LOG.md`. Material operations include code, configuration, build-system,
+`docs/工程操作日志.md`. Material operations include code, configuration, build-system,
 documentation, dependency, simulation, test, hardware, flashing, debugging, Git, and release work.
 
 - Keep records newest-first and assign one stable `LOG-YYYYMMDD-NNN` ID per coherent operation.
@@ -37,7 +37,7 @@ documentation, dependency, simulation, test, hardware, flashing, debugging, Git,
 
 ## Architecture and safety
 
-- Place new work according to `docs/REMEDIATION_ARCHITECTURE_ALLOCATION.md`.
+- Place new work according to `docs/整改架构与职责分配.md`.
 - Keep MCU register/HAL work in C platform code, deterministic control composition in
   `foc-control`, pure algorithms in `foc-algorithm`, and C ABI conversion in `foc-rt-bridge`.
 - Keep all new control features disabled by default until their documented validation gate passes.

@@ -1,3 +1,16 @@
+# FluxRT —— 应用层构建描述（SCons 侧）。
+# FluxRT - application-layer build description (SCons side).
+#
+# 职责 / Responsibility: 把 applications/ 下的全部 .c 编成一组，并用 Glob 而不是
+# 逐个列举，使新增的应用源文件自动参与构建（代价是新文件的编译选项差异需要额外处理）。
+# Builds every .c under applications/ as one group, using Glob rather than an explicit list
+# so a new application file is picked up automatically; the trade-off is that per-file
+# compile-option differences need explicit handling.
+#
+# 上下文 / Context: 本组包含 Shell 命令层，是操作者唯一入口；它**不**含实时路径，
+# 12 kHz 的 ISR 在 foc/platform/stm32g431/ 里。
+# This group contains the shell command layer, the operator's only entry point. It does
+# not contain the realtime path: the 12 kHz ISR lives in foc/platform/stm32g431/.
 from building import *
 
 cwd = GetCurrentDir()

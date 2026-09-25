@@ -1,23 +1,61 @@
+# FluxRT —— 板级硬件驱动与 FOC 开关（Kconfig 侧，生成到 rtconfig.h）。
+# FluxRT - board hardware drivers and FOC switches (Kconfig side, generated into rtconfig.h).
+#
+# 职责 / Responsibility:
+#   - 选择 bring-up 外设（GPIO 与 LPUART1 控制台），这些走 RT-Thread 的驱动框架；
+#   - 暴露默认关闭的 FOC 数学、时序候选与 ISR 诊断开关。
+#   - Selects the bring-up peripherals (GPIO and the LPUART1 console), which go through the
+#     RT-Thread driver framework, and exposes default-off FOC math/timing candidates
+#     plus ISR diagnostics.
+#
+# 边界 / Boundary:
+#   真正的功率级外设（TIM1 PWM、注入组 ADC、比较器、编码器、栅极驱动）**不走** Kconfig，
+#   也不走 RT-Thread 驱动框架：它们由 foc/platform/stm32g431/ 直接初始化并独占，因此这里
+#   没有对应的开关。文件末尾那行 comment 就是这条约定的机器可读声明。
+#   The actual power-stage peripherals (TIM1 PWM, injected-group ADC, comparator, encoder
+#   and gate driver) deliberately bypass both Kconfig and the RT-Thread driver framework:
+#   they are initialised and owned directly by foc/platform/stm32g431/, so no switch exists
+#   for them here. The trailing comment line in this file is the machine-readable statement
+#   of that rule.
 menu "Hardware Drivers Config"
 
 menu "Bring-up peripherals"
 
+# GPIO 打开是为了让 RT-Thread 的 pin 框架可用（X-NUCLEO-IHM16M1 的使能/故障引脚在
+# 早期 bring-up 里被手工操作过）。它不是功率级安全路径的一部分。
+# GPIO is enabled to bring in the RT-Thread pin framework (the X-NUCLEO-IHM16M1 enable and
+# fault pins were driven by hand during bring-up). It is not part of the power-stage safety
+# path.
 config BSP_USING_GPIO
     bool "Enable GPIO"
     select RT_USING_PIN
     default y
 
+# UART 打开供 RT-Thread 串口驱动使用；本工程的唯一控制台是 LPUART1（115200），
+# 见 board/board.c 的时钟源选择与 board/stm32g4xx_hal_msp.c 的引脚映射。
+# UART is enabled for the RT-Thread serial driver; this project's only console is LPUART1 at
+# 115200, see the clock-source selection in board/board.c and the pin mapping in
+# board/stm32g4xx_hal_msp.c.
 menuconfig BSP_USING_UART
     bool "Enable UART"
     select RT_USING_SERIAL
     default y
 
 if BSP_USING_UART
+    # 发送超时 [ms]：控制台是诊断通道，超时过长会在链路异常时挂住 Shell 线程，
+    # 因此取 2000 ms 作为上限。
+    # TX timeout in ms: the console is a diagnostic channel, and a longer timeout would
+    # block the shell thread on a broken link, so 2000 ms is the ceiling.
     config BSP_STM32_UART_V1_TX_TIMEOUT
         int "UART TX timeout"
         default 2000
         depends on RT_USING_SERIAL_V1
 
+    # PA2/PA3 是"临时 bring-up 映射"：它对应 NUCLEO 板上 ST-LINK 虚拟串口之外的接线，
+    # 后续硬件定版时会改，所以选项名里带 temporary。
+    # PA2/PA3 is a temporary bring-up mapping that does not match the NUCLEO's ST-LINK
+    # virtual COM port wiring and will change when the hardware is frozen, hence
+    # "temporary" in the option name.
     config BSP_USING_LPUART1
         bool "Enable LPUART1 on PA2/PA3 (temporary bring-up mapping)"
         default y
@@ -27,20 +65,50 @@ endmenu
 
 menu "FOC math backend"
 
+# 当前混合后端用 CORDIC 加速 sin/cos、atan2，用 FPU VSQRT.F32 计算矢量模长；
+# Rust 侧对每个操作都有 CPU 回退，因此关掉它不改变算法行为，只改变周期数。
+# The hybrid backend uses CORDIC for sin/cos and atan2 and FPU VSQRT.F32 for vector
+# magnitude. Rust has a CPU fallback for every operation, so disabling it changes
+# cycle counts rather than algorithms.
 config FOC_MATH_BACKEND_STM32G4_CORDIC
-    bool "Use STM32G4 CORDIC for current-loop sin/cos and vector magnitude"
+    bool "Use STM32G4 CORDIC + FPU fast-loop math backend"
     depends on SOC_STM32G431RB
     default y
     help
-        Build the STM32G4 CORDIC adapter and select it after platform init.
+        Build the STM32G4 CORDIC + FPU adapter and select it after platform init.
         Every accelerated operation has an automatic Rust CpuMath fallback.
         Disable this when porting to a chip without CORDIC; the FOC algorithm
         and host simulation remain unchanged.
 
 endmenu
 
+menu "FOC timing candidates"
+
+# 该开关不改变 Rust 控制周期，只把 TIM1 载波提到 24 kHz。TIM1 CH4 仍在三分流
+# 有效窗口产生 OC4REF，TIM2 通过 ITR0 对其二分频后以 TRGO 触发 ADC/12 kHz
+# 完整控制链；RCR=3 让 CCR preload 每两个 PWM 拍更新一次。
+# Production 在 C 平台层无条件忽略本宏，避免遗留 .config 改变量产时序。
+config FOC_PWM_24K_CONTROL_12K_CANDIDATE
+    bool "Use Diagnostic-only 24 kHz PWM / 12 kHz control timing candidate"
+    depends on SOC_STM32G431RB
+    default n
+    help
+        Set TIM1 PWM to 24 kHz while keeping injected ADC sampling and the full
+        control ISR at 12 kHz. TIM1 OC4REF marks the valid three-shunt sampling
+        window; TIM2 counts that internal trigger and emits every second edge to
+        the ADC. RCR=3 updates CCR preload every two PWM periods. This remains a
+        gated candidate until no-power timing and low-power board validation pass.
+        Production builds ignore this option even if it remains selected.
+
+endmenu
+
 menu "FOC diagnostics"
 
+# 时序探针会在 ISR 入口拉高 PA5（NUCLEO 的 LD2/D13），用于把 DWT 计数与示波器实测对拍。
+# 它会占用一个 LED 引脚并增加极少量指令，因此默认关闭；控制逻辑不依赖它。
+# The timing probe drives PA5 (the NUCLEO's LD2/D13) high across the ISR, to cross-check the
+# DWT numbers against a scope. It consumes an LED pin and adds a few instructions, so it is
+# off by default, and no control logic depends on it.
 config FOC_ISR_TIMING_PROBE
     bool "Pulse PA5 high across the measured ADC/FOC ISR span"
     depends on SOC_STM32G431RB
@@ -51,10 +119,94 @@ config FOC_ISR_TIMING_PROBE
         oscilloscope or logic-analyzer WCET cross-check. The production
         default remains disabled and no control behavior depends on it.
 
+# 数学基准会加入固定向量、Shell 输出和 DWT 统计，约占 2.4 KiB Flash。它只用于
+# 停机测量，默认关闭；普通 Diagnostic 与 Production 都不应承担这部分体积。
+# The stopped-state math benchmark adds fixed vectors, shell output and DWT
+# statistics (about 2.4 KiB Flash). Keep it off in normal Diagnostic and Production.
+config FOC_MATH_DIAGNOSTIC_BENCHMARK
+    bool "Build stopped-state CORDIC math benchmark command"
+    depends on FOC_MATH_BACKEND_STM32G4_CORDIC
+    default n
+    help
+        Add the Diagnostic-only foc_math_bench shell command. It runs only
+        while the power stage is disarmed and reports isolated sin/cos and
+        atan2 cycles, fixed-vector errors and invalid-input rejection counts.
+        Disable it again after collecting benchmark evidence.
+
+# 健康计数和一次性故障注入只为验证硬件失败 -> CORDIC 复位 -> Rust CpuMath 回退
+# 这条链路。它会给快环增加计数写操作，所以只在专项 Diagnostic 镜像中临时打开。
+# Health counters and one-shot fault injection validate the hardware failure ->
+# CORDIC reset -> Rust CpuMath fallback chain. Counter writes add fast-loop work,
+# so this belongs only in a temporary Diagnostic image.
+config FOC_MATH_DIAGNOSTIC_HEALTH
+    bool "Build Diagnostic CORDIC health counters and one-shot fault injection"
+    depends on FOC_MATH_BACKEND_STM32G4_CORDIC
+    default n
+    help
+        Add the Diagnostic-only foc_math_health command, per-operation success
+        and fallback counters, and a recoverable one-shot CORDIC not-ready
+        injection. Keep it disabled in normal Diagnostic and Production builds.
+
+# 固定延迟候选只用于 Diagnostic A/B：等待 6 个 CPU NOP 后单次检查 RRDY，
+# 不删除失败检测，也不允许进入 Production。它依赖停机基准，保证启用候选时
+# 同一个镜像里始终保留可量化的轮询基线。
+# The fixed-delay candidate is Diagnostic A/B only: wait six CPU NOPs, then
+# check RRDY once. It keeps failure detection and is ignored by Production.
+# Depending on the stopped-state benchmark ensures that an enabled candidate
+# always ships with a polling reference in the same image.
+config FOC_MATH_CORDIC_FIXED_DELAY_CANDIDATE
+    bool "Use guarded fixed-delay CORDIC candidate in Diagnostic realtime path"
+    depends on FOC_MATH_DIAGNOSTIC_BENCHMARK && FOC_MATH_DIAGNOSTIC_HEALTH
+    default n
+    help
+        Replace the bounded RRDY polling loop in Diagnostic firmware with six
+        fixed NOPs followed by one RRDY check. The benchmark still measures both
+        the polling reference and this candidate. Production always keeps the
+        bounded polling implementation even if this option is present in .config.
+
+# CPU 快速近似基准把 Rust 多项式 sin/cos/atan2 与 CORDIC 一起放入同一个专项
+# Diagnostic 镜像，以排除不同链接布局造成的伪差异。默认和 Production 都不携带。
+# The CPU fast-approximation benchmark puts the Rust polynomial sin/cos/atan2
+# beside CORDIC in one special Diagnostic image, avoiding cross-image layout
+# noise. Normal Diagnostic and Production do not carry it.
+config FOC_MATH_CPU_FAST_APPROX_BENCHMARK
+    bool "Benchmark portable Rust CPU fast math in the CORDIC diagnostic image"
+    depends on FOC_MATH_DIAGNOSTIC_BENCHMARK
+    default n
+    help
+        Add the portable Rust polynomial sin/cos and atan2 implementations to
+        the stopped-state math benchmark. This measures error and isolated DWT
+        cycles in the same image as the CORDIC references. Keep it disabled
+        after collecting evidence.
+
+# 只改变 Diagnostic 实时 sin/cos 与 atan2 的选择；矢量模长继续走 FPU VSQRT，
+# Production 无条件忽略。候选开启时同镜像基准仍保留 CORDIC 对照。
+# Changes only Diagnostic realtime sin/cos and atan2 selection; magnitude keeps
+# FPU VSQRT and Production ignores the option. The same-image benchmark retains
+# CORDIC as a reference while this candidate is active.
+config FOC_MATH_CPU_FAST_APPROX_CANDIDATE
+    bool "Use portable Rust CPU fast math in Diagnostic realtime path"
+    depends on FOC_MATH_CPU_FAST_APPROX_BENCHMARK
+    default n
+    help
+        Select the portable polynomial sin/cos and atan2 implementation in the
+        Diagnostic realtime path. FPU VSQRT remains the magnitude backend.
+        Production always retains the configured CORDIC/FPU path even if this
+        option is present in .config.
+
 endmenu
 
+# 功率级外设刻意不提供 Kconfig 开关：TIM1、注入组 ADC、比较器、编码器与栅极驱动由
+# foc/platform/stm32g431/ 独家初始化，任何"从菜单关掉它"的选项都会让安全路径变成可选。
+# Power-stage peripherals deliberately have no Kconfig switch: TIM1, the injected-group ADC,
+# the comparator, the encoder and the gate driver are initialised exclusively by
+# foc/platform/stm32g431/, and an option to switch them off from a menu would make the
+# safety path optional.
 comment "FOC PWM, ADC, comparator, encoder and gate-driver peripherals are intentionally disabled"
 
+# 仍然引入 RT-Thread 的 HAL_Drivers Kconfig，因为 LPUART1 控制台与 pin 框架来自那里。
+# The RT-Thread HAL_Drivers Kconfig is still sourced, because the LPUART1 console and the
+# pin framework come from it.
 source "$(RTT_DIR)/bsp/stm32/libraries/HAL_Drivers/drivers/Kconfig"
 
 endmenu

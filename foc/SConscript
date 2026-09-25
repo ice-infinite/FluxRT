@@ -1,8 +1,32 @@
+# FluxRT —— FOC 组件构建描述（SCons 侧）。
+# FluxRT - FOC component build description (SCons side).
+#
+# 职责 / Responsibility:
+#   - 列出 FOC 自有源文件：实时时序统计、STM32G431 平台适配、数学加速；
+#   - 直接把 STM32G4 HAL 的 ADC/TIM 源文件编进本组，而不依赖 RT-Thread 的
+#     HAL_Drivers 组：FOC 用注入组 ADC 与 TIM1 Break，需要这些文件确定被编入；
+#   - 导出 include 路径，并提供 Rust 静态库的搜索路径与库名。
+#   - Lists the FluxRT-owned FOC sources; compiles the STM32G4 ADC/TIM HAL sources into
+#     this group rather than relying on the RT-Thread HAL_Drivers group, because FOC
+#     needs the injected-group ADC and the TIM1 break path to be present for certain;
+#     and exports the include path plus the Rust archive search path and library name.
+#
+# 与 CMake 的分工 / Division of labour with CMake:
+#   本文件只决定"哪些文件参与、头文件在哪里"，真正的编译选项与 Rust 集成在
+#   custom.cmake 里（Rust 库的最终搜索路径会被 custom.cmake 覆盖为按优化等级分目录的
+#   路径）。直接跑 SCons 得到的是 Diagnostic 语义且用 rust/Cargo.toml 默认的 `s`。
+#   This file only decides which files take part and where the headers are; the real
+#   compile options and the Rust integration live in custom.cmake, which also overrides
+#   the Rust search path with the per-opt-level directory. A bare SCons run means
+#   Diagnostic semantics with the `s` default from rust/Cargo.toml.
 import os
 
 from building import *
 
 cwd = GetCurrentDir()
+# HAL 源码来自 packages，不复制进本工程；路径基于本文件位置推出来，因此工程可以整体搬迁。
+# The HAL sources come from packages and are never copied into this project; the path is
+# derived from this file's location so the project can be moved as a whole.
 hal_src = os.path.abspath(os.path.join(
     cwd,
     '..',
@@ -11,6 +35,9 @@ hal_src = os.path.abspath(os.path.join(
     'Src',
 ))
 src = [
+    'runtime/foc_phase_voltage_capture.c',
+    'runtime/foc_phase_voltage_model.c',
+    'runtime/foc_pwm_timing.c',
     'runtime/foc_realtime_timing.c',
     'platform/stm32g431/foc_platform_stm32g431.c',
     'platform/stm32g431/foc_math_accel_stm32g431.c',
@@ -22,6 +49,12 @@ src = [
 path = [
     cwd + '/include',
 ]
+# Rust 静态库目录。这里写的是 SCons 默认优化等级 `s` 对应的路径；CMake 构建时
+# custom.cmake 会按实际档位覆盖为 build/rust-target-<level>/...，因此本常量只对
+# 直接使用 SCons 的场景有意义。
+# Rust archive directory. This is the path for the SCons default opt-level `s`; in a CMake
+# build custom.cmake overrides it with build/rust-target-<level>/..., so this constant only
+# matters when SCons is used directly.
 rust_lib_path = os.path.abspath(os.path.join(
     cwd,
     '..',
@@ -31,6 +64,10 @@ rust_lib_path = os.path.abspath(os.path.join(
     'release',
 ))
 
+# depend=[''] 表示本组始终参与构建（不受 Kconfig 开关控制）：功率级适配层没有
+# "关掉"的选项，关掉它就等于没有电机控制。
+# depend=[''] means this group is always built and is not gated by a Kconfig symbol: the
+# power-stage adapter has no off switch, because switching it off leaves no motor control.
 group = DefineGroup(
     'FOC',
     src,

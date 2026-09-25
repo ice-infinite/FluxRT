@@ -7,6 +7,8 @@ publish = false
 [features]
 default = []
 stm32g4-cordic = []
+fast-math-benchmark = []
+fast-math-candidate = ["fast-math-benchmark"]
 
 [lib]
 name = "foc_rt_bridge"

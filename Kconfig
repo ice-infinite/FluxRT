@@ -1,9 +1,42 @@
+# FluxRT —— 顶层 Kconfig（rtconfig.h 的唯一来源）。
+# FluxRT - top-level Kconfig (the only source of rtconfig.h).
+#
+# 职责 / Responsibility:
+#   - 定义 BSP/RTT/PKGS 目录变量并引入三个 Kconfig 源：RT-Thread 内核、软件包、
+#     STM32 库驱动，最后是 board/Kconfig（本工程的硬件驱动与 FOC 开关）；
+#   - 固定 SoC 与板卡：本工程只针对 STM32G431RB + NUCLEO-G431RB 参考板。
+#   - Defines the BSP/RTT/PKGS directory variables and sources three Kconfig trees: the
+#     RT-Thread kernel, the packages and the STM32 library drivers, followed by
+#     board/Kconfig (this project's hardware drivers and FOC switches); and it fixes the
+#     SoC and board, because this project only targets STM32G431RB on the NUCLEO-G431RB
+#     reference board.
+#
+# 重要 / Important:
+#   rtconfig.h 由 `scons --pyconfig-silent` 从本文件生成，手工编辑 rtconfig.h 会在下次
+#   生成时被覆盖。任何配置改动都必须改这里，然后重新生成并按 docs/构建档与优化等级.md
+#   重新记录 BIN SHA-256、text/data/bss 与板端 WCET。
+#   rtconfig.h is generated from this file by `scons --pyconfig-silent`, so hand-editing
+#   rtconfig.h is lost on the next generation. Configuration changes belong here, followed
+#   by regeneration and re-recording of the BIN SHA-256, text/data/bss and on-board WCET as
+#   described in docs/构建档与优化等级.md.
 mainmenu "FluxRT Configuration"
 
+# BSP_DIR 相对于本文件所在目录；RTT_DIR 依赖 build.ps1 / SConstruct 约定的工作区布局
+# （<workspace>/projects/FluxRT 与 <workspace>/rt-thread 并列）。
+# BSP_DIR is relative to this file's directory; RTT_DIR relies on the workspace layout
+# build.ps1 and SConstruct assume, with <workspace>/rt-thread next to
+# <workspace>/projects/FluxRT.
 BSP_DIR := .
 RTT_DIR := ../../rt-thread
 PKGS_DIR := packages
 
+# SoC 选择：本工程只跑 STM32G431RB。select 出来的三项都不是可选项——组件初始化与
+# 用户 main() 是 RT-Thread 的启动方式，SOC_SERIES_STM32G4 决定 HAL 头文件选择哪一套
+# 寄存器定义。没有"取消选择"的配置项，因为换芯片属于移植（见 docs/更换MCU移植步骤.md）。
+# SoC selection: this project only runs on the STM32G431RB. None of the selected symbols
+# is optional: component init and the user main() are how RT-Thread boots, and
+# SOC_SERIES_STM32G4 decides which register definitions the HAL headers pick. There is no
+# opt-out, because changing the chip is a port (see docs/更换MCU移植步骤.md).
 config SOC_STM32G431RB
     bool
     select SOC_SERIES_STM32G4
@@ -11,10 +44,17 @@ config SOC_STM32G431RB
     select RT_USING_USER_MAIN
     default y
 
+# 板卡标识：供条件编译区分参考板与将来的自研板。当前只有 NUCLEO-G431RB 参考实现。
+# Board identity, used to tell the reference board from a future custom board in
+# conditional code. Only the NUCLEO-G431RB reference exists today.
 config BOARD_FLUXRT_STM32G431_REFERENCE
     bool
     default y
 
+# 引入顺序有讲究：内核在前（board/Kconfig 里的 select RT_USING_* 需要这些符号已定义），
+# 板级/硬件驱动最后。
+# The order matters: the kernel comes first because the select RT_USING_* statements in
+# board/Kconfig need those symbols to exist, and the board/hardware drivers come last.
 source "$(RTT_DIR)/Kconfig"
 osource "$PKGS_DIR/Kconfig"
 rsource "$(RTT_DIR)/bsp/stm32/libraries/Kconfig"

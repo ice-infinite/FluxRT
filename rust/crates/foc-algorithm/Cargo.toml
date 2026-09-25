@@ -1,12 +1,39 @@
+# FluxRT —— foc-algorithm 纯算法 crate 的构建清单。
+# FluxRT - build manifest for the foc-algorithm pure-algorithm crate.
+#
+# 职责 / Responsibility:
+#   - 声明本 crate 是不发布、不依赖 HAL/RTOS 的 no_std 算法库。
+#   - 声明唯一的第三方依赖 libm，并把 crate 类型固定为 rlib。
+#
+# 架构位置与依赖方向 / Place in the architecture and dependency direction:
+#   applications/ (C + RT-Thread) -> foc-rt-bridge (C ABI)
+#     -> foc-control (板级无关控制组合) -> foc-algorithm (本 crate，纯数学)
+#   本 crate 位于最底层，只允许被 foc-control、foc-sim 等上层依赖，
+#   自己不得反向依赖任何上层 crate，也不得引入芯片头文件。
+#   applications/ (C + RT-Thread) -> foc-rt-bridge (C ABI) -> foc-control ->
+#   foc-algorithm (this crate). It sits at the bottom of the stack: upper
+#   crates may depend on it, never the other way round.
+#
+# 参考 / Reference: docs/架构与安全边界.md, docs/注释规范.md
 [package]
 name = "foc-algorithm"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
+# 只生成 rlib：本 crate 不导出 C ABI 符号，纯 C/RT-Thread 工程要调用它，
+# 必须另建 FFI 包装 crate 并生成 staticlib（见 crate README 的接入章节）。
+# rlib only: this crate exports no C ABI symbol. A pure C/RT-Thread project
+# must add a separate FFI wrapper crate that produces a staticlib.
 [lib]
 name = "foc_algorithm"
 crate-type = ["rlib"]
 
+# libm 是本 crate 唯一的第三方依赖，也是能在 `no_std` 目标上使用 sin/cos/atan2/
+# sqrt 的原因；`default-features = false` 关掉其 std 侧特性，保证交叉编译到
+# thumbv7em 时不链接宿主 libm。
+# libm is the only third-party dependency and the reason sin/cos/atan2/sqrt work
+# on `no_std` targets; `default-features = false` keeps its std-side features off
+# so the thumbv7em builds never link a host libm.
 [dependencies]
 libm = { version = "0.2", default-features = false }
