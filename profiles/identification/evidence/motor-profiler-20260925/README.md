@@ -8,7 +8,7 @@ ST Workbench 数据库）。
 
 用 `tools/motor_profiler_client.py` 的 MCP 读寄存器路径，经 COM6（ST-Link VCP，
 1843200 baud）读回 `SC_*` 寄存器。**前置条件是先修掉 Profiler 固件的两处缺陷**，
-见 [../../../docs/patches/README.md](../../../docs/patches/README.md)。
+见 [../../../../docs/patches/README.md](../../../../docs/patches/README.md)。
 
 ## 实测结果
 
@@ -57,7 +57,7 @@ ST Workbench 数据库）。
 
 ## 由它生成的候选
 
-`../../../candidates/rev2-gbm2804h-profiled-20260925.json`，用
+`../../../../candidates/rev2-gbm2804h-profiled-20260925.json`，用
 
 ```powershell
 python tools/motor_profiler_convert.py convert `
@@ -72,7 +72,7 @@ python tools/motor_profiler_convert.py convert `
 **磁链换算仍带警告**：按官方单位（线电压 RMS）`Ke = 2.714620` 应得
 `0.021165805 Wb`，而工程基线是 `0.005529026 Wb`，相差 **3.83 倍**。`Ke` 的单位口径
 （线电压还是相电压）仍需一次**实物反电势测量**判定，见
-[../../../docs/MotorProfiler串口协议逆向与实测差异.md](../../../docs/MotorProfiler串口协议逆向与实测差异.md)。
+[../../../../docs/MotorProfiler串口协议逆向与实测差异.md](../../../../docs/MotorProfiler串口协议逆向与实测差异.md)。
 
 ## 下一步
 
