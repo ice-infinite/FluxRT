@@ -1,7 +1,22 @@
 function p = foc_refresh_vectors(p)
 %FOC_REFRESH_VECTORS Rebuild typed Simulink vectors after named overrides.
+%
+% 把 init_foc_params.m 的命名字段打包成两个定长数值向量。
+% Packs the named fields of init_foc_params.m into two fixed-length numeric vectors.
+%
+% 职责 / Responsibility:
+%   - controllerVector 是 controller_core.m 的 cfg 入参，plantVector 是 pmsm_plant.m
+%     的 cfg 入参；Simulink 只认识向量，不认识结构体字段名；
+%   - 字段顺序即协议：controller_core.m / pmsm_plant.m 里 cfg(n) 的编号必须与这里
+%     一一对应，改顺序等于改控制律，必须同时同步两边的注释和 run_foc_validation.m
+%     的向量长度断言（numel(p.controllerVector)==49）。
+%   - controllerVector feeds controller_core.m and plantVector feeds pmsm_plant.m.
+%     Field order IS the protocol: the cfg(n) indices in those two files must match this
+%     packing exactly, so reordering is a logic change and must be mirrored in the
+%     validation asserts as well. Units are carried from the named fields, not from the
+%     vector: the vector itself is unitless by construction.
 p.controllerVector = [ ...
-    p.motor.polePairs; p.observer.Rs; p.observer.Ls; p.timing.ts; ...
+    p.motor.polePairs; p.observer.Rs; p.observer.Ls; p.timing.controlTs; ...
     p.control.voltageUtilization; p.inverter.dutyMin; p.inverter.dutyMax; ...
     p.limits.softwareTripA; p.bus.minimumV; p.bus.maximumV; ...
     p.control.idKp; p.control.idKi; p.control.currentOutMin; ...
@@ -21,9 +36,35 @@ p.controllerVector = [ ...
     double(p.inverter.deadTimeCompensationEnabled); ...
     p.inverter.deadTimeCompensationGain; ...
     p.inverter.deadTimeCompensationCurrentBandA; ...
-    double(p.inverter.observerDeadTimeCompensationEnabled)];
+    double(p.inverter.observerDeadTimeCompensationEnabled); ...
+    p.timing.pwmTs];
+% controllerVector 索引对照（cfg(n)，n 与 controller_core.m 的常量解包一一对应）:
+%   1 polePairs[-]  2 Rs[ohm]  3 Ls[H]  4 ts[s]  5 voltageUtilization[-]
+%   6..7 dutyMin/dutyMax[-]  8 softwareTripA[A]  9..10 busMin/busMax[V]
+%   11..12 idKp[V/A]/idKi[V/(A*s)]  13..14 currentOutMin/Max[V]
+%   15 alignmentS[s]  16 rampS[s]  17 transitionS[s]  18 finalSpeedRpm[rpm]
+%   19 finalCurrentA[A]  20 closedLoopEnable[-]  21 kSlideV[V]  22 boundaryA[A]
+%   23 emfAlpha[-]  24..25 pllKp/pllKi  26..27 pllOmegaMin/Max[rad/s]
+%   28 reliabilityDecimator[-]  29 reliabilityMinMeanRpm[rpm]  30 reliabilityMinEmfV[V]
+%   31 reliabilityMaxVarRatio[-]  32 reliabilityWindows[-]  33..34 采集/失锁超时[s]
+%   35 speedLoopDivider[-]  36..37 speedKp/speedKi  38..39 speedOutMin/Max[A]
+%   40 closedLoopSpeedRampRpmPerS[rpm/s]  41 speedPiPreloadRatio[-]
+%   42 closedLoopCurrentSlewAPerS[A/s]  43 maxSpeedRpm[rpm]  44 deadTimeNs[ns]
+%   45 deadTimeCompensationEnabled[-]  46 deadTimeCompensationGain[-]
+%   47 deadTimeCompensationCurrentBandA[A]  48 observerDeadTimeCompensationEnabled[-]
+%   49 pwmTs[s]
+% Index map of controllerVector: n matches the cfg constant unpacking in
+% controller_core.m, whose units are given in brackets above. The vector length (49)
+% is asserted in run_foc_validation.m.
 p.plantVector = [ ...
     p.motor.Rs; p.motor.Ld; p.motor.Lq; p.motor.fluxLinkageWb; ...
     p.motor.polePairs; p.motor.inertiaKgM2; p.motor.frictionNmS; ...
-    p.timing.ts; double(p.inverter.enableDeadTime); p.inverter.deadTimeNs];
+    p.timing.pwmTs; double(p.inverter.enableDeadTime); p.inverter.deadTimeNs];
+% plantVector 索引对照（cfg(n)，对应 pmsm_plant.m）:
+%   1 Rs[ohm]  2 Ld[H]  3 Lq[H]  4 fluxLinkageWb[Wb]  5 polePairs[-]
+%   6 inertiaKgM2[kg*m^2]  7 frictionNmS[N*m*s]  8 ts[s]
+%   9 enableDeadTime[-]  10 deadTimeNs[ns]
+% plantVector index map; units as above. Rs/Ld/Lq/flux/inertia/friction are the
+% Workbench-inherited values that still need identification on the real motor, so a
+% plant/measurement mismatch is expected to show up in exactly these entries.
 end

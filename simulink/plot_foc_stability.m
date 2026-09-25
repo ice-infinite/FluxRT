@@ -1,5 +1,31 @@
 function report = plot_foc_stability(varargin)
 %PLOT_FOC_STABILITY Run and plot the current closed-loop stability baseline.
+%
+% FluxRT —— 生成当前闭环稳定性基线图与 JSON 统计（结果是仿真，不是实机结论）。
+% FluxRT - produces the current closed-loop stability baseline figure and JSON statistics.
+%
+% 职责 / Responsibility:
+%   - 跑两组仿真：理想逆变器（enableDeadTime=false，对应 Rust 主机 plant 的逐拍对拍）
+%     和 550 ns 平均死区（enableDeadTime=true，对应功率板趋势），输出 6 联图对比；
+%   - 统计量在 12 kHz 原始样本上计算，只有画图才抽取到 1 kHz（decimate 16）。
+%   - Runs two cases, an ideal inverter (enableDeadTime=false, the tick-by-tick Rust host
+%     plant) and 550 ns average dead time (enableDeadTime=true, the board trend), and plots
+%     them side by side. All statistics use the native 12 kHz samples; only the plotted
+%     traces are decimated to 1 kHz.
+%
+% 单位 / Units: 转速 [rpm]、电流 [A]、角度 [rad]、时间 [s]、占空比/状态/可靠标志 [-]。
+% 关键判据：稳态窗口 trueSpeedMeanRpm/StdRpm [rpm]、observerSpeedRmseRpm [rpm]、
+% iqTrackingRmseA/idTrackingRmseA [A]、peakPhaseCurrentA [A]、finalFaultFlags [-]。
+% Speeds in [rpm], currents in [A], angles in [rad], time in [s]; state, reliability and duty
+% are dimensionless. The reported metrics carry the units listed above.
+%
+% 边界 / Boundary: 纯仿真，不接触串口与功率级；输出的 PNG/FIG/MAT/JSON 文件名固定为
+% `..._10s.*`（与默认 duration=10 对应），改 duration 不会改变文件名。
+% Pure simulation: no serial port, no power stage. The exported PNG/FIG/MAT/JSON names are
+% fixed as `..._10s.*` to match the default duration of 10 s even if duration is changed.
+%
+% 参考 / Reference: simulink/Simulink仿真工程说明.md, docs/仿真实机相关性验证.md
+
 ip = inputParser;
 ip.addParameter('duration',10,@(x)isnumeric(x)&&isscalar(x)&&x>3);
 ip.addParameter('outputDir',fullfile(fileparts(mfilename('fullpath')),'results'), ...
@@ -12,6 +38,12 @@ addpath(here);
 outputDir = char(o.outputDir);
 if ~exist(outputDir,'dir'), mkdir(outputDir); end
 
+% 两组工况 / Two cases: 理想逆变器与 550 ns 平均死区。理想组用于和 Rust 主机 plant 对拍
+% （两边都是理想平均逆变器），死区组用于看功率板的实际趋势；两组不能混在同一张"精确
+% 一致"表里，这是本目录一直强调的边界。
+% The ideal case is for tick-by-tick comparison with the Rust host plant (both use an ideal
+% average-value inverter) and the dead-time case shows the board trend. The two must not be
+% mixed into one "exact match" table.
 ideal = run_foc_sim('closedLoop',true,'duration',o.duration, ...
     'enableDeadTime',false);
 if bdIsLoaded('foc_bringup'), close_system('foc_bringup',0); end
@@ -27,6 +59,11 @@ report.ideal = stability_metrics(ideal,steadyStart);
 report.deadtime550ns = stability_metrics(deadtime,steadyStart);
 
 % Plot at 1 kHz. All statistics above retain the native 12 kHz samples.
+% 画图抽取到 1 kHz（12 kHz / 16）：只影响可读性，所有上面的统计量仍用 12 kHz 原始样本，
+% 因此图上"看起来平滑"与统计的数值精度无关。
+% The plotted traces are decimated to 1 kHz (12 kHz / 16). This is a readability choice only:
+% every statistic above still uses the native 12 kHz samples, so a smooth-looking plot says
+% nothing about numerical accuracy.
 idealPlot = decimate_run(ideal,16);
 deadPlot = decimate_run(deadtime,16);
 t = deadPlot.time;
@@ -122,6 +159,11 @@ fprintf('Steady true speed %.4f +/- %.4f rpm; observer error RMSE %.4f rpm; Iq R
 end
 
 function m = stability_metrics(r,startTime)
+% 计算稳态窗口 [startTime, end] 内的统计量（startTime [s]，其余见字段名量纲）。
+% 未辨识/未验证的量不要从这里外推：trueSpeedRpm 是 plant 真值，实机没有对应测量。
+% Computes statistics over the steady window [startTime, end] (startTime in [s]; other units
+% follow the field names). Do not extrapolate from here to hardware: trueSpeedRpm is plant
+% truth and has no counterpart measurement on the rig.
 mask = r.time>=startTime;
 m = struct();
 m.sampleCount = sum(mask);
@@ -144,11 +186,19 @@ m.reliableFraction = mean(r.reliable(mask)~=0);
 end
 
 function t = first_time(r,stateValue)
+% 首次进入某状态的时刻 [s]；没进入过返回 NaN，调用方用 isfinite 判断后再画线。
+% First time [s] the run enters a given state, NaN if it never does; callers test with
+% isfinite before drawing a marker.
 index = find(r.state==stateValue,1);
 if isempty(index), t = NaN; else, t = r.time(index); end
 end
 
 function out = decimate_run(r,divider)
+% 按 divider 抽取结果结构体（divider [-] 为整数倍数，本文件传 16 → 1 kHz 图线）。
+% 抽取只用于绘图，且所有被抽取字段都来自同一次运行，时间轴保持一致。
+% Decimates the result struct by an integer factor (16 here, i.e. 1 kHz plot lines). Used for
+% plotting only, and every decimated field comes from the same run so the time base stays
+% consistent.
 index = 1:divider:numel(r.time);
 names = {'time','trueSpeedRpm','obsSpeedRpm','speedReferenceRpm','iqRef', ...
     'iqMeas','idMeas','obsAngle','trueAngle','controlAngle','state', ...
@@ -161,10 +211,17 @@ end
 end
 
 function y = wrap_pi(x)
+% 把角度 [rad] 折到 (-pi, pi]，用于画"误差"曲线时避免 ±2*pi 跳变。
+% 注意这里是本文件的局部实现（+foc/wrap_pi.m 是另一份），两者语义相同，改动需同步。
+% Wraps an angle [rad] into (-pi, pi] so error curves do not jump by ±2*pi. This is a local
+% copy (the package +foc/wrap_pi.m is a separate one); keep both in sync.
 y = mod(x+pi,2*pi)-pi;
 end
 
 function mark_handoff(ax,transitionTime,closedTime)
+% 在图上标出接管时刻 [s]（状态 6 与状态 7 的首次进入）；NaN 表示该状态没出现过，跳过。
+% Marks the handoff instants [s] (first entry into states 6 and 7); NaN means the state never
+% occurred and the marker is skipped.
 if isfinite(transitionTime), xline(ax,transitionTime,'--','transition'); end
 if isfinite(closedTime), xline(ax,closedTime,'--','closed'); end
 end
