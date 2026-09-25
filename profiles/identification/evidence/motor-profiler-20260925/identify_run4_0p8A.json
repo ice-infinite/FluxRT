@@ -1,0 +1,171 @@
+{
+  "port": "COM6",
+  "baud": 1843200,
+  "currents_a": [
+    0.8
+  ],
+  "max_seconds_per_current": 300.0,
+  "runs": [
+    {
+      "current_requested_a": 0.8,
+      "started_utc": "2026-09-25T07:27:25.462734+00:00",
+      "polls": [
+        {
+          "t_s": 12.0,
+          "state": 2,
+          "state_name": "SCC_ALIGN_PHASE",
+          "completed": 0,
+          "current_a": 0.800000011920929,
+          "rs_ohm": 4.934962749481201,
+          "ls_h": 0.0008224938064813614,
+          "ke": 2.5791869163513184
+        },
+        {
+          "t_s": 38.9,
+          "state": 1,
+          "state_name": "SCC_DUTY_DETECTING_PHASE",
+          "completed": 0,
+          "current_a": 0.800000011920929,
+          "rs_ohm": 4.934962749481201,
+          "ls_h": 0.0008224938064813614,
+          "ke": 3.9756531715393066
+        },
+        {
+          "t_s": 65.7,
+          "state": 1,
+          "state_name": "SCC_DUTY_DETECTING_PHASE",
+          "completed": 0,
+          "current_a": 0.800000011920929,
+          "rs_ohm": 4.934962749481201,
+          "ls_h": 0.0008224938064813614,
+          "ke": 3.9756531715393066
+        },
+        {
+          "t_s": 92.5,
+          "state": 1,
+          "state_name": "SCC_DUTY_DETECTING_PHASE",
+          "completed": 0,
+          "current_a": 0.800000011920929,
+          "rs_ohm": 4.934962749481201,
+          "ls_h": 0.0008224938064813614,
+          "ke": 3.9756531715393066
+        },
+        {
+          "t_s": 119.5,
+          "state": 1,
+          "state_name": "SCC_DUTY_DETECTING_PHASE",
+          "completed": 0,
+          "current_a": 0.800000011920929,
+          "rs_ohm": 4.934962749481201,
+          "ls_h": 0.0008224938064813614,
+          "ke": 3.9756531715393066
+        },
+        {
+          "t_s": 146.3,
+          "state": 1,
+          "state_name": "SCC_DUTY_DETECTING_PHASE",
+          "completed": 0,
+          "current_a": 0.800000011920929,
+          "rs_ohm": 4.934962749481201,
+          "ls_h": 0.0008224938064813614,
+          "ke": 3.9756531715393066
+        },
+        {
+          "t_s": 173.1,
+          "state": 1,
+          "state_name": "SCC_DUTY_DETECTING_PHASE",
+          "completed": 0,
+          "current_a": 0.800000011920929,
+          "rs_ohm": 4.934962749481201,
+          "ls_h": 0.0008224938064813614,
+          "ke": 3.9756531715393066
+        },
+        {
+          "t_s": 200.2,
+          "state": 1,
+          "state_name": "SCC_DUTY_DETECTING_PHASE",
+          "completed": 0,
+          "current_a": 0.800000011920929,
+          "rs_ohm": 4.934962749481201,
+          "ls_h": 0.0008224938064813614,
+          "ke": 3.9756531715393066
+        },
+        {
+          "t_s": 227.0,
+          "state": 1,
+          "state_name": "SCC_DUTY_DETECTING_PHASE",
+          "completed": 0,
+          "current_a": 0.800000011920929,
+          "rs_ohm": 4.934962749481201,
+          "ls_h": 0.0008224938064813614,
+          "ke": 3.9756531715393066
+        },
+        {
+          "t_s": 253.9,
+          "state": 1,
+          "state_name": "SCC_DUTY_DETECTING_PHASE",
+          "completed": 0,
+          "current_a": 0.800000011920929,
+          "rs_ohm": 4.934962749481201,
+          "ls_h": 0.0008224938064813614,
+          "ke": 3.9756531715393066
+        },
+        {
+          "t_s": 281.2,
+          "state": 1,
+          "state_name": "SCC_DUTY_DETECTING_PHASE",
+          "completed": 0,
+          "current_a": 0.800000011920929,
+          "rs_ohm": 4.934962749481201,
+          "ls_h": 0.0008224938064813614,
+          "ke": 3.9756531715393066
+        },
+        {
+          "t_s": 308.1,
+          "state": 1,
+          "state_name": "SCC_DUTY_DETECTING_PHASE",
+          "completed": 0,
+          "current_a": 0.800000011920929,
+          "rs_ohm": 4.934962749481201,
+          "ls_h": 0.0008224938064813614,
+          "ke": 3.9756531715393066
+        }
+      ],
+      "final": {
+        "state": 1,
+        "completed": 0,
+        "check": 1,
+        "pole_pairs": 7,
+        "steps": 15,
+        "current_a": 0.800000011920929,
+        "nominal_speed": 16,
+        "rs_ohm": 4.934962749481201,
+        "ls_h": 0.0008224938064813614,
+        "ke": 3.9756531715393066,
+        "vbus_v": 11.8336181640625,
+        "meas_nominal_speed": 0.0,
+        "inertia_j": 0.0,
+        "friction_f": 0.0
+      },
+      "completed": false,
+      "finished_utc": "2026-09-25T07:33:03.935059+00:00"
+    }
+  ],
+  "before": {
+    "state": 1,
+    "completed": 0,
+    "check": 1,
+    "pole_pairs": 7,
+    "steps": 15,
+    "current_a": 0.800000011920929,
+    "nominal_speed": 16,
+    "rs_ohm": 4.8465399742126465,
+    "ls_h": 0.0009693080792203546,
+    "ke": 2.5791869163513184,
+    "vbus_v": 11.8367919921875,
+    "meas_nominal_speed": 0.0,
+    "inertia_j": 0.0,
+    "friction_f": 0.0
+  },
+  "finished_utc": "2026-09-25T07:33:03.935149+00:00"
+}

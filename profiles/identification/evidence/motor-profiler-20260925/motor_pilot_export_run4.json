@@ -1,0 +1,15 @@
+{
+  "id": "GBM2804H-100T",
+  "label": "GBM2804H-100T",
+  "hardwareFamily": "MOTOR",
+  "description": "Run 4 (5-minute run, 0.8 A). SC_STATE advanced 2(ALIGN)->1(DUTY) then held; SC_COMPLETED stayed 0. 2026-09-25.",
+  "compatibility": ["FOC", "sixStep"],
+  "polePairs": 7,
+  "nominalDCVoltage": 11.9,
+  "nominalCurrent": 0.8,
+  "maxRatedSpeed": 1572,
+  "rs": 4.934963,
+  "ls": 0.00082249,
+  "magneticStructure": { "type": "SM-PMSM" },
+  "BEmfConstant": 3.975653
+}
