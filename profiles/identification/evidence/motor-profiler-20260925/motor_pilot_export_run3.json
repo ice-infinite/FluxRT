@@ -1,0 +1,15 @@
+{
+  "id": "GBM2804H-100T",
+  "label": "GBM2804H-100T",
+  "hardwareFamily": "MOTOR",
+  "description": "Run 3 (converging): SC_STATE advanced 1->3->4->1, profiler swept current to 0.64 A. 2026-09-25.",
+  "compatibility": ["FOC", "sixStep"],
+  "polePairs": 7,
+  "nominalDCVoltage": 11.913757,
+  "nominalCurrent": 0.64,
+  "maxRatedSpeed": 1572,
+  "rs": 5.156876,
+  "ls": 0.0008594793,
+  "magneticStructure": { "type": "SM-PMSM" },
+  "BEmfConstant": 4.337168
+}
