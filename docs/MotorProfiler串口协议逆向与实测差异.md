@@ -226,98 +226,143 @@ Windows 侧一次写入 8 字节实测耗时约 **170–210 µs**，远高于 8 
   无显著变化。
 - **不是能力协商问题**：多种能力值都能拿到回应。
 
-## 5. 根因：`aspepOverUartA.Capabilities` 在启动后被清零
+## 5. 根因：控制帧（BEACON/PING）的负载永远不会被接收
 
-这是排查的最终结论，**问题不在控制端**。
+排查的最终结论。**问题不在控制端，也不在"固件未初始化"。**
 
-### 5.1 诊断链（每一步都有调试器实测）
+### 5.1 直接观测
 
-| 步骤 | 观测 | 结论 |
-|---|---|---|
-| 1 | 设备 `Capabilities` 全 0（期望 `0/7/7/32/0`） | 能力协商恒失败 |
-| 2 | `maxRXPayload = 0` | 该字段只在 `ASPEP_start()` 处理分支里赋值 |
-| 3 | `ASPEP_State` 恒为 0 (IDLE) | 状态机没有推进 |
-| 4 | ELF 向量表前 16 字节 == 板上 Flash 前 16 字节 | 板上固件**确实是这份 ELF 构建的** |
-| 5 | ELF 的 `.data` 初值 = `0/7/7/32/0` | 静态初始化器本身是对的 |
-| 6 | 断点停在 `main()` 入口：`Capabilities = 0/7/7/32/0`、`ASPEPIp = 0x20000a54` | **startup 的 `.data` 拷贝正常执行** |
-| 7 | 断点停在 `MCboot()` 入口：仍为 `0/7/7/32` | `HAL_Init` 阶段未清零 |
-| 8 | 断点停在 `ASPEP_start()` 入口：仍为 `0/7/7/32`，调用栈 `main → MX_MotorControl_Init → MCboot → ASPEP_start` | 调用链正常 |
-| 9 | `finish` 返回后：**仍为 `0/7/7/32`** | **`ASPEP_start` 没有清零它** |
-
-**结论**：`.data` 初值正确、startup 拷贝正常、`ASPEP_start` 也没问题，但程序**自由运行
-一段时间后** `Capabilities` 变成全 0。清零发生在 `ASPEP_start` 返回之后。
-
-### 5.2 一个高度可疑的内存布局事实
-
-`Capabilities` 是 `ASPEP_Handle_t`（116 字节）的**最后一个成员**，偏移 **108**：
+在目标自由运行（`reset run`）后读内存，`Capabilities` **是正确的**：
 
 ```text
-0x20000a68  aspepOverUartA      116 字节, 到 0x20000adc 结束
-0x20000ad4    └─ Capabilities   偏移 108, 最后 8 字节  <<< 紧贴结构末尾
-0x20000adc  MCP_Over_UartA      紧随其后
+Capabilities  = 0/7/7/32/0   (与 mcp_config.c 静态初始化一致)
+ASPEPIp       = 0x20000a54
+rxBuffer      = 0x20000fb4
+maxRXPayload  = 0
+ASPEP_State   = 0 (IDLE)
 ```
 
-也就是说，**任何越界写只要超过 `aspepOverUartA` 末尾 8 字节以内就会精确覆盖
-`Capabilities`，而不会破坏其它任何字段**。这与"只有 `Capabilities` 变零、其余字段
-正常"的观测完全吻合（`ASPEPIp`、`rxBuffer`、函数指针都仍然有效）。
+发一个带能力负载的 BEACON（`45 00 00 b0 | 05 c4 01 04`）后再读：
 
-`ASPEP_CheckBeacon` 做的是 `MIN(pHandle->Capabilities.X, Master.X)`。当
-`Capabilities` 全 0 时，`TXS` 与 `TXA` 的严格相等判定恒不成立，**因此控制端无论发
-什么能力值都谈不成**。这与实测吻合：发官方值 `7/7/32` 或发全 `0` 都不改变状态。
+```text
+ASPEP_State = 0        (没有进入 CONFIGURED)
+rxHeader    = 45 00 00 b0    <<< 里面是**包头**，不是负载
+```
 
-### 5.3 客户端侧已被排除的因素
+**正确的行为应该是 `rxHeader` 里放着负载 `05 c4 01 04`。** 它却仍是包头，说明
+**负载字节从未被搬进 `rxHeader`**。于是 `ASPEP_CheckBeacon` 读到的是一堆零，
+`MIN(7, 0) = 0`，`TXS`/`TXA` 的严格相等判定恒不成立 → 状态退回 IDLE。
+
+### 5.2 源码依据（`Src/aspep.c`）
+
+接收状态机的处理分两处，**BEACON/PING 那一处漏了重新武装 DMA**：
+
+```c
+/* ASPEP_HWDataReceivedIT, WAITING_PACKET 分支 */
+case DATA_PACKET:
+  ...
+  else if (pHandle->rxLengthASPEP <= pHandle->maxRXPayload)
+  {
+    /* 只有 DATA_PACKET 会重新武装 DMA 去收负载 */
+    pHandle->fASPEP_cfg_recept(..., pHandle->rxBuffer, rxLengthASPEP + ...);
+    pHandle->ASPEP_TL_State = WAITING_PAYLOAD;
+  }
+  break;
+
+case BEACON:
+case PING:
+{
+  pHandle->NewPacketAvailable = true;
+  /* The receiver is not reconfigure right now on purpose to avoid race condition
+     when the packet will be processed in ASPEP_RXframeProcess */
+  break;                      /* <<< 只置标志，没有武装 DMA 去收 4 字节负载 */
+}
+```
+
+随后 `ASPEP_RXframeProcess` 处理完这一帧，末尾执行：
+
+```c
+pHandle->fASPEP_cfg_recept(pHandle->ASPEPIp, pHandle->rxHeader, ASPEP_HEADER_SIZE);
+```
+
+**它立刻把 DMA 重新武装去收下一条包头，把还留在 USART 接收寄存器里的控制帧负载
+（4 字节）丢弃了。** 结果 `rxBuffer` 里永远是陈旧/零数据，能力协商必然失败。
+
+### 5.3 这条根因能解释的全部现象
+
+| 现象 | 解释 |
+|---|---|
+| 设备对 BEACON 有回应 | `rxPacketType` 与头部解析都正常，`ASPEP_sendBeacon` 被正常调用 |
+| 状态永远停在 IDLE | 能力负载读到全 0，`CheckBeacon` 恒失败 |
+| 发官方值 `7/7/32` 或发全 `0` 都不变 | 负载根本没被接收，发什么值都一样 |
+| 设备自己的 NACK 只有 4 字节 | 设备发的是**无负载控制帧**，与"收不到控制帧负载"是同一个设计副作用 |
+| `maxRXPayload = 0` | 该字段在 `RXframeProcess` 的 BEACON 成功分支里赋值；能力协商从未成功过 |
+| 无任何 CRC 错误 | 头部 CRC 完全正常，从未失败过 |
+
+### 5.4 客户端侧已被排除的因素
 
 | 项 | 证据 |
 |---|---|
-| 帧格式 | 设备把**我发的负载原样搬进了 `rxHeader`**：实测 `rxHeader = 05 c7 01 04` |
+| 帧格式 | 设备把**我发的包头原样搬进了 `rxHeader`**（`45 00 00 b0`），头部解析正确 |
 | 包类型解析 | `rxPacketType = 5 (BEACON)` |
 | CRC-4 | 同一实现能验证设备自己发的 `0xC004040F` 与我发的 `0xB0000045` |
-| 能力值 | 设备把我发的能力解成 `0/0/7/7/32`，**正是官方值** |
+| 能力值取值 | 发 `7/7/32`、`4/7/32`、全 `0` 都不改变状态——因为负载收不到 |
 | 接收 DMA | 正确通道是 **DMA1 ch0**：`CCR=0x81 EN=1 NDTR=4 PAR=RDR MAR=rxHeader` |
 | UART 参数 | 与固件一致，`CR1=0x4D`、`CR3=0xC1` |
 | 发送速率 | 空闲 0.05–2.0 s、字节间延时 0–5 ms 都试过，无改善 |
 
-**旁证**：`syncPacketCount=0` 且 `rxHeader` 全零，说明 **Motor Pilot 也从未与此设备
-建立过连接**。"连不上"不是本客户端的特有问题。
+**旁证**：`syncPacketCount=0` 且 `rxHeader` 只含包头，说明 **Motor Pilot 也从未与此
+设备建立过连接**。"连不上"不是本客户端的特有问题。
 
 <details>
-<summary>排查中两个容易踩的坑</summary>
+<summary>排查中修正过的三个错误判断（留作教训）</summary>
 
-**DMA 通道号不能假设。** 本设备接收用 **DMA1 通道 0**，而 `usart_aspep_driver.c`
-的代码顺序容易让人以为是通道 1。判定方法：看 `PAR` 是否等于 `USART2->RDR`、
-`MAR` 是否等于 `rxHeader` 的地址。误看通道会得出"接收 DMA 未武装"的错误结论。
+1. **误判"接收 DMA 未武装"**：看错了通道（看的 ch1，实际是 ch0）。枚举 DMA 时必须
+   按 `PAR == USART2->RDR`、`MAR == rxHeader` 判定，不能假设通道号。
+2. **误判"`ASPEP_start()` 从未被调用"**：只看了内存结果没验证调用。实测断点确实
+   命中，调用栈 `main → MX_MotorControl_Init → MCboot → ASPEP_start` 完全正常。
+3. **误判"`Capabilities` 被越界写清零"**：那是目标被 OpenOCD 挂起在启动阶段的
+   **瞬时值**；自由运行后它是正确的。**读目标内存前必须确认目标是自由运行的。**
 
-**ST-Link 的硬件断点槽很有限**，且 `monitor reset` 不清除它们。多次 GDB 会话后
-`watch` 会插入失败（`Could not insert hardware watchpoint`）。排查时要么重启
-OpenOCD，要么改用"分段断点 + 打印"的方式，不要依赖硬件监视点。
+另一个操作坑：ST-Link 硬件断点槽有限且 `monitor reset` 不清除，多次 GDB 会话后
+`watch` 会插入失败；排查应改用"分段断点 + 打印"。
 </details>
 
 ## 6. 建议的下一步
 
-**重建并重烧 Motor_Profiler 固件**。虽然已确认板上固件就是这份 ELF 构建的，但
-`Capabilities` 被清零说明存在**内存越界写**，而这类问题常常与"板上跑的不是最新
-构建"混在一起，先用一次干净的重烧排除后者。
+**问题在 Motor_Profiler 工程内部，不在 FluxRT 范围内。** 修法很清楚：在
+`ASPEP_HWDataReceivedIT` 的 `BEACON`/`PING` 分支里，把控制帧负载也读进来，
+再置 `NewPacketAvailable`：
 
-重烧后：
+```c
+case BEACON:
+case PING:
+{
+  /* 先武装 DMA 收取控制帧的 4 字节负载，再置标志 */
+  pHandle->fASPEP_cfg_recept(pHandle->ASPEPIp, pHandle->rxBuffer, ASPEP_CTRL_SIZE);
+  pHandle->ASPEP_TL_State = WAITING_PAYLOAD;
+  pHandle->NewPacketAvailable = true;
+  break;
+}
+```
+
+并在 `WAITING_PAYLOAD` 分支里对控制帧同样置 `NewPacketAvailable`，让
+`ASPEP_RXframeProcess` 拿到负载后再重新武装包头接收。
+
+修好后用一条命令即可验证：
 
 ```powershell
 python tools/motor_profiler_probe.py --port COM6 --all
 ```
 
-若 `Capabilities` 仍被清零，则应在**该工程内部**继续定位越界写，建议做法：
-
-1. 给 `aspepOverUartA` 前后各加一段哨兵字节（如 `0xDEADBEEF`），在 `main` 循环里
-   周期检查哨兵是否被破坏——这能把"越界写"变成可观测事件。
-2. 把 `Capabilities` 从结构末尾挪到结构中部（临时改动），若问题消失即确认是
-   越界写而不是逻辑清零。
-3. 检查 `MCP_Over_UartA`（紧随其后）与 `MCPSyncRXBuff` 的边界，以及
-   `usart_aspep_driver.c` 的 DMA 长度配置。
+判据：`ASPEP_State` 应从 0 变为 1（CONFIGURED）或 2（CONNECTED），且
+`maxRXPayload` 从 0 变为 256。
 
 ### 一个必须记住的操作教训
 
 **OpenOCD 连接时会挂起 CPU。** 排查过程中多次出现"设备无响应"，实际是调试会话
 把目标停在 `main.c:122` 的 `while(1)` 里。用 `-c 'reset run'` 启动，并让目标在
-断开后自由运行。
+断开后自由运行；**读内存前务必确认目标在跑**。
 
 ## 7. 相关文件
 
