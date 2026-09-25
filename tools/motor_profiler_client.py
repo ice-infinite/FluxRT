@@ -537,6 +537,7 @@ class MotorProfilerClient:
         serial_factory: Optional[Callable[..., object]] = None,
         log: Optional[Callable[[str], None]] = None,
         host_capabilities: Optional[Capabilities] = None,
+        inter_byte_delay_s: float = 0.0,
     ) -> None:
         self.port = port
         self.baudrate = baudrate
@@ -549,6 +550,15 @@ class MotorProfilerClient:
         self.connected = False
         self.sync_packet_count = 0
         self.last_packet_numbers: list = []
+        # 字节间延时：**实机需要，默认关闭**。在 1843200 baud 下一次写完一帧时，
+        # 目标侧偶发收不全（实测同一帧有时被处理、有时完全没有反应）。CLI 在真实
+        # 串口路径上默认给 1 ms/字节。默认 0 是为了让离线测试不必等真实时间。
+        # Inter-byte pacing: needed on real hardware, off by default. Writing a whole
+        # frame in one go at 1843200 baud is occasionally not fully received by the
+        # target (measured: the same frame is sometimes processed, sometimes ignored).
+        # The CLI defaults to 1 ms per byte on a real port; the library default is 0
+        # so offline tests do not wait on real time.
+        self.inter_byte_delay_s = inter_byte_delay_s
         # 控制端能力：默认取官方 ``Src/mcp_config.c`` 里 ``aspepOverUartA`` 的值，
         # 因为 ``ASPEP_CheckBeacon`` 要求双方严格相等，猜错就永远连不上。
         # Controller capabilities, defaulted to the official ``aspepOverUartA``
@@ -589,8 +599,26 @@ class MotorProfilerClient:
     # -- 低层收发 / low-level I/O -------------------------------------------
 
     def _write(self, data: bytes) -> None:
+        """按 ``inter_byte_delay_s`` 逐字节写，避免目标收不全。
+        Write byte by byte honouring ``inter_byte_delay_s`` so the target receives
+        every byte.
+
+        用 ``getattr`` 取 ``flush``：假串口与某些串口实现没有这个方法，直接调用会
+        让离线测试全部报错。
+        ``flush`` is looked up with ``getattr`` because fake ports and some real ones
+        do not provide it.
+        """
         self._log(f"TX {len(data):3d}B  {data.hex(' ')}")
-        self._ser.write(data)
+        if self.inter_byte_delay_s <= 0.0:
+            self._ser.write(data)
+            return
+        flush = getattr(self._ser, "flush", None)
+        for index, byte in enumerate(data):
+            self._ser.write(bytes((byte,)))
+            if flush is not None:
+                flush()
+            if index + 1 < len(data):
+                time.sleep(self.inter_byte_delay_s)
 
     def _read_exact(self, count: int, deadline_s: float) -> bytes:
         """在截止时间内读满 ``count`` 字节。
@@ -1014,6 +1042,11 @@ class FakePerformer:
         del self.tx[:count]
         return chunk
 
+    def flush(self) -> None:
+        """``serial.Serial.flush`` 的空实现；假串口没有发送缓冲。
+        No-op stand-in for ``serial.Serial.flush``; the fake port has no TX buffer."""
+        return None
+
     def reset_input_buffer(self) -> None:
         pass
 
@@ -1095,6 +1128,9 @@ def _cmd_probe(args: argparse.Namespace) -> int:
         baudrate=args.baud,
         serial_factory=factory,
         log=lambda msg: print(msg, file=sys.stderr),
+        # 真实串口按 1 ms/字节发送；模拟模式不需要节奏。
+        # Real ports pace at 1 ms per byte; simulation needs no pacing.
+        inter_byte_delay_s=0.0 if args.simulate else args.byte_delay_ms / 1000.0,
     ) as client:
         client.connect()
         report: dict = {"identity": {}, "thresholds": {}, "results": {}, "raw": {}}
@@ -1139,6 +1175,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     probe = sub.add_parser("probe", help="只读探针，不启动电机 / read-only probe")
     probe.add_argument("--simulate", action="store_true", help="用假串口自测 / use the fake port")
+    probe.add_argument("--byte-delay-ms", type=float, default=1.0,
+                       help="字节间延时，实机默认 1 ms；收到不到应答时调大 / "
+                            "inter-byte delay in ms, 1 by default on a real port")
     probe.set_defaults(func=_cmd_probe)
     return parser
 

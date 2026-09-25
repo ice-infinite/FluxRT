@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import struct
+import time
 import sys
 import unittest
 from pathlib import Path
@@ -720,6 +721,129 @@ class RegisterAccessTests(unittest.TestCase):
                 client.transact(mpc.mcp_command_request(mpc.STOP_MOTOR))
         finally:
             client.close()
+
+
+class RecordingPort:
+    """只记录 ``write`` 调用大小的假串口，用于单独验证 ``_write`` 的节奏。
+    A minimal port that only records write sizes so ``_write`` can be tested in
+    isolation, without a frame parser in the way."""
+
+    def __init__(self) -> None:
+        self.calls: list = []
+        self.flushes = 0
+
+    def write(self, data: bytes) -> int:
+        self.calls.append(len(data))
+        return len(data)
+
+    def flush(self) -> None:
+        self.flushes += 1
+
+    def read(self, count: int = 1) -> bytes:
+        return b""
+
+    def close(self) -> None:
+        pass
+
+
+class WritePacingTests(unittest.TestCase):
+    """字节间延时的实测依据与实现。 / The measured basis and implementation of pacing.
+
+    实机观察：在 1843200 baud 下把一帧 8 字节**一次写完**，目标有时处理、有时完全
+    无反应；逐字节加 1 ms 间隔时回应稳定得多。这是 ST-Link VCP 的转发时序问题，
+    不是波特率错误——设备能正确解出错误码就说明波特率是对的。
+    Measured: writing a whole 8-byte frame in one go at 1843200 baud is sometimes
+    processed and sometimes ignored; 1 ms per byte is far more reliable. This is a
+    VCP forwarding effect, not a baud-rate error.
+    """
+
+    def _client_with_port(self, delay: float):
+        client = mpc.MotorProfilerClient(port="FAKE", inter_byte_delay_s=delay)
+        port = RecordingPort()
+        client._ser = port
+        return client, port
+
+    def test_default_has_no_pacing(self) -> None:
+        """库默认不延时，否则离线测试要等真实时间。
+        The library defaults to no pacing, or offline tests would wait on real time."""
+        self.assertEqual(mpc.MotorProfilerClient(port="FAKE").inter_byte_delay_s, 0.0)
+
+    def test_fast_path_writes_whole_buffer_at_once(self) -> None:
+        """无延时时必须一次写完，不能被拆成逐字节。
+        With no delay the frame must go out in one call, not byte by byte."""
+        client, port = self._client_with_port(0.0)
+        client._write(b"\x01\x02\x03\x04")
+        self.assertEqual(port.calls, [4])
+
+    def test_paced_path_writes_one_byte_per_call(self) -> None:
+        """设了延时时必须逐字节写、每字节 flush，且只等 n-1 个间隔。
+        With pacing each byte must be its own write, each must be flushed, and there
+        must be exactly n-1 gaps.
+
+        这里统计 ``time.sleep`` 的调用而不是量墙钟：墙钟会让测试受机器负载与
+        首次导入开销影响，实测出现过偶发失败。
+        This counts ``time.sleep`` calls instead of measuring wall-clock time, which
+        proved flaky under machine load and first-import cost.
+        """
+        client, port = self._client_with_port(0.001)
+        sleeps: list = []
+        original_sleep = mpc.time.sleep
+
+        def recording_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+
+        mpc.time.sleep = recording_sleep  # type: ignore[assignment]
+        try:
+            client._write(b"\x01\x02\x03\x04")
+        finally:
+            mpc.time.sleep = original_sleep  # type: ignore[assignment]
+
+        self.assertEqual(port.calls, [1, 1, 1, 1])
+        self.assertEqual(port.flushes, 4)
+        # 4 字节 => 3 个间隔，不是 4 个（末字节后不等待）。
+        # Four bytes give three gaps, not four; no sleep after the last byte.
+        self.assertEqual(sleeps, [0.001, 0.001, 0.001])
+
+    def test_paced_path_honours_the_configured_delay(self) -> None:
+        """延时值必须真的用上去，不能被写死。
+        The configured delay must actually be used, not hard-coded."""
+        client, port = self._client_with_port(0.0025)
+        sleeps: list = []
+        original_sleep = mpc.time.sleep
+        mpc.time.sleep = lambda s: sleeps.append(s)  # type: ignore[assignment]
+        try:
+            client._write(b"\x01\x02")
+        finally:
+            mpc.time.sleep = original_sleep  # type: ignore[assignment]
+        self.assertEqual(port.calls, [1, 1])
+        self.assertEqual(sleeps, [0.0025])
+
+    def test_single_byte_frame_never_sleeps(self) -> None:
+        """单字节帧没有间隔，不能引入无谓延时。
+        A one-byte frame has no gap and must not sleep."""
+        client, port = self._client_with_port(0.001)
+        sleeps: list = []
+        original_sleep = mpc.time.sleep
+        mpc.time.sleep = lambda s: sleeps.append(s)  # type: ignore[assignment]
+        try:
+            client._write(b"\xAA")
+        finally:
+            mpc.time.sleep = original_sleep  # type: ignore[assignment]
+        self.assertEqual(port.calls, [1])
+        self.assertEqual(sleeps, [])
+
+    def test_pacing_works_without_a_flush_method(self) -> None:
+        """串口对象没有 ``flush`` 时不能崩：假串口与部分实现确实没有。
+        Pacing must not crash when the port has no ``flush``; fake ports and some
+        real implementations lack it."""
+        class NoFlushPort(RecordingPort):
+            flush = None  # type: ignore[assignment]
+
+        client = mpc.MotorProfilerClient(port="FAKE", inter_byte_delay_s=0.001)
+        port = NoFlushPort()
+        client._ser = port
+        client._write(b"\x01\x02\x03\x04")
+        self.assertEqual(port.calls, [1, 1, 1, 1])
 
 
 class CliTests(unittest.TestCase):
