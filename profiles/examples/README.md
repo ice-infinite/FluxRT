@@ -33,7 +33,7 @@ python tools/motor_profiler_convert.py convert `
 ```
 
 `--flux-convention` 是**必填**：`Ke` 的单位口径存在 √3 倍歧义，工具不会替你选。
-详见 [参数候选与审批流程](../parameters/参数候选与审批流程.md)。
+详见 [参数候选与审批流程](../../docs/parameters/参数候选与审批流程.md)。
 
 ## 样例会复现什么
 
