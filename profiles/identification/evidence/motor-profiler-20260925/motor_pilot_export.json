@@ -1,0 +1,15 @@
+{
+  "id": "GBM2804H-100T",
+  "label": "GBM2804H-100T",
+  "hardwareFamily": "MOTOR",
+  "description": "Read back from ST Motor Profiler on NUCLEO-G431RB + X-NUCLEO-IHM16M1, 2026-09-25",
+  "compatibility": ["FOC", "sixStep"],
+  "polePairs": 7,
+  "nominalDCVoltage": 11.833618,
+  "nominalCurrent": 0.8,
+  "maxRatedSpeed": 1572,
+  "rs": 4.693368,
+  "ls": 0.000954,
+  "magneticStructure": { "type": "SM-PMSM" },
+  "BEmfConstant": 2.714620
+}
