@@ -254,7 +254,7 @@ rg -n "FluxRT|fluxrt|STM32G431|FOC:" . `
 | `foc/SConscript` | 当前平台源文件路径 |
 | `.vscode/launch.json` | MCU 型号、ELF 路径和调试器 |
 | `.vscode/tasks.json` | 任务显示名称，可选 |
-| `README.md` 和 `docs` | 工程名称、板卡和安全边界 |
+| `算法库总览.md` 和 `docs` | 工程名称、板卡和安全边界 |
 
 完成后再次运行同一条 `rg`，确认没有不应保留的旧工程名称。
 

@@ -15,7 +15,7 @@
 下一阶段或把功能改为默认开启。
 
 每项整改的模块归属、目标目录、依赖规则和实施工作包见
-[FOC 整改工程架构分配与代码落位规范](REMEDIATION_ARCHITECTURE_ALLOCATION.md)。
+[FOC 整改工程架构分配与代码落位规范](整改架构与职责分配.md)。
 
 ## 2. 当前经过核实的基线
 
@@ -24,7 +24,7 @@
 | 控制器 | STM32G431RBT6，170 MHz，128 KiB Flash | 只要换算法就有充足资源 |
 | PWM/控制环 | 当前均约 12 kHz | 已经实现高频 PWM、低频控制环解耦 |
 | 闭环 WCET | 已记录最大约 10,083 cycles；软件截止 12,500 cycles | `pre/control/post` 三个独立最大值可以相加 |
-| Flash | 当前重建后 `text + data = 127,052 B`，剩余约 4,020 B，即 3.07% | 只剩 989 B，或只改 `opt-level` 就一定解决 |
+| Flash | A14 Diagnostic `text + data = 126,748 B`（96.70%）；Production 为 95,700 B（73.01%） | Production 容量充足就等于闭环和发布已经验证 |
 | 电机参数 | Rs=5.29 Ω、Ld=Lq=1.058 mH、磁链来自 Workbench | 参数已经由当前实物辨识 |
 | 无感闭环 | 两轮 5 秒短时接管成功，上电默认仍关闭 | 已完成全工况或量产验证 |
 | 死区补偿 | 仅 Host/Rust/Matlab 仿真有实验实现 | MCU 目标固件已经补偿 |
@@ -34,11 +34,11 @@
 
 基线资料：
 
-- [工程架构与安全边界](ARCHITECTURE.md)
-- [开环到无感闭环接管](CLOSED_LOOP_HANDOFF.md)
-- [仿真与实机相关性验证](SIMULATION_HARDWARE_CORRELATION.md)
-- [ST MCSDK 参考参数与 PC 仿真](ST_MCSDK_REFERENCE_AND_SIMULATION.md)
-- [硬件数学加速与 CPU 回退](HARDWARE_MATH_ACCELERATION.md)
+- [工程架构与安全边界](架构与安全边界.md)
+- [开环到无感闭环接管](无感闭环接管.md)
+- [仿真与实机相关性验证](仿真实机相关性验证.md)
+- [ST MCSDK 参考参数与 PC 仿真](ST_MCSDK参考参数与仿真.md)
+- [硬件数学加速与 CPU 回退](硬件数学加速与CPU回退.md)
 
 ## 3. 借鉴边界
 
@@ -117,16 +117,16 @@ TIM1 ARR，否则 PI、观察器、Rev-Up、trace 分频和死区补偿都会使
 | 优先级 | 当前缺口 | 改进内容 | 主要位置 | 完成证据 |
 |---|---|---|---|---|
 | P0 | 时序字段是独立最大值 | 增加同一拍完整 ISR WCET 和分段记录 | C 平台层 | DWT 与 GPIO 示波器结果一致 |
-| P0 | Flash 仅余约 3.07% | 对比 `O3/s/z`，裁剪格式化、libm 和调试功能 | 构建系统 | size/map 报告和 WCET 同时通过 |
+| P0 | Diagnostic Flash 仅余 560 B（0.43%） | 继续拆分应用层，裁剪重复格式化和调试功能 | 构建系统/应用层 | size/map 报告和 WCET 同时通过 |
 | P0 | 没有独立轴端真值 | 接编码器或外部测速仪 | 平台层/测试台 | 可计算真实角度和速度误差 |
 | P1 | PWM 与控制环绑定 12 kHz | 评估 24 kHz PWM + 12 kHz 控制 | TIM1/ADC/ABI | 无漏采样、无超时、声学和波形改善 |
 | P1 | 重复电流变换 | 每拍只做一次 Clarke 并共享 αβ | Rust control/bridge | 数值对拍一致，WCET 降低 |
 | P1 | CORDIC 适配偏重 | 对比当前、打包 Q15、CPU 快速近似 | 数学后端 | 误差、平均时间、WCET 三项报告 |
 | P1 | trace 与生产路径混合 | 生产构建可编译关闭，诊断构建保留 | Kconfig/C 平台 | 两类构建均可复现 |
-| P2 | 目标固件无逆变器补偿 | 加入可关闭的死区/管压降电压模型 | Rust control/bridge | Host、MATLAB、低压实机逐级通过 |
-| P2 | 观测器只用命令占空比 | 增加 `CommandModel/Measured/Hybrid` 电压源 | Rust observer/平台 | 切换无角度跳变，失效可回退 |
+| P2 | target 分层补偿已接入，无功率 S4 已通过，但未做带功率 WCET/A-B | 在默认 `0/0/0` 基线上按 1/2/3/4 阶段逐级验证 | Rust control/bridge | Host、MATLAB、无功率 S4 已通过；待完整 WCET 和低压 S5 |
+| P2 | CommandModel 已集中，Measured/Hybrid 仍不可用 | 保留分层回退；相电压只有通过质量门才能进观测器 | Rust voltage/observer/平台 | 默认数值不变；切换无角度跳变，失效可回退 |
 | P2 | 参数来自数据库 | 自动辨识 Rs、平均 L、Ld-Lq、磁链 | 标定状态机 | 重复测量误差和温升条件有记录 |
-| P3 | 未使用板载 BEMF 网络 | 接入 PC0/PC1/PC3 对应 BEMF ADC | STM32G431 平台 | 示波器、ADC 和重构电压对拍 |
+| P3 | 板载 BEMF 仅完成 A17 只读原始码固定窗 | 标定 PC0/PC3/PC1，增加有效性与混合电压源 | STM32G431 平台 | 示波器、ADC 和重构电压对拍 |
 | P3 | 无交叉/BEMF 前馈 | 增加可选 dq 解耦 | Rust control | 仿真和实机扰动指标改善 |
 | P3 | 限幅策略固定 | 保留圆限幅并增加可选 d 轴优先模式 | Rust control | 饱和区稳定且 anti-windup 正确 |
 | P4 | 无延迟补偿 | 根据实测 ADC→PWM 延迟增加角度补偿 | Rust control/config | 编码器真值下相位误差下降 |
@@ -150,7 +150,7 @@ TIM1 ARR，否则 PI、观察器、Rev-Up、trace 分频和死区补偿都会使
 - [x] 接入独立速度/角度真值之前，不提高默认闭环权限。
 
 本轮 DWT、size/map 和实机结果见
-[`performance/2026-09-23-a0-correlated-wcet-baseline.md`](performance/2026-09-23-a0-correlated-wcet-baseline.md)。
+[`performance/2026-09-23-A0关联WCET基线.md`](performance/2026-09-23-A0关联WCET基线.md)。
 PA5 示波器对拍与独立轴端真值仍未完成，因此阶段 0 只完成软件和板端 DWT 基线，不能
 标记为完整硬件验收。
 
@@ -196,10 +196,24 @@ docs/performance/<date>-<commit>-baseline.md
 - 所有安全测试、仿真和短时实机基线不退化。
 
 构建配置 A/B、map 审计和 Diagnostic/Production 分档已完成，结果见
-[`performance/2026-09-23-a1-build-profile-matrix.md`](performance/2026-09-23-a1-build-profile-matrix.md)。
-当前默认 Rust `s`；Production 候选剩余 29.04% Flash，且 trace 关闭时完整 ISR 为
-8,160 cycles。阶段 1 尚未完成共享 Clarke、中间量复用和 CORDIC 事务优化，不能把本次
-构建分档标记为整个阶段 1 完成。
+[`performance/2026-09-23-A1构建档矩阵.md`](performance/2026-09-23-A1构建档矩阵.md)。
+当前默认 Rust `s`；构建分档已完成。后续共享 Clarke、混合 CORDIC/FPU 模长优化、
+`sin/cos`/`atan2` 分项基准和固定延迟候选 A/B 的最新尺寸与 WCET 见各自阶段报告。
+阶段 1 已完成单次 CORDIC 未就绪故障注入和 CPU 快速近似同口径 A/B。CPU-fast 在专项
+开环短测中把最坏完整 ISR 从 7,975 降到 7,771 cycles，但没有实机闭环角度真值，因此
+保持默认关闭。打包 Q15/Q31 的进一步事务候选仍在积压项中；数学微优化不再阻塞阶段 2。
+
+A13 已重建 Production 并完成同口径 582 rpm 开环 5 s 对比：ROM/RAM 分别比 Diagnostic
+少 31,056/5,264 B，但 WCET 只从 8,906 降到 8,855 cycles。说明分档成功解决容量问题，
+没有显著改变控制计算成本。Production 当前无法在线把闭环从安全默认 0 改成 1，闭环
+产品参数必须以后通过带版本/CRC/审批的不可变档案注入，不能恢复现场 `foc_cfg`。详见
+[`performance/2026-09-24-A13-Production尺寸与开环WCET.md`](performance/2026-09-24-A13-Production尺寸与开环WCET.md)。
+
+A14 已实现该档案的最小安全骨架：ABI V12 由 Rust 对完整配置做规范化
+CRC，C 应用层校验 schema/revision、板卡/电机 ID、档案 CRC 与审批位依赖，
+失败则不 configure/不 bind。当前 revision 1 为结构有效但 `approvals=0`，所以
+仍是安全开环；它没有把 Workbench 参数升格为已辨识参数。详见
+[`performance/2026-09-24-A14-ProductionMotorProfile.md`](performance/2026-09-24-A14-ProductionMotorProfile.md)。
 
 #### 1.2 数据流复用
 
@@ -217,10 +231,10 @@ Ia/Ib/Ic
 桥接层为接管初始化计算的附加 Clarke 只在状态切换时需要，不应强行并入稳态快环。
 
 电流 Clarke 共享入口和实时桥接复用已经完成，结果见
-[`performance/2026-09-23-a2-shared-current-clarke.md`](performance/2026-09-23-a2-shared-current-clarke.md)。
+[`performance/2026-09-23-A2共享电流Clarke.md`](performance/2026-09-23-A2共享电流Clarke.md)。
 数值回归和三次实机短测通过，但完整 ISR WCET 从旧基线 8,257 变为 8,267 cycles，未取得
-可测降幅。因此本节的数据流结构已经落地，“WCET 降低”验收门仍需由后续 CORDIC 事务
-优化完成，不能把路线阶段 1 整体标记为完成。
+可测降幅。因此本节的数据流结构已经落地；后续混合 CORDIC/FPU 和 CPU-fast A/B 已补上
+可测 WCET 收益，本项不再阻塞阶段 2。
 
 #### 1.3 数学后端基准
 
@@ -233,6 +247,35 @@ Ia/Ib/Ic
 比较项目：最大角度误差、最大模长误差、平均 cycles、最坏 cycles、超时行为和故障
 计数。不能仅因为 ST 或 VESC 不轮询，就删除当前超时保护；若采用固定延迟读取，应先
 证明寄存器时序，并保留启动自检或健康计数。
+
+第一项优化已经完成：G431 的矢量模长从 CORDIC Q15 事务改为 FPU 平方和加
+`VSQRT.F32`。Diagnostic `s` 三次 5 秒开环短测的最坏完整 ISR 从共享 Clarke 基线
+8,267 cycles 降至 7,957 cycles，下降 310 cycles（3.75%）；BIN 从 122,788 B 降至
+122,516 B。一个“明确位于圆限幅内就跳过模长”的候选反而升至 8,429 cycles，已回退。
+详见 [`performance/2026-09-24-A3混合CORDIC与FPU.md`](performance/2026-09-24-A3混合CORDIC与FPU.md)。
+当前 CORDIC `sin/cos`、`atan2` 的停机分项基线也已完成，见
+[`performance/2026-09-24-A3-CORDIC分项基准.md`](performance/2026-09-24-A3-CORDIC分项基准.md)。
+三轮各 1,024 次调用全部成功；`sin/cos` 原始平均 287～288 cycles、最大误差
+1,013 ppb，`atan2` 原始平均 357～358 cycles、最大误差 1 µrad。专用基准增加
+2,428 B，已由默认关闭的 Kconfig 隔离。后续加入所有档位共用的 CORDIC 超时复位路径后，
+当前普通 Diagnostic 为 122,596 B；A3 的 7,957-cycle 实机 WCET 是该阶段历史基线。
+
+固定延迟读取候选也已完成同口径 A/B，见
+[`performance/2026-09-24-A4-CORDIC固定延迟对比.md`](performance/2026-09-24-A4-CORDIC固定延迟对比.md)。
+候选采用 6 NOP 后单次检查 `RRDY`，没有盲读结果；三轮完整 ISR 从轮询的 7,957 cycles
+降到 7,888 cycles，节省 69 cycles，且均为 0 invalid/miss/error/fault。随后补齐专项实时
+成功/回退/未就绪/恢复计数，并分别注入一次 `sin/cos` 与 `atan2` 未就绪：两者均恰好
+回退并复位一次，后续约 6.36 万拍成功，最坏 8,225/12,500 cycles、0 miss/error/fault。
+详见 [`performance/2026-09-24-A5-CORDIC健康计数与故障恢复.md`](performance/2026-09-24-A5-CORDIC健康计数与故障恢复.md)。
+由于 69-cycle 收益很小而固定等待依赖时钟、Flash wait-state 和工具链，候选继续默认关闭，
+Production 继续使用有界轮询。
+
+可移植 CPU 快速近似也已完成同口径 A/B，见
+[`performance/2026-09-24-A6-CPU快速数学候选对比.md`](performance/2026-09-24-A6-CPU快速数学候选对比.md)。
+Host 密集误差门为 `sin 4e-6`、`cos 2.6e-5`、`atan2 13 urad`；专项实机三轮最坏
+完整 ISR 为 7,771 cycles，比 CORDIC 对照节省 204 cycles。由于实机为开环且没有独立角度
+真值，候选继续默认关闭。单次未就绪以外的硬件故障、长测和打包 Q15/Q31 事务仍未覆盖，
+不能删除默认超时保护，也不能把候选误读为闭环质量已验证。
 
 ### 阶段 2：分离 PWM、控制环和观察器频率
 
@@ -254,7 +297,7 @@ PWM：     24 kHz
 - 完整控制仍有约 83.3 μs 周期预算；
 - 必须建模“采样到新占空比实际生效”的额外延迟。
 
-这是当前约 10,083 cycles 快环更现实的起点。
+这是当前实机记录最坏约 10,602 cycles 快环更现实的起点。
 
 #### 方案 B：24 kHz 都采样，每两拍执行一次完整控制
 
@@ -277,10 +320,45 @@ PWM：     24 kHz
 24 kHz 载波有机会降低当前 12 kHz 可闻音，但 12 kHz 占空比更新仍可能产生边带，
 因此必须用示波器和声学实测确认，不能只凭载波频率判定噪声消失。
 
+#### 阶段 2 当前进度（2026-09-24）
+
+方案 A 已完成 PC/Rust、MATLAB/Simulink、目标构建、无功率 S4 和受限空载 S5，但候选
+仍不批准成为默认。A8/A9 的 `TIM1 Update TRGO -> ADC` 设计只证明了 12 kHz 事件频率；
+首次功率短测的电流 RMS 仅约 3～8 mA，`Iq` 约 2～5 mA，暴露出三分流采样窗口错误，
+该方案已经废弃。
+
+当前候选改为 `TIM1 OC4REF -> TIM2 ITR0 二分频 -> TIM2 Update TRGO -> ADC`：TIM1
+保持 24 kHz 和 OC4 有效采样窗口，TIM2 每两个 OC4REF 上升沿触发一次 12 kHz ADC/
+完整控制。HotPlug 读回 TIM1 TRGO=OC4REF、ARR=3541、RCR=3、CCR4=ARR-1；TIM2
+外部时钟模式 1、ITR0、ARR=1；ADC1/2 均选择 TIM2 TRGO。同步间隔平均约 14,163
+cycles，候选开环电流 RMS、`Iq`、`Vq` 已与默认 12/12 kHz 基线基本一致。
+
+闭环三轮短测中，默认 12/12 kHz 完成 2/3，修正版 24/12 kHz 完成 1/3；失败均为
+`OBSERVER_LOST (0x8)`，两者均无 deadline miss。样本不足以估算可靠性，但候选没有
+显示收益，板上已经恢复默认 12/12 kHz。现阶段优先整改默认频率下的 BEMF-SMO/PLL
+可靠性、电压模型和相位延迟，不继续用提频掩盖观察器问题。详见
+[`performance/2026-09-24-A10-24k12k受限实机AB.md`](performance/2026-09-24-A10-24k12k受限实机AB.md)；
+A8/A9 仅保留为被后续证据纠正的历史记录。
+
 ### 阶段 3：建立统一的逆变器电压估计层
 
 当前控制器输出 `PwmCommand`，观察器再从上一拍 PWM 和母线电压重构 αβ 电压。目标
 是增加独立的电压估计对象：
+
+A19.1 已完成第一步骨架：`foc-control/src/voltage.rs` 定义稳定的
+`ObserverVoltageSource::{CommandModel, PhaseVoltage, Hybrid}`，默认和当前唯一可用来源均为
+`CommandModel`；两个观察器后端已经走统一入口，公式和 ABI 均未改变。ST 参考工程同样把
+上一拍 `Valphabeta` 与平均 Vbus 送入 STO，并不使用 TP6/7/8 相端 ADC。IHM16M1 的
+10 kΩ/2.2 kΩ 只作为 `nominal-not-calibrated` 诊断模型，明确 `observer=disabled`。
+
+CM2 已完成纯公式与状态层：`foc-algorithm/inverter.rs` 是物理公式唯一实现，
+`foc-control/voltage.rs` 持有电流极性滤波和组合。CM3 已用 ABI V13/config V7 把它
+接入 target 快环，总门、观测器修正和 PWM 前馈独立，默认为 `0/0/0`；
+`FTIMING` V2 在每条 WCET 记录中带上三门标签。独立 MATLAB 对拍 7 拍最大绝对
+误差仍为 `4.30e-08`。无功率 S4 已完成 Calibration 拒绝门和 Diagnostic stage
+`0/1/2/3/4/0` 标签验证；期间发现并修正 `foc_cfg` 的 tshell 栈溢出，板上最终恢复
+stage 0、Vbus 0 mV、输出关闭。详见
+[`performance/2026-09-24-CM3-Target逆变器补偿配置与时序标签.md`](performance/2026-09-24-CM3-Target逆变器补偿配置与时序标签.md)。
 
 ```rust
 pub enum ObserverVoltageSource {
@@ -312,14 +390,19 @@ PI/SVPWM 输出 ───────────────→ 实际 PWM
 
 实施顺序：
 
-1. 把当前 Host-only 补偿移动到纯 Rust、可同时供 Host 与 target 编译的模块；
-2. 默认 `enabled=false`，不改变现有目标行为；
-3. 用低通后的 αβ/dq 电流构造三相极性，同时保留软零带；
-4. 明确 duty、αβ 调制和实际伏特三种量纲，不能直接照搬 VESC 系数；
-5. 在 PC 和 MATLAB 扫描死区、零带、滤波系数和补偿增益；
-6. 增加管压降、母线纹波、ADC 量化和延迟模型；
-7. 先只修正观察器电压，再单独评估 PWM 前馈；
-8. 目标固件首次启用时限制为低压、限流、空载、短时间、可立即停机。
+1. [x] 把当前 Host-only 补偿移动到纯 Rust、可同时供 Host 与 target 编译的模块；
+2. [x] 默认 `enabled=false`，不改变现有目标行为；
+3. [x] 用同系数三相低通（平衡系统与 αβ 滤波等价）构造极性，保留软零带；
+4. [x] 明确 duty、实际伏特和损失符号，没有直接照搬 VESC 系数；
+5. [ ] PC/MATLAB 数值对拍已通过，但多工况参数网格扫描仍待做；
+6. [ ] 等效器件压降已实现；母线纹波、ADC 量化和温度漂移仍待补；
+7. [x] 观测器电压修正与 PWM 前馈开关独立，可按先后顺序消融；
+8. [x] 目标固件分层启用门和 WCET 模式标签已在 CM3 接入，默认全关；
+9. [x] CM3 无功率 S4 和首轮低压开环 S5 已完成；五档均无 error/miss/fault，最坏
+   stage 4 WCET 10,462/12,500 cycles；CM4.1 已修正终速捕获、去相关重试和单向接管，
+   stage 2 完成 3/3 冷启动与 30 s 受限闭环，0 error/miss/fault；CM4.2 进一步把
+   接管支撑和速度 PI 预装拆成独立参数，582 rpm 再次完成 3/3 + 30 s，实机观察峰值
+   从 894 降到 722 rpm。仍无独立速度真值，不升格为 Production；下一步扩展多转速/方向。
 
 验收不能只看稳态转速偏差。至少比较：
 
@@ -367,19 +450,36 @@ Rs、Ld、Lq、磁链、拟合误差、重复次数、是否人工批准
 
 ### 阶段 5：接入 IHM16M1 相电压/BEMF 采样
 
-IHM16M1 原理图包含 `BEMF1/2/3` 分压与保护网络。当前平台只配置了电流、母线、
-温度和电位器 ADC，尚未使用这些信号。
+IHM16M1 原理图包含 `BEMF1/2/3` 分压与保护网络。A17 已在 Diagnostic 平台接入
+PC0/PC3/PC1 的 12 kHz、256 拍 ADC 原始码固定窗，并完成一次停机无功率采集；这些值
+没有标定，也没有进入控制或观察器。
+
+A18 又把固定窗拆入独立 Calibration 构建档：该档不含在线调参、trace 或数学诊断，
+应用层和平台层均拒绝 arm；同时建立板卡/固件/多点拟合/证据哈希/人工审批绑定的
+`fluxrt-phase-voltage-calibration-v1` 契约。三档目标构建已通过，但未烧录、未测电压。
+详见[A18 专项报告](performance/2026-09-24-A18-Calibration构建档与标定契约.md)。
+
+A19 已完成 Calibration 首次 S4 下载、启动、`foc_start` 拒绝门和停机 256 拍原始码
+基线；未运行电机。由于尚无可信万用表参考值，偏置、增益和实际分压拟合仍未完成，
+不能进入动态相序阶段。详见
+[A19 专项报告](performance/2026-09-24-A19-Calibration板端安全门与静态基线.md)。
 
 实施前先完成：
 
-- [ ] 按原理图和 NUCLEO-G431RB 映射确认 PC0、PC1、PC3 对应关系；
+- [x] 按原理图和 NUCLEO-G431RB 映射确认 U/V/W 为 PC0/PC3/PC1；
 - [ ] 测量分压比、二极管压降、输入 RC 和 ADC 源阻抗；
-- [ ] 确认 ADC1/ADC2 的通道冲突、注入组/规则组资源和采样窗口；
+- [x] 完成 ADC1 注入 rank 资源和 ADC2 电流通道静态冲突检查；动态可用采样窗仍待示波器确认；
 - [ ] 示波器同时观察相端、分压端、PWM 和 ADC 触发；
-- [ ] 先只采集 trace，不参与控制；
+- [x] 先只采集原始码固定窗，不参与控制；
+- [x] 建立独立 Calibration 构建档、双层禁启转和标定记录拒绝门；
 - [ ] 与 `duty × Vbus`、死区模型和三相重构结果离线对比；
 - [ ] 增加开路、饱和、越界和不一致检测；
 - [ ] 失效时自动回退 `CommandModel`，而不是继续使用坏数据。
+
+A17 的代码、容量、无功率板端证据和边界见
+[`performance/2026-09-24-A17-相电压只读采样与固定窗.md`](performance/2026-09-24-A17-相电压只读采样与固定窗.md)。
+新增三个 ADC 转换会延后 Diagnostic JEOS/ISR，运行态 WCET 必须重测；Production 仍是
+原有一 rank 电流采样，不包含固定窗。
 
 目标采用 VESC 类似的混合策略，而不是无条件信任开关相电压：
 
@@ -421,6 +521,12 @@ ST 参考工程当前补偿系数为 0，因此该功能应根据本工程实际
 
 Park 与逆 Park 可使用不同延迟，但必须由 GPIO/DWT/定时器事件测得，并用编码器角度
 验证。不得用观察器自身输出证明补偿正确。
+
+2026-09-24 A12 已完成默认关闭的接口与同源仿真入口：C/Rust 配置用两个相对基础角的
+绝对预测拍数表示，范围 ±2 拍；小角度旋转复用一次 CORDIC，不新增第二次三角事务。
+582/800/1200 rpm、空载/0.002 N·m 扫描没有找到跨工况一致收益，故默认仍为 `0/0`，
+未进入实机。详见
+[`performance/2026-09-24-A12-Park逆Park延迟补偿扫描.md`](performance/2026-09-24-A12-Park逆Park延迟补偿扫描.md)。
 
 #### 6.4 温度补偿
 
@@ -567,20 +673,24 @@ hfi_enable = 0
 
 ## 10. 推荐实际执行顺序
 
+A0～A28 的已完成历史、逐批状态、依赖、仪器要求和完成门统一维护在
+[后续任务阶段计划](后续任务阶段计划.md)。本节保留技术方向，不单独承担实时进度。
+
 1. 完整 ISR 时序、Flash 和测试基线；
 2. `O3/s/z` 实测，不先决定结果；
 3. 裁剪无关格式化/调试体积，建立 production 配置；
 4. 共享 Clarke、缓存/预计算并优化 CORDIC 事务；
 5. 在保持 12 kHz 控制环不变时重新测 WCET；
 6. 仿真实现 PWM/控制频率分离和额外延迟；
-7. 实机评估 24 kHz PWM + 12 kHz 控制；
-8. 在 Host/Matlab 比较当前软零带与滤波电流极性死区补偿；
-9. 补偿默认关闭接入目标固件，低功率 A/B；
-10. 完成 Rs/Ld/Lq/磁链辨识流程；
-11. 接入板载 BEMF ADC 并先只记录；
-12. 增加 Hybrid 观察器电压、dq 解耦和角度延迟补偿；
-13. 有独立角度真值、凸极证据后再研究 HFI；
-14. 最后评估 MTPA、弱磁、温度补偿和产品化默认值。
+7. 受限实机评估 24 kHz PWM + 12 kHz 控制（已完成，候选暂不升格）；
+8. 保持默认 12/12 kHz，先记录并修正 BEMF-SMO/PLL 失锁、相位延迟和电压模型；
+9. 在 Host/Matlab 比较当前软零带与滤波电流极性死区补偿；
+10. 补偿默认关闭接入目标固件，低功率 A/B；
+11. 完成 Rs/Ld/Lq/磁链辨识流程；
+12. 接入板载 BEMF ADC 并先只记录；
+13. 增加 Hybrid 观察器电压、dq 解耦和角度延迟补偿；
+14. 有独立角度真值、凸极证据后再研究 HFI；
+15. 最后评估 MTPA、弱磁、温度补偿和产品化默认值。
 
 ## 11. 明确禁止的捷径
 

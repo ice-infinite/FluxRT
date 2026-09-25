@@ -105,4 +105,4 @@ Simulink/Simscape plant
 ```
 
 输出为 `simulation/results/foc_sim_vs_hardware.png/.fig/.mat`。完整的采集命令、字段
-定义、首轮结果和通过边界见 [SIMULATION_HARDWARE_CORRELATION.md](SIMULATION_HARDWARE_CORRELATION.md)。
+定义、首轮结果和通过边界见 [仿真实机相关性验证.md](仿真实机相关性验证.md)。

@@ -5,7 +5,7 @@
 
 ## 当前基线
 
-参数已同步到 Rust ABI `0x00070000`、配置版本4：
+参数已同步到 Rust ABI `0x00080000`、配置版本4：
 
 | 项目 | 当前值 |
 |---|---:|
@@ -78,6 +78,7 @@ comparison = compare_with_hardware();
 | `run_foc_validation.m` | 参数、开环和闭环回归 |
 | `plot_foc_stability.m` | 生成理想/550 ns死区闭环稳定性图和JSON统计 |
 | `plot_deadtime_compensation.m` | 生成死区无补偿/有补偿对照图和量化指标 |
+| `validate_multirate_timing.m` | 对比目标真实 preload 时序：12/12 kHz + 1 拍与 24/12 kHz + 2 拍，导出 JSON |
 | `compare_with_hardware.m` | 与最新开环实机trace对拍 |
 | `run_optimize.m` | 基于当前模型重新扫描观察器参数 |
 
@@ -85,6 +86,23 @@ comparison = compare_with_hardware();
 
 - `enableDeadTime=false`：对应 `rust/crates/foc-sim` 的理想平均逆变器，适合逐拍对拍。
 - `enableDeadTime=true`：加入550 ns平均死区电压损失，更适合和当前功率板趋势比较。
+
+默认用 12/12 kHz、1 个 PWM 拍延迟表达当前目标链路的整拍离散近似。由于实机仍以
+OC4REF 触发 ADC，OC4REF 与 UEV 的半周期相位尚未用示波器确认，这个 1 拍不是已经
+量出的精确采样到生效延迟。24/12 kHz 候选改用 Update 触发，CCR 在下一控制 UEV
+生效，因此其 2 个 PWM 拍延迟是目标定时设计中的确定值。
+多速率候选必须同时显式给出三个参数：
+
+```matlab
+r = run_foc_sim('closedLoop',true,'duration',7, ...
+    'pwmFrequencyHz',24000,'controlFrequencyHz',12000, ...
+    'actuationDelayPwmTicks',2);
+report = validate_multirate_timing('duration',7);
+```
+
+模型按 `pwmTs` 推进 plant，按 `controlTs` 执行 ControllerCore；死区按 PWM 周期
+归一化，PI/Rev-Up/观察器仍按控制周期。该模型不含开关纹波和结构声学，不能用它
+直接判断刺耳声是否消失。
 
 两种结果不能混在同一张“精确一致”表里。
 

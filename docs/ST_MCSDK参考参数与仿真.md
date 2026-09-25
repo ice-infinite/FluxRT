@@ -33,6 +33,9 @@ ST 的生成代码；只读取生成参数与控制流程，在独立 Rust 代�
 | 额定电流 | 0.8 A | `pmsm_motor_parameters.h` |
 | 最大转速 | 1572 rpm | `pmsm_motor_parameters.h` |
 | 母线标称电压 | 13 V | `power_stage_parameters.h` |
+| ADC 参考电压 | 3.3 V | `.ioc` / `parameters_conversion.h` |
+| 母线分压 | 0.0625（1/16） | `.ioc` / `power_stage_parameters.h` |
+| 相端诊断分压 | 10 kΩ / 2.2 kΩ，理论满量程 18.3 V | IHM16M1 官方原理图；仅名义值 |
 | PWM / 电流环 | 30 kHz | `drive_parameters.h` |
 | 速度环 | 1 kHz | `drive_parameters.h` |
 | 默认目标转速 | 524 rpm | `drive_parameters.h` |
@@ -82,10 +85,22 @@ Rust 对应实现位于：
 - `rust/crates/foc-control/src/startup.rs`：1.000 s 定向、1.164 s 升到
   582 rpm、25 ms 观测器过渡。
 - `rust/crates/foc-control/src/observer.rs`：可替换的 BEMF + PLL 适配器。
+- `rust/crates/foc-control/src/voltage.rs`：观察器电压来源；当前只批准 `CommandModel`。
 - `rust/crates/foc-rt-bridge/src/lib.rs`：同一控制代码对 C 的稳定 ABI。
 
 `foc_rust_configure_st_reference()` 一次性装入当前基线。C 侧仍然保留最终硬件
 使能权：即使 Rust 参数正确，只要 `foc_platform_init()` 没有返回 OK，启动仍会被拒绝。
+
+### 3.1 ST 观察器实际使用的电压
+
+ST 参考工程的高频任务先把上一拍 `FOCVars[M1].Valphabeta` 放入 `STO_Inputs`，电流控制器
+随后计算本拍 `Valphabeta` 并保存；STO 同时读取平均 Vbus。也就是说，默认 STO-PLL 使用
+命令电压模型与母线电压，不读取 TP6/TP7/TP8 的相端 ADC。
+
+FluxRT 因此把默认路径明确命名为 `CommandModel`：上一拍三相 duty 先去掉 SVPWM 共模，
+再乘实测 Vbus 得到 αβ 电压。IHM16M1 的 10 kΩ/2.2 kΩ、3.3 V、12 bit 只形成
+`18.3/4095 = 4.468864 mV/count` 的名义诊断换算；没有逐板测量时必须标记为
+`nominal-not-calibrated` 和 `observer=disabled`。
 
 ## 4. 硬件接口如何解耦
 

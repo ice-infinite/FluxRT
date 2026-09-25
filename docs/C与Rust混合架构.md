@@ -53,7 +53,7 @@ foc/include/foc_platform.h
     └── 芯片平台契约
 foc/platform/stm32g431/
     ├── STM32G431 功率级实现（默认失能 + ISR 电流环 + 保护）
-    └── 可选 CORDIC 数学适配器
+    └── 可选 CORDIC + FPU 数学适配器
 
 rust/crates/foc-rt-bridge/
     ├── staticlib + rlib
@@ -61,7 +61,7 @@ rust/crates/foc-rt-bridge/
     └── 唯一允许少量 unsafe 的位置
 rust/crates/foc-control/
     ├── ST 参考速度环/电流环/启动序列/观测器组合
-    ├── ControlMath / CpuMath 可替换数学后端
+    ├── ControlMath / CpuMath / FastApproxMath 可替换数学后端
     └── FeedbackPort / PwmPort / SafetyPort 硬件契约
 rust/crates/foc-algorithm/
     ├── 从原 lib-rs 复制的 no_std 算法库
@@ -72,9 +72,14 @@ rust/crates/foc-sim/
 
 依赖只能向下：C 平台不能依赖算法内部结构，算法库不能反向调用 HAL 或 RT-Thread。
 
-当前 G431 默认用 CORDIC 加速快环 `sin/cos` 和矢量模长；无加速器或单次硬件调用
-失败时由 bridge 立即回落到 `CpuMath`。配置、移植和实时约束见
-`HARDWARE_MATH_ACCELERATION.md`。
+当前 G431 默认用 CORDIC 加速快环 `sin/cos`、`atan2`，用 FPU `VSQRT.F32`
+计算矢量模长；输入非法或单次硬件调用失败时由 bridge 立即回落到 `CpuMath`。配置、
+移植和实时约束见
+`硬件数学加速与CPU回退.md`。
+
+可移植 CPU 快速近似放在算法层纯函数中，通过 `FastApproxMath` 实现同一 trait；目标选择
+只在 bridge 中完成。它已完成 PC/实机 A/B，但因没有实机闭环角度真值仍默认关闭。当前
+C/Rust ABI 为 `0x00080000`；新增诊断导出时也按 ABI 规则同步提升了版本。
 
 ## 4. C/Rust ABI 规则
 
@@ -146,7 +151,7 @@ bridge 已把 C 输入映射到 `foc-control` 中与仿真共用的电流环；`
 
 此外，`foc_rust_open_loop_step()` 是板级 bring-up 的窄接口：它只在 Rust 状态为 `RUNNING` 时输出旋转电压矢量，电压不超过母线的 8%，不访问任何寄存器。它不是生产启动状态机，后续应由 `RevUpSequencer + BemfPllEstimator` 的正式组合替代。
 
-`foc_rust_configure_st_reference()` 会装入当前 ST 参考参数。完整算法库仍保留在 `foc-algorithm` 中。以后使用 MTPA/MTPV、弱磁、滤波或高级控制时，先在 Rust 内组合算法，再给 C 增加少量稳定的“业务级入口”；不要给 63 个内部模块逐个制作 C 包装函数。闭环仿真、接口替换和当前限制见 `ST_MCSDK_REFERENCE_AND_SIMULATION.md`。
+`foc_rust_configure_st_reference()` 会装入当前 ST 参考参数。完整算法库仍保留在 `foc-algorithm` 中。以后使用 MTPA/MTPV、弱磁、滤波或高级控制时，先在 Rust 内组合算法，再给 C 增加少量稳定的“业务级入口”；不要给 63 个内部模块逐个制作 C 包装函数。闭环仿真、接口替换和当前限制见 `ST_MCSDK参考参数与仿真.md`。
 
 ## 7. 算法库如何迁入与更新
 

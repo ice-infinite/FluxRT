@@ -24,7 +24,10 @@ cd E:\File\RT-Thread\projects\FluxRT
 - PWM 前馈：按三相电流方向修正占空比，抵消逆变器死区造成的平均电压损失；
 - 观测器电压重构：用估算的实际桥臂电压，而不是命令占空比，作为 BEMF/SMO 的输入。
 
-这些开关只存在于 PC `std` 构建，不进入 `thumbv7em-none-eabihf` 固件 ABI。目标板若要使用补偿，应在实测死区、电流极性和功率级压降后，通过独立的硬件配置接口接入，不能直接照搬仿真参数。
+这些开关已在 CM3 进入 `thumbv7em-none-eabihf` 的 ABI V13/config V7，但目标默认
+总门/观测修正/PWM 前馈为 `0/0/0`。Diagnostic 停机状态可用
+`foc_cfg invstage 0..4` 分层切换；参数的正式来源仍是版本化 profile。未完成目标板
+WCET 与低压限流 A/B 前，不得打开默认值，也不能直接照搬仿真参数。
 
 ```powershell
 cd E:\File\RT-Thread\projects\FluxRT\rust
