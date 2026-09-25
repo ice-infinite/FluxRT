@@ -1,0 +1,59 @@
+{
+  "format_version": 1,
+  "kind": "phase-voltage-divider-baseline-comparison",
+  "firmware": {
+    "build_profile": "calibration",
+    "bin_sha256": "05d238136afd16d0e253a39738ca34e775ce1c379432379031453d390a2c269b"
+  },
+  "conditions": {
+    "dc_bus_voltage_mv_at_final_status": 0,
+    "power_outputs": "disabled",
+    "motor_arm": "compiled-out",
+    "motor_and_logic_analyzer": "disconnected-per-prior-user-confirmation",
+    "external_voltage_injection": "none"
+  },
+  "sample_rate_hz": 12000,
+  "samples_per_window": 256,
+  "windows_per_mode": 3,
+  "channels": {
+    "u": {
+      "divider_off_window_means": [383.453125, 383.0859375, 383.09765625],
+      "divider_off_mean": 383.2122395833333,
+      "divider_off_window_mean_range": 0.3671875,
+      "divider_off_within_window_pstdev": [1.4134364981756344, 1.3435455876499873, 1.4232426029443952],
+      "divider_on_window_means": [74.6875, 74.74609375, 74.87109375],
+      "divider_on_mean": 74.76822916666667,
+      "divider_on_window_mean_range": 0.18359375,
+      "divider_on_within_window_pstdev": [1.5674920254980567, 1.7416049684733153, 1.726116139983326],
+      "off_minus_on_counts": 308.44401041666663
+    },
+    "v": {
+      "divider_off_window_means": [339.59765625, 339.35546875, 339.1875],
+      "divider_off_mean": 339.3802083333333,
+      "divider_off_window_mean_range": 0.41015625,
+      "divider_off_within_window_pstdev": [1.059847044075671, 0.9895002363685607, 0.9742785792574935],
+      "divider_on_window_means": [35.15625, 35.1796875, 35.1953125],
+      "divider_on_mean": 35.177083333333336,
+      "divider_on_window_mean_range": 0.0390625,
+      "divider_on_within_window_pstdev": [1.1245658884654113, 1.4573820371967503, 1.3639246780316536],
+      "off_minus_on_counts": 304.203125
+    },
+    "w": {
+      "divider_off_window_means": [338.98828125, 340.15625, 339.9609375],
+      "divider_off_mean": 339.7018229166667,
+      "divider_off_window_mean_range": 1.16796875,
+      "divider_off_within_window_pstdev": [15.81545980744469, 16.34225614587839, 16.257643559910328],
+      "divider_on_window_means": [35.27734375, 36.1640625, 33.90234375],
+      "divider_on_mean": 35.114583333333336,
+      "divider_on_window_mean_range": 2.26171875,
+      "divider_on_within_window_pstdev": [16.584926867319492, 16.330223773607443, 16.37888295967817],
+      "off_minus_on_counts": 304.58723958333337
+    }
+  },
+  "interpretation": {
+    "pc9_switch_effect": "observed-as-a-304-to-308-count-mean-shift",
+    "u_v_repeatability": "window-means-repeat-within-less-than-one-count",
+    "w_note": "within-window-noise-remains-about-16-counts-and-needs-controlled-source-investigation",
+    "calibration_status": "raw-baseline-only-not-valid-for-voltage-fit"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "format_version": 1,
+  "session_id": "a16-screening-20260924",
+  "created_at_utc": "2026-09-24T07:29:43Z",
+  "purpose": "screening-only",
+  "target": {
+    "board_id": "0x43116001",
+    "board_name": "NUCLEO-G431RB + X-NUCLEO-IHM16M1",
+    "motor_id": "0x28041007",
+    "motor_name": "GBM2804H-100T",
+    "pole_pairs": 7,
+    "profile_revision": 1,
+    "runtime_config_crc32": "0x8C7A8DF4",
+    "firmware_profile": "Diagnostic",
+    "firmware_image_path": null,
+    "firmware_sha256": "175CD0D3FCB1F95AB2C7AAC427BC6DBD3C6AFCEE686E3D8A0B23F14FB79A5FC9"
+  },
+  "conditions": {
+    "supply_voltage_nominal_v": 12.3,
+    "supply_current_limit_a": 2.0,
+    "load": "no-load-free-spin",
+    "software_current_trip_a": 1.15,
+    "closed_loop_enabled": false,
+    "ambient_temperature_c": null,
+    "winding_temperature_c": null
+  },
+  "acquisition": {
+    "trace_csv_path": "profiles/identification/evidence/a16-screening-20260924/trace.csv",
+    "trace_csv_sha256": "2E880633D36AC7311098818E9B24751FFBCC42F1E75312D30DFA55F1F3CD923F",
+    "raw_log_path": "profiles/identification/evidence/a16-screening-20260924/trace.log",
+    "raw_log_sha256": "B4AA618B4D51959E819D3D5594D7C8E5025F54D3940433035E54687C9C4C5AF6",
+    "control_frequency_hz": 12000,
+    "trace_rate_hz": 50,
+    "duration_s": 5.0,
+    "target_speed_rpm": 582.0
+  },
+  "capabilities": {
+    "actual_phase_voltage_measured": false,
+    "independent_speed_truth": false,
+    "high_rate_current_capture": false,
+    "winding_temperature_measured": false
+  },
+  "safety": {
+    "allow_motor_run_confirmed": true,
+    "max_allowed_phase_current_a": 1.15,
+    "minimum_bus_voltage_v": 7.0,
+    "maximum_bus_voltage_v": 16.0,
+    "emergency_stop_command": "foc_stop"
+  }
+}

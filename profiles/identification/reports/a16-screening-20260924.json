@@ -1,0 +1,65 @@
+{
+  "blocking_reasons": [
+    "trace voltage is a controller command, not measured motor-terminal voltage",
+    "firmware image is not archived; recorded SHA-256 cannot be re-verified",
+    "winding temperature was not measured",
+    "50 Hz trace cannot resolve the sub-millisecond RL transient",
+    "actual phase voltage is unavailable",
+    "independent rotor speed/angle truth is unavailable"
+  ],
+  "candidate_generation_allowed": false,
+  "conditions": {
+    "closed_loop_enabled": false,
+    "load": "no-load-free-spin",
+    "supply_current_limit_a": 2.0
+  },
+  "estimates": {
+    "flux_linkage_wb": {
+      "eligible_for_profile": false,
+      "reason": "measured terminal voltage and independent rotor speed/angle truth are required",
+      "value": null
+    },
+    "stator_inductance_h": {
+      "eligible_for_profile": false,
+      "reason": "high-rate current-step capture and measured terminal voltage are required",
+      "value": null
+    },
+    "stator_resistance_screening_ohm": {
+      "eligible_for_profile": false,
+      "median_absolute_deviation_ohm": 0.075742828,
+      "method": "median(abs(vq_command_v / iq_measured_a)) in settled alignment",
+      "sample_count": 13,
+      "value": 5.8265625
+    }
+  },
+  "format_version": 1,
+  "result": "insufficient-for-revision2",
+  "run_health": {
+    "deadline_misses": 0,
+    "dropped_samples": 0,
+    "last_control_status": 0,
+    "realtime_errors": 0,
+    "rust_fault_flags": 0
+  },
+  "session_id": "a16-screening-20260924",
+  "session_sha256": "6E7ACF7F4C1A9C95D7AE966246938E34B0765B848107837E98F78DCECC501649",
+  "target": {
+    "firmware_image_archived": false,
+    "firmware_sha256": "175CD0D3FCB1F95AB2C7AAC427BC6DBD3C6AFCEE686E3D8A0B23F14FB79A5FC9",
+    "profile_revision": 1,
+    "runtime_config_crc32": "0x8C7A8DF4"
+  },
+  "trace_summary": {
+    "hazardous_samples": 0,
+    "maximum_bus_voltage_v": 12.288,
+    "maximum_phase_current_a": 0.921,
+    "minimum_bus_voltage_v": 12.288,
+    "sample_count": 250,
+    "state_counts": {
+      "3": 50,
+      "4": 58,
+      "5": 142
+    },
+    "voltage_limited_samples": 78
+  }
+}

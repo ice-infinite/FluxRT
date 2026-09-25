@@ -1,0 +1,28 @@
+{
+  "format_version": 1,
+  "capture_kind": "stopped-phase-voltage-window",
+  "divider_mode": "on",
+  "sample_rate_hz": 12000,
+  "samples": 256,
+  "sequence_first": 0,
+  "sequence_last": 255,
+  "output": "profiles\\calibration\\evidence\\a19-divider-baseline-20260924\\phase_voltage_on_3.csv",
+  "output_sha256": "fb169c54b2f3f204632584a55db520b7888c63236873804b156b4e6a592ed3ad",
+  "log": "profiles\\calibration\\evidence\\a19-divider-baseline-20260924\\phase_voltage_on_3.log",
+  "log_sha256": "a988ec547c4db0d02a62f8aa268c6a9eaebb63322dac4ad9c154f7afa4208586",
+  "phase_u_raw": {
+    "min": 72,
+    "mean": 74.87109375,
+    "max": 86
+  },
+  "phase_v_raw": {
+    "min": 32,
+    "mean": 35.1953125,
+    "max": 50
+  },
+  "phase_w_raw": {
+    "min": 12,
+    "mean": 33.90234375,
+    "max": 66
+  }
+}

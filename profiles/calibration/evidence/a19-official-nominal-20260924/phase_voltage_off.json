@@ -1,0 +1,39 @@
+{
+  "format_version": 1,
+  "capture_kind": "stopped-phase-voltage-window",
+  "divider_mode": "off",
+  "sample_rate_hz": 12000,
+  "samples": 256,
+  "sequence_first": 0,
+  "sequence_last": 255,
+  "output": "profiles\\calibration\\evidence\\a19-official-nominal-20260924\\phase_voltage_off.csv",
+  "output_sha256": "940e409c5ee054090c15111a0cba73b44eac268e90f908d686da2a1e42af437f",
+  "log": "profiles\\calibration\\evidence\\a19-official-nominal-20260924\\phase_voltage_off.log",
+  "log_sha256": "9d4899d9fee10663dba3b4186e109334115fa8fb77627064269b97e119e02c06",
+  "phase_voltage_model": {
+    "source": "st-ihm16m1-nominal",
+    "quality": "nominal-not-calibrated",
+    "observer": "disabled",
+    "vref_mv": 3300,
+    "adc_max": 4095,
+    "upper_ohm": 10000,
+    "lower_ohm": 2200,
+    "full_scale_mv": 18300,
+    "uv_per_count": 4469
+  },
+  "phase_u_raw": {
+    "min": 347,
+    "mean": 379.39453125,
+    "max": 398
+  },
+  "phase_v_raw": {
+    "min": 303,
+    "mean": 336.27734375,
+    "max": 355
+  },
+  "phase_w_raw": {
+    "min": 285,
+    "mean": 336.2109375,
+    "max": 371
+  }
+}

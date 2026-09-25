@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ice-infinite/FluxRT/profiles/schema/fluxrt-production-profile-v1.schema.json",
+  "title": "FluxRT production profile candidate v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "name", "profile", "runtime_config", "approval", "expected"],
+  "properties": {
+    "format_version": {"const": 1},
+    "name": {"type": "string", "minLength": 1},
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "board_id", "board_name", "motor_id", "motor_name"],
+      "properties": {
+        "revision": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "board_id": {"$ref": "#/$defs/hexU32"},
+        "board_name": {"type": "string", "minLength": 1},
+        "motor_id": {"$ref": "#/$defs/hexU32"},
+        "motor_name": {"type": "string", "minLength": 1}
+      }
+    },
+    "runtime_config": {"$ref": "#/$defs/runtimeConfigV7"},
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parameters", "closed_loop"],
+      "properties": {
+        "parameters": {"$ref": "#/$defs/approvalScope"},
+        "closed_loop": {"$ref": "#/$defs/approvalScope"}
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime_config_crc32", "record_crc32"],
+      "properties": {
+        "runtime_config_crc32": {"$ref": "#/$defs/hexU32"},
+        "record_crc32": {"$ref": "#/$defs/hexU32"}
+      }
+    }
+  },
+  "$defs": {
+    "hexU32": {"type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$"},
+    "u32": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "finiteNumber": {"type": "number"},
+    "pi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kp", "ki", "ts", "out_min", "out_max", "integrator_min", "integrator_max"],
+      "properties": {
+        "kp": {"$ref": "#/$defs/finiteNumber"},
+        "ki": {"$ref": "#/$defs/finiteNumber"},
+        "ts": {"$ref": "#/$defs/finiteNumber"},
+        "out_min": {"$ref": "#/$defs/finiteNumber"},
+        "out_max": {"$ref": "#/$defs/finiteNumber"},
+        "integrator_min": {"$ref": "#/$defs/finiteNumber"},
+        "integrator_max": {"$ref": "#/$defs/finiteNumber"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "sha256"],
+      "properties": {
+        "kind": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"}
+      }
+    },
+    "approvalScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approved", "approved_runtime_config_crc32", "reviewer", "approved_at_utc", "evidence"],
+      "properties": {
+        "approved": {"type": "boolean"},
+        "approved_runtime_config_crc32": {
+          "oneOf": [{"$ref": "#/$defs/hexU32"}, {"type": "null"}]
+        },
+        "reviewer": {"type": ["string", "null"]},
+        "approved_at_utc": {"type": ["string", "null"]},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}
+      }
+    },
+    "runtimeConfigV7": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "struct_size", "config_version", "observer_backend", "observer_enable",
+        "closed_loop_enable", "observer_update_divider", "id_pi", "iq_pi", "speed_pi",
+        "pole_pairs", "pwm_frequency_hz", "speed_loop_frequency_hz",
+        "stator_resistance_ohm", "stator_inductance_h", "flux_linkage_wb",
+        "rated_current_a", "max_speed_rpm", "nominal_bus_voltage_v", "voltage_utilization",
+        "default_target_speed_rpm", "alignment_duration_s", "open_loop_ramp_duration_s",
+        "observer_transition_duration_s", "startup_final_speed_rpm", "startup_current_a",
+        "observer_smo_k_slide_v", "observer_smo_boundary_a", "observer_emf_filter_alpha",
+        "observer_pll_kp", "observer_acquisition_pll_kp_ratio", "observer_pll_ki", "observer_minimum_speed_rpm",
+        "observer_minimum_bemf_v", "observer_speed_variance_ratio",
+        "observer_consecutive_samples", "observer_acquisition_timeout_s",
+        "observer_loss_timeout_s", "closed_loop_speed_ramp_rpm_per_s",
+        "speed_pi_preload_ratio", "closed_loop_current_slew_a_per_s",
+        "observer_run_reliability", "angle_compensation", "inverter_voltage_model"
+      ],
+      "properties": {
+        "struct_size": {"const": 284},
+        "config_version": {"const": 8},
+        "observer_backend": {"type": "integer", "enum": [0, 1, 2]},
+        "observer_enable": {"type": "integer", "enum": [0, 1]},
+        "closed_loop_enable": {"type": "integer", "enum": [0, 1]},
+        "observer_update_divider": {"type": "integer", "minimum": 1, "maximum": 32},
+        "id_pi": {"$ref": "#/$defs/pi"},
+        "iq_pi": {"$ref": "#/$defs/pi"},
+        "speed_pi": {"$ref": "#/$defs/pi"},
+        "pole_pairs": {"$ref": "#/$defs/u32"},
+        "pwm_frequency_hz": {"$ref": "#/$defs/u32"},
+        "speed_loop_frequency_hz": {"$ref": "#/$defs/u32"},
+        "stator_resistance_ohm": {"$ref": "#/$defs/finiteNumber"},
+        "stator_inductance_h": {"$ref": "#/$defs/finiteNumber"},
+        "flux_linkage_wb": {"$ref": "#/$defs/finiteNumber"},
+        "rated_current_a": {"$ref": "#/$defs/finiteNumber"},
+        "max_speed_rpm": {"$ref": "#/$defs/finiteNumber"},
+        "nominal_bus_voltage_v": {"$ref": "#/$defs/finiteNumber"},
+        "voltage_utilization": {"$ref": "#/$defs/finiteNumber"},
+        "default_target_speed_rpm": {"$ref": "#/$defs/finiteNumber"},
+        "alignment_duration_s": {"$ref": "#/$defs/finiteNumber"},
+        "open_loop_ramp_duration_s": {"$ref": "#/$defs/finiteNumber"},
+        "observer_transition_duration_s": {"$ref": "#/$defs/finiteNumber"},
+        "startup_final_speed_rpm": {"$ref": "#/$defs/finiteNumber"},
+        "startup_current_a": {"$ref": "#/$defs/finiteNumber"},
+        "observer_smo_k_slide_v": {"$ref": "#/$defs/finiteNumber"},
+        "observer_smo_boundary_a": {"$ref": "#/$defs/finiteNumber"},
+        "observer_emf_filter_alpha": {"$ref": "#/$defs/finiteNumber"},
+        "observer_pll_kp": {"$ref": "#/$defs/finiteNumber"},
+        "observer_acquisition_pll_kp_ratio": {"$ref": "#/$defs/finiteNumber"},
+        "observer_pll_ki": {"$ref": "#/$defs/finiteNumber"},
+        "observer_minimum_speed_rpm": {"$ref": "#/$defs/finiteNumber"},
+        "observer_minimum_bemf_v": {"$ref": "#/$defs/finiteNumber"},
+        "observer_speed_variance_ratio": {"$ref": "#/$defs/finiteNumber"},
+        "observer_consecutive_samples": {"$ref": "#/$defs/u32"},
+        "observer_acquisition_timeout_s": {"$ref": "#/$defs/finiteNumber"},
+        "observer_loss_timeout_s": {"$ref": "#/$defs/finiteNumber"},
+        "closed_loop_speed_ramp_rpm_per_s": {"$ref": "#/$defs/finiteNumber"},
+        "speed_pi_preload_ratio": {"$ref": "#/$defs/finiteNumber"},
+        "closed_loop_current_slew_a_per_s": {"$ref": "#/$defs/finiteNumber"},
+        "observer_run_reliability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimum_speed_rpm", "maximum_phase_error_rad"],
+          "properties": {
+            "minimum_speed_rpm": {"$ref": "#/$defs/finiteNumber"},
+            "maximum_phase_error_rad": {"$ref": "#/$defs/finiteNumber"}
+          }
+        },
+        "angle_compensation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["park_prediction_ticks", "reverse_park_prediction_ticks"],
+          "properties": {
+            "park_prediction_ticks": {"$ref": "#/$defs/finiteNumber"},
+            "reverse_park_prediction_ticks": {"$ref": "#/$defs/finiteNumber"}
+          }
+        },
+        "inverter_voltage_model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled", "observer_voltage_correction_enable", "pwm_feedforward_enable",
+            "pwm_carrier_frequency_hz", "dead_time_s", "compensation_gain",
+            "current_zero_band_a", "current_sign_filter_alpha", "device_drop_v"
+          ],
+          "properties": {
+            "enabled": {"type": "integer", "enum": [0, 1]},
+            "observer_voltage_correction_enable": {"type": "integer", "enum": [0, 1]},
+            "pwm_feedforward_enable": {"type": "integer", "enum": [0, 1]},
+            "pwm_carrier_frequency_hz": {"type": "integer", "minimum": 1000, "maximum": 1000000},
+            "dead_time_s": {"$ref": "#/$defs/finiteNumber"},
+            "compensation_gain": {"$ref": "#/$defs/finiteNumber"},
+            "current_zero_band_a": {"$ref": "#/$defs/finiteNumber"},
+            "current_sign_filter_alpha": {"$ref": "#/$defs/finiteNumber"},
+            "device_drop_v": {"$ref": "#/$defs/finiteNumber"}
+          }
+        }
+      }
+    }
+  }
+}
