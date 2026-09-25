@@ -1,0 +1,15 @@
+{
+  "id": "GBM2804H-100T",
+  "label": "GBM2804H-100T",
+  "hardwareFamily": "MOTOR",
+  "description": "Run 2, after STOP->START restart, SC_STATE advanced 1->2->3->4 (RS_DETECT). 2026-09-25.",
+  "compatibility": ["FOC", "sixStep"],
+  "polePairs": 7,
+  "nominalDCVoltage": 11.855835,
+  "nominalCurrent": 0.8,
+  "maxRatedSpeed": 1572,
+  "rs": 4.715267,
+  "ls": 0.000935,
+  "magneticStructure": { "type": "SM-PMSM" },
+  "BEmfConstant": 3.982468
+}
