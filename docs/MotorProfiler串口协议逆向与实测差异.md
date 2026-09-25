@@ -226,18 +226,61 @@ Windows 侧一次写入 8 字节实测耗时约 **170–210 µs**，远高于 8 
   无显著变化。
 - **不是能力协商问题**：多种能力值都能拿到回应。
 
-## 5. 建议的下一步
+## 5. 根因：板上固件的 ASPEP 未初始化
 
-**抓一次真实上位机的完整对话。** 这是唯一能同时确定"可靠帧格式"与"启动命令
-编码"的方法，而且不需要再猜：
+这是排查的最终结论，**问题不在控制端**。用 OpenOCD + GDB 直接读目标内存得到：
+
+| 观测 | 值 | 含义 |
+|---|---|---|
+| `aspepOverUartA.Capabilities` | **全 0**（`0/0/0/0/0`） | 与 `mcp_config.c` 的静态初始化值 `0/7/7/32/0` 不符 |
+| `aspepOverUartA.maxRXPayload` | **0** | 该字段只在 `ASPEP_start()` 的处理分支里赋值 |
+| `aspepOverUartA.ASPEP_State` | **0 (IDLE)**，发任何 BEACON 后都不变 | 状态机没有推进 |
+| `fASPEP_HWInit` / `ASPEPIp` / `rxBuffer` | 非 0、有效 | 静态初始化器生效，**不是整个结构没初始化** |
+
+`ASPEP_CheckBeacon` 里做的是 `MIN(pHandle->Capabilities.X, Master.X)`。当
+`Capabilities` 全 0 时，`TXS` 与 `TXA` 的严格相等判定恒不成立，**因此控制端无论发
+什么能力值都谈不成**。这与实测完全吻合：发官方值 `7/7/32` 或发全 `0` 都不改变状态。
+
+### 5.1 客户端侧已被排除的因素
+
+| 项 | 证据 |
+|---|---|
+| 帧格式 | 设备把**我发的负载原样搬进了 `rxHeader`**：实测 `rxHeader = 05 c7 01 04` |
+| 包类型解析 | `rxPacketType = 5 (BEACON)` |
+| CRC-4 | 同一实现能验证设备自己发的 `0xC004040F` 与我发的 `0xB0000045` |
+| 能力值 | 设备把我发的能力解成 `0/0/7/7/32`，**正是官方值** |
+| 接收 DMA | 正确通道是 **DMA1 ch0**：`CCR=0x81 EN=1 NDTR=4 PAR=RDR MAR=rxHeader` |
+| UART 参数 | 与固件一致，`CR1=0x4D`、`CR3=0xC1` |
+| 发送速率 | 空闲 0.05–2.0 s、字节间延时 0–5 ms 都试过，无改善 |
+
+**旁证**：`syncPacketCount=0` 且 `rxHeader` 全零，说明 **Motor Pilot 也从未与此设备
+建立过连接**。"连不上"不是本客户端的特有问题。
+
+<details>
+<summary>排查中一个容易踩的坑：DMA 通道号</summary>
+
+枚举 DMA 通道时**不能假设通道号**。本设备接收用 **DMA1 通道 0**，而
+`usart_aspep_driver.c` 的代码顺序容易让人以为是通道 1。判定方法：
+看 `PAR` 是否等于 `USART2->RDR`、`MAR` 是否等于 `rxHeader` 的地址。
+
+误看通道会得到"接收 DMA 未武装"的错误结论，进而把排查引向错误方向。
+</details>
+
+## 6. 建议的下一步
+
+**重建并重烧 Motor_Profiler 固件**，排除"板上跑的不是这份工程构建出的固件"。
+工程内已有 `build\Debug\Motor_Profiler.elf`，但需确认它与板上固件一致；不一致时
+一切协议推断都建立在错误的基线上。
+
+重烧后用只读探针再试握手：
 
 ```powershell
-# 1. 启动 Motor Pilot 并 Connect
-# 2. 同时用 OpenOCD + GDB 旁读设备收到的字节（断点或监视 rxHeader）
-# 3. 把抓到的字节与 tools/motor_profiler_probe.py 的输出逐字节对比
+python tools/motor_profiler_probe.py --port COM6 --all
 ```
 
-`tools/motor_profiler_probe.py --dump` 可在不发任何帧的情况下监听设备输出。
+若握手通过（`ASPEP_State` 变成 1 或 2），再继续 `--read` 与 Profiler 启动命令的实测。
+若仍失败，则问题在该工程的配置而非构建产物，届时应抓一次真实上位机的完整对话
+逐字节对比。
 
 ### 一个必须记住的操作教训
 
@@ -245,7 +288,7 @@ Windows 侧一次写入 8 字节实测耗时约 **170–210 µs**，远高于 8 
 把目标停在 `main.c:122` 的 `while(1)` 里。用 `-c 'reset run'` 启动，并让目标在
 断开后自由运行。
 
-## 6. 相关文件
+## 7. 相关文件
 
 | 文件 | 作用 |
 |---|---|
