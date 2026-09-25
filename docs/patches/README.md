@@ -127,15 +127,40 @@ version: 4 != 0  -> FAIL      ← 唯一失败的项
 按 `register_interface.h` 的类型定义选择宽度即可正确解码（8BIT=1 字节、
 16BIT=2 字节、32BIT=4 字节浮点）。
 
-### 仍然缺失的一环：Profiler 启动命令
+### Profiler 启动命令：已定出命令字（仍在收尾）
 
-`PROFILER_CMD`（命令码 `0x68`）的处理函数 `MC_ProfilerCommand` 只是
-`SCC_CMD` 的弱符号包装，而 **`SCC_CMD` 的实现在预编译静态库里**
-（`MCSDK_v6.4.1-Full/MotorControl/libMP/libmp-G4-*.a`），源码不在工程内。
-因此"启动识别"的子命令编码**无法从源码得到**，只能实测或从库的符号信息推断。
+`PROFILER_CMD`（命令码 `0x68`）的处理函数 `MC_ProfilerCommand` 只是 `SCC_CMD` 的
+弱符号包装；`SCC_CMD` 的实现在预编译静态库
+`MCSDK_v6.4.1-Full/MotorControl/libMP/libmp-G4-*.a` 里。**通过反汇编该库解出了
+负载格式**（`ar x` 解包后 `arm-none-eabi-objdump -d mp_self_com_ctrl.o`）：
 
-已知可用的参数（来自官方 `GUI/profiler.qml`）：
-`bCMD_SC_STOP=0`、`bCMD_SC_START=1`、`bCMD_HT_START=2`、`bCMD_PPD_START=6`。
+```asm
+00000000 <SCC_CMD>:
+   0: push  {r4, r5, r6, lr}
+   2: ldrb  r1, [r2, #0]        ; r2 = rxBuffer，取第 1 字节
+   6: cmp   r1, #6
+   8: bhi   0x88                ; > 6 直接返回错误码 2
+   a: mov   r4, r0
+   c: tbb   [pc, r1]            ; 按第 1 字节做跳转表（0..6）
+```
+
+即**负载第 1 字节是命令选择码，合法范围 0–6**，与官方 `GUI/profiler.qml` 的
+`bCMD_*` 常量一一对应。
+
+实测命令字映射（每次重新握手、发 `68 00 <cmd> 00`、读 `SC_STATE`）：
+
+| cmd | 设备响应 | `SC_STATE` | 结论 |
+|---|---|---|---|
+| **0** | `00` = `MCP_CMD_OK` | 1 | **接受**（`bCMD_SC_STOP`） |
+| **1** | `00` = `MCP_CMD_OK` | 2 | **接受**（`bCMD_SC_START`） |
+| 2–5 | `02` = `MCP_CMD_UNKNOWN` | 4 | 被拒（本库不支持 HT_*） |
+| **6** | `00` = `MCP_CMD_OK` | 1 | **接受**（`bCMD_PPD_START`） |
+
+`SC_STATE` 随命令变化，说明状态机**确实在响应**。
+
+**仍未完成**：`SC_COMPLETED` 始终为 0，说明识别没有真正跑完。可能还需要：
+- 命令负载里的第 2 字节（TBB 之后的字段）的取值；
+- 或者 `SCC_Start` 的前置条件（反汇编显示它检查 `[r4,#63] == 4` 与 `[r4,#52] == 0`）。
 
 ## 回退
 
