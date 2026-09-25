@@ -636,17 +636,43 @@ class MotorProfilerClient:
             buf.extend(chunk)
         return bytes(buf)
 
-    def _read_frame(self, deadline_s: float) -> tuple:
+    #: 控制帧（BEACON/PING/NACK/ACK）的固定负载长度。官方 ``Src/aspep.c`` 会把它
+    #: 写进头部的长度字段（``ASPEP_sendBeacon`` 传 ``ASPEP_CTRL_SIZE``），但**实测
+    #: 固件把长度字段写 0 却仍然发 4 字节负载**。为了同时兼容两种行为，控制帧在
+    #: 长度字段为 0 时按 4 字节读。
+    #: Fixed control-frame payload length. The official source writes it into the
+    #: header's length field, but the measured firmware writes 0 there and still
+    #: sends 4 bytes, so a zero length on a control frame is read as 4 bytes.
+    _CONTROL_PAYLOAD_SIZE = ASPEP_CTRL_SIZE
+
+    def _read_frame(self, deadline_s: float, control_payload_size: int = 0) -> tuple:
         """读一个完整 ASPEP 帧，返回 ``(packet_type, payload)``。
-        Read one complete ASPEP frame and return ``(packet_type, payload)``."""
+        Read one complete ASPEP frame and return ``(packet_type, payload)``.
+
+        ``control_payload_size`` 给控制帧（BEACON/PING/NACK/ACK）在一个 0 长度
+        字段时兜底：真实固件不填长度字段，严格按 0 读会丢掉 BEACON 的能力负载。
+        ``control_payload_size`` is the fallback payload size for control frames whose
+        length field is zero. The measured firmware leaves that field at zero, and
+        reading strictly by it would discard the BEACON's capability payload.
+        """
         raw_header = self._read_exact(ASPEP_HEADER_SIZE, deadline_s)
         header = struct.unpack("<I", raw_header)[0]
         self._log(f"RX 头部 / header 0x{header:08X}")
         info = parse_header(header)
+        payload_len = info["payload_len"]
+        if payload_len == 0 and control_payload_size > 0:
+            # 只有控制帧类型才兜底；DATA_PACKET 的 0 长度是合法的空负载。
+            # Only control frames fall back; a zero-length DATA_PACKET is valid.
+            if info["packet_type"] in (BEACON, PING, NACK, ACK):
+                payload_len = control_payload_size
+                self._log(
+                    f"控制帧长度字段为 0，按 {control_payload_size} 字节读取"
+                    f" / control frame length field is 0, reading {control_payload_size}"
+                )
         payload = b""
-        if info["payload_len"]:
-            payload = self._read_exact(info["payload_len"], deadline_s)
-            self._log(f"RX {info['payload_len']:3d}B  {payload.hex(' ')}")
+        if payload_len:
+            payload = self._read_exact(payload_len, deadline_s)
+            self._log(f"RX {payload_len:3d}B  {payload.hex(' ')}")
         if info["packet_type"] == DATA_PACKET:
             self.sync_packet_count += 1
         elif info["packet_type"] == PING:
@@ -692,16 +718,35 @@ class MotorProfilerClient:
         """
         deadline = time.monotonic() + timeout_s
         host = self.host_capabilities
-        self._send_beacon(host)
-        self._log(f"已发送首个 BEACON / initial beacon sent: {host}")
 
         # 阶段 1：等 performer 回 BEACON，确认能力谈成。
+        # 实测固件会交替回 BEACON 与 NACK（NACK 是它此前积累的错误状态，
+        # ``ASPEP_RXframeProcess`` 发完一次就 ``fASPEP_HWSync`` 重新同步），所以这里
+        # 必须**重发 BEACON 并重试**，不能因为先收到 NACK 就放弃。
+        # The measured firmware alternates between BEACON and NACK (the NACK reports a
+        # previously latched error and is followed by a resync), so this must resend
+        # and retry rather than give up on the first NACK.
         self.peer = None
-        while time.monotonic() < deadline:
-            ptype, payload = self._read_frame(deadline)
-            if ptype == BEACON:
-                self.peer = Capabilities.decode(payload)
-                break
+        attempt = 0
+        while time.monotonic() < deadline and self.peer is None:
+            attempt += 1
+            self._send_beacon(host)
+            self._log(f"已发送 BEACON / beacon sent (#{attempt}): {host}")
+            while time.monotonic() < deadline:
+                try:
+                    ptype, payload = self._read_frame(deadline, self._CONTROL_PAYLOAD_SIZE)
+                except ProfilerError:
+                    break
+                if ptype == BEACON:
+                    self.peer = Capabilities.decode(payload)
+                    break
+                if ptype == NACK:
+                    nack = Nack.decode(payload)
+                    self._log(
+                        f"performer NACK {nack.error_info}"
+                        f"（此前积累的错误状态，重发 BEACON）/ retrying after NACK"
+                    )
+                    break
         if self.peer is None:
             raise ProfilerError(
                 "未收到 BEACON 应答；请确认烧录的是 Profiler 固件、串口与波特率正确、"
@@ -722,7 +767,7 @@ class MotorProfilerClient:
         self._send_ping(ASPEP_PING_CFG, packet_number=0)
         while time.monotonic() < deadline:
             try:
-                ptype, payload = self._read_frame(deadline)
+                ptype, payload = self._read_frame(deadline, self._CONTROL_PAYLOAD_SIZE)
             except ProfilerError:
                 break
             if ptype == PING:
@@ -751,7 +796,7 @@ class MotorProfilerClient:
         self._send_data(payload)
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
-            ptype, response = self._read_frame(deadline)
+            ptype, response = self._read_frame(deadline, self._CONTROL_PAYLOAD_SIZE)
             if ptype == DATA_PACKET:
                 return response
             if ptype == NACK:
