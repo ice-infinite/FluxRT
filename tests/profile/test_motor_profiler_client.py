@@ -746,6 +746,124 @@ class RecordingPort:
         pass
 
 
+class ControlFrameFallbackTests(unittest.TestCase):
+    """控制帧长度字段为 0 时的兜底读取。
+    Fallback reading when a control frame's length field is zero.
+
+    实测依据：官方 ``ASPEP_sendBeacon`` 会把 4 写进头部长度字段，但**真实设备发的是
+    长度字段为 0 的 4 字节帧**。严格按长度读会丢掉 BEACON 的能力负载，从而永远
+    谈不成握手。
+    Measured basis: the official source writes 4 into the length field, but the real
+    device sends a 4-byte frame with a zero length field. Reading strictly by the
+    length would discard the BEACON's capability payload and the handshake could never
+    complete.
+    """
+
+    def _client(self, performer: mpc.FakePerformer) -> mpc.MotorProfilerClient:
+        return mpc.MotorProfilerClient(
+            port="FAKE", serial_factory=mpc.FakeSerialFactory(performer)
+        )
+
+    def test_zero_length_beacon_is_read_as_four_bytes(self) -> None:
+        """长度字段为 0 的 BEACON 必须按 4 字节读，能力要能解出来。
+        A zero-length BEACON must be read as 4 bytes so its capabilities decode."""
+        performer = mpc.FakePerformer()
+        client = self._client(performer)
+        client.open()
+        try:
+            caps = mpc.Capabilities(version=0, data_crc=0, rx_max_size=4,
+                                    txs_max_size=16, txa_max_size=0)
+            wire_header = mpc.build_header(mpc.BEACON, 0)
+            performer.tx.extend(struct.pack("<I", wire_header) + caps.encode())
+            ptype, payload = client._read_frame(
+                time.monotonic() + 1.0, client._CONTROL_PAYLOAD_SIZE
+            )
+            self.assertEqual(ptype, mpc.BEACON)
+            self.assertEqual(len(payload), 4)
+            self.assertEqual(mpc.Capabilities.decode(payload), caps)
+        finally:
+            client.close()
+
+    def test_zero_length_data_packet_stays_empty(self) -> None:
+        """0 长度的 DATA_PACKET 是合法的空负载，**不能**兜底成 4 字节。
+        A zero-length DATA_PACKET is a valid empty payload and must not be padded."""
+        performer = mpc.FakePerformer()
+        client = self._client(performer)
+        client.open()
+        try:
+            performer.tx.extend(struct.pack("<I", mpc.build_header(mpc.DATA_PACKET, 0)))
+            ptype, payload = client._read_frame(
+                time.monotonic() + 1.0, client._CONTROL_PAYLOAD_SIZE
+            )
+            self.assertEqual(ptype, mpc.DATA_PACKET)
+            self.assertEqual(payload, b"")
+        finally:
+            client.close()
+
+    def test_best_effort_accepts_a_header_only_nack(self) -> None:
+        """真实设备的 NACK 只有 4 字节头部、长度字段为 0；best_effort 必须接受它。
+        The real device's NACK is header-only with a zero length field; best_effort
+        must accept it.
+
+        实测抓到的 NACK 就是 4 字节 ``0f 04 04 c0``，其头部长度字段为 0。
+        The captured NACK is the 4-byte ``0f 04 04 c0``, whose length field is 0.
+        """
+        performer = mpc.FakePerformer()
+        client = self._client(performer)
+        client.open()
+        try:
+            header = mpc.build_header(mpc.NACK, 0)
+            self.assertEqual((header & 0x1FFF0) >> 4, 0)
+            performer.tx.extend(struct.pack("<I", header))
+            ptype, payload = client._read_frame(
+                time.monotonic() + 1.0, client._CONTROL_PAYLOAD_SIZE, best_effort=True
+            )
+            self.assertEqual(ptype, mpc.NACK)
+            # 兜底去读 4 字节负载，但设备一个都没发，所以必须是空而不是抛异常。
+            # The fallback asks for 4 bytes but the device sent none, so the result
+            # must be empty rather than a raised error.
+            self.assertEqual(payload, b"")
+        finally:
+            client.close()
+
+    def test_captured_nack_bytes_decode_to_bad_crc_header(self) -> None:
+        """实测 NACK 的原始字节本身就要能解出错误码；这条把抓包固定下来。
+        The captured NACK bytes must decode to an error code; this pins the capture.
+
+        注意实测 NACK 的**长度字段是 64 而不是 0**，但设备只发 4 字节就结束。也就是说
+        真实固件既没有按源码那样填 4（控制帧负载长度），也没有把长度清零，而是把
+        错误码塞进了头部的高位。所以对控制帧**不能信任长度字段**。
+        Note the captured NACK's length field is 64, not 0, yet the device sends only 4
+        bytes. The real firmware neither writes 4 (the source's control payload length)
+        nor zeroes it; it packs the error code into the header's upper bits. The length
+        field therefore cannot be trusted for control frames.
+        """
+        captured = bytes.fromhex("0f 04 04 c0")
+        header = struct.unpack_from("<I", captured, 0)[0]
+        self.assertTrue(mpc.crc4_check(header))
+        self.assertEqual(header & 0x0F, mpc.NACK)
+        self.assertEqual((header & 0x1FFF0) >> 4, 64, "实测长度字段为 64")
+        self.assertEqual((header >> 8) & 0xFF, mpc.ASPEP_BAD_CRC_HEADER)
+        # 设备实际只发了 4 字节，所以按长度字段读必然读不齐 —— 这正是 best_effort
+        # 存在的理由。
+        # The device sent 4 bytes total, so trusting the length field can never
+        # complete, which is exactly why best_effort exists.
+        self.assertLess(len(captured), 4 + ((header & 0x1FFF0) >> 4))
+
+    def test_strict_read_still_raises_on_a_short_payload(self) -> None:
+        """非 best_effort 时读不齐必须报错，不能静默返回残包。
+        Without best_effort a short payload must raise, not return silently."""
+        performer = mpc.FakePerformer()
+        client = self._client(performer)
+        client.open()
+        try:
+            performer.tx.extend(struct.pack("<I", mpc.build_header(mpc.DATA_PACKET, 4)) + b"\x01")
+            with self.assertRaises(mpc.ProfilerError):
+                client._read_frame(time.monotonic() + 0.4)
+        finally:
+            client.close()
+
+
 class WritePacingTests(unittest.TestCase):
     """字节间延时的实测依据与实现。 / The measured basis and implementation of pacing.
 

@@ -406,11 +406,18 @@ class Nack:
 
 
 # ASPEP 错误码 ↔ 名称，便于日志可读。 / Error code names for readable logs.
+# 来源 ``Src/aspep.h``：ASPEP_BAD_PACKET_TYPE=1、ASPEP_BAD_PACKET_SIZE=2、
+# ASPEP_BAD_CRC_HEADER=4、ASPEP_BAD_CRC_DATA=5。
+ASPEP_BAD_PACKET_TYPE = 1
+ASPEP_BAD_PACKET_SIZE = 2
+ASPEP_BAD_CRC_HEADER = 4
+ASPEP_BAD_CRC_DATA = 5
+
 ASPEP_ERROR_NAMES = {
-    1: "BAD_PACKET_TYPE",
-    2: "BAD_PACKET_SIZE",
-    4: "BAD_CRC_HEADER",
-    5: "BAD_CRC_DATA",
+    ASPEP_BAD_PACKET_TYPE: "BAD_PACKET_TYPE",
+    ASPEP_BAD_PACKET_SIZE: "BAD_PACKET_SIZE",
+    ASPEP_BAD_CRC_HEADER: "BAD_CRC_HEADER",
+    ASPEP_BAD_CRC_DATA: "BAD_CRC_DATA",
 }
 
 
@@ -645,7 +652,8 @@ class MotorProfilerClient:
     #: sends 4 bytes, so a zero length on a control frame is read as 4 bytes.
     _CONTROL_PAYLOAD_SIZE = ASPEP_CTRL_SIZE
 
-    def _read_frame(self, deadline_s: float, control_payload_size: int = 0) -> tuple:
+    def _read_frame(self, deadline_s: float, control_payload_size: int = 0,
+                    best_effort: bool = False) -> tuple:
         """读一个完整 ASPEP 帧，返回 ``(packet_type, payload)``。
         Read one complete ASPEP frame and return ``(packet_type, payload)``.
 
@@ -654,6 +662,14 @@ class MotorProfilerClient:
         ``control_payload_size`` is the fallback payload size for control frames whose
         length field is zero. The measured firmware leaves that field at zero, and
         reading strictly by it would discard the BEACON's capability payload.
+
+        ``best_effort`` 让负载读不齐时**返回已读到的部分而不是抛异常**。真实固件的
+        NACK 只有 4 字节头部、没有负载，所以按兜底长度去读必然读不齐；此时应该把
+        头部交出去继续找下一个帧，而不是让整次握手失败。
+        ``best_effort`` returns whatever payload arrived instead of raising when the
+        payload cannot be completed. The measured firmware's NACK is header-only, so a
+        fallback read can never complete; the caller wants the header and the next
+        frame rather than a failed handshake.
         """
         raw_header = self._read_exact(ASPEP_HEADER_SIZE, deadline_s)
         header = struct.unpack("<I", raw_header)[0]
@@ -671,13 +687,44 @@ class MotorProfilerClient:
                 )
         payload = b""
         if payload_len:
-            payload = self._read_exact(payload_len, deadline_s)
-            self._log(f"RX {payload_len:3d}B  {payload.hex(' ')}")
+            if best_effort:
+                try:
+                    payload = self._read_exact(payload_len, deadline_s)
+                except ProfilerError:
+                    # 只有"兜底长度"才允许降级：设备对数据帧是**遵守**长度字段的，
+                    # 读不齐说明真的出错，此时返回残包让调用方判错。
+                    # Only the derived control length may fall back. The device does
+                    # honour the length field for data frames, so a short read there is
+                    # a genuine error; the partial bytes go back for the caller to
+                    # reject.
+                    if info["payload_len"] == 0:
+                        payload = self._read_available(
+                            payload_len, time.monotonic() + 0.15
+                        )
+                    else:
+                        raise
+            else:
+                payload = self._read_exact(payload_len, deadline_s)
+            self._log(f"RX {len(payload):3d}B  {payload.hex(' ')}")
         if info["packet_type"] == DATA_PACKET:
             self.sync_packet_count += 1
-        elif info["packet_type"] == PING:
+        elif info["packet_type"] == PING and len(payload) >= ASPEP_CTRL_SIZE:
             self.last_packet_numbers.append(Ping.decode(payload).packet_number)
         return info["packet_type"], payload
+
+    def _read_available(self, count: int, deadline_s: float) -> bytes:
+        """尽力读最多 ``count`` 字节，超时返回已读部分而不报错。
+        Read up to ``count`` bytes, returning what arrived instead of raising."""
+        buf = bytearray()
+        while len(buf) < count:
+            remaining = deadline_s - time.monotonic()
+            if remaining <= 0:
+                break
+            chunk = self._ser.read(count - len(buf))
+            if not chunk:
+                continue
+            buf.extend(chunk)
+        return bytes(buf)
 
     def _send_beacon(self, caps: Capabilities) -> None:
         self._write(encode_frame(BEACON, caps.encode()))
@@ -734,7 +781,7 @@ class MotorProfilerClient:
             self._log(f"已发送 BEACON / beacon sent (#{attempt}): {host}")
             while time.monotonic() < deadline:
                 try:
-                    ptype, payload = self._read_frame(deadline, self._CONTROL_PAYLOAD_SIZE)
+                    ptype, payload = self._read_frame(deadline, self._CONTROL_PAYLOAD_SIZE, best_effort=True)
                 except ProfilerError:
                     break
                 if ptype == BEACON:
@@ -767,7 +814,7 @@ class MotorProfilerClient:
         self._send_ping(ASPEP_PING_CFG, packet_number=0)
         while time.monotonic() < deadline:
             try:
-                ptype, payload = self._read_frame(deadline, self._CONTROL_PAYLOAD_SIZE)
+                ptype, payload = self._read_frame(deadline, self._CONTROL_PAYLOAD_SIZE, best_effort=True)
             except ProfilerError:
                 break
             if ptype == PING:
@@ -796,7 +843,7 @@ class MotorProfilerClient:
         self._send_data(payload)
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
-            ptype, response = self._read_frame(deadline, self._CONTROL_PAYLOAD_SIZE)
+            ptype, response = self._read_frame(deadline, self._CONTROL_PAYLOAD_SIZE, best_effort=True)
             if ptype == DATA_PACKET:
                 return response
             if ptype == NACK:
