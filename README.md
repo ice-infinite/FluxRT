@@ -17,10 +17,16 @@
 - TIM1 已按中心对齐 12 kHz 运行，ADC1/ADC2 由 TIM1 TRGO 同步注入采样；PA11/Break2、1.15 A 软件过流和驱动器故障关断已接入。
 - 默认上电保持 CH1～CH3、MOE 和 PB13/PB14/PB15 关闭；只有串口显式执行 `foc_start` 才会 arm，`foc_stop` 立即关断。
 - Rust 已运行对齐、强制角度升速、Id/Iq PI、圆限幅、SVPWM 和 SMO。默认 `SMO=启用`、`closed_loop=0`；闭环只能在停机后通过 Shell 临时打开。
-- 已建立完整 ISR 同拍 WCET，并完成 Rust `3/s/z` 实机矩阵；默认为 `s`。A17 Diagnostic BIN 为 128,600 B，Flash 仅余 2,472 B；A17 新增 ADC 序列后的运行态 WCET 尚待复测，不能沿用旧数值。
-- 已建立 Diagnostic / Calibration / Production 三个隔离构建档。A18 Calibration + `s` 为 97,128 B，只保留停机相电压固定窗并在应用/平台两层禁止 arm；Production + `s` 为 95,708 B，不含在线调参、trace 或 4 KiB 固定窗。
+- 已建立完整 ISR 同拍 WCET，并完成过 Rust `3/s/z` 实机矩阵；A23 V19 后 Diagnostic
+  改以 `z` 解决 128 KiB 容量门，其余档位仍为 `s`。V19 + `z` 的运行态 WCET 尚待复测，
+  不能沿用旧数值。
+- 已建立 Diagnostic / Calibration / Identification / Production 四个隔离构建档。Identification 的 EXP-B3 S4～S5.4硬件链通过；S5.5A/B确认LCR线对/位置差异，S5.5C又证明简单乘法比例不能把动态1.9503 mH拉入0.98～1.4103 mH诊断包络。Rust在该包络10个PC闭环工况全部完成，但现有仪器缺独立动态电流/差分PWM电压，精确 `Ld/Lq`、参数更新及再次powered run仍未授权。
 - A19 已在目标板完成 Calibration 首次下载、启动和 `foc_start` 拒绝门，并取得停机 256 拍连续原始码；当前缺可信万用表多点参考，仍未形成电压标定参数。
 - A17 已接通 PC0/PC3/PC1 三路 BEMF ADC 原始码的 12 kHz、256 拍只读固定窗；无功率实机采集通过，但尚未完成电压标定、动态相序、示波器对拍或观察器接入。
+- A22.3 已完成 adapter→V19 的硬件中立组装门：名义/无模型与质量状态联合校验、回绕 age、
+  失败88 B清零和128拍legacy等价通过；它尚未接入目标ISR，Measured仍关闭。A21.1 已用
+  严格完整-token十进制解析替换应用层36处libc数字转换，Diagnostic ROM由129,952 B降至
+  106,416 B，回收23,536 B、剩余24,656 B；V19 + `z` 的板端完整ISR WCET仍待复测。
 - 已完成 CORDIC `sin/cos`、`atan2` 停机分项基准；专用 `foc_math_bench` 由默认关闭的 Kconfig 控制，不占用日常 Diagnostic/Production Flash。
 - 已完成“6 NOP + 单次 RRDY 检查”候选 A/B，并补齐实时健康计数与单次未就绪故障注入：两类注入均恰好回退/恢复 1 次、后续约 6.36 万拍成功、0 miss/error/fault；因收益仅 69 cycles 且依赖时钟/工具链，候选仍默认关闭，Production 保留有界轮询。
 - 已实现可移植 Rust CPU 快速 `sin/cos`/`atan2` 候选：Host 密集误差回归、PC 闭环仿真和实机同镜像 A/B 通过；三轮最坏完整 ISR 比 CORDIC 少 204 cycles，但因实机仍为开环且没有编码器真值，G431 默认继续使用 CORDIC/FPU。
@@ -82,9 +88,19 @@ Calibration 停机采集构建（禁止电机 arm）：
 .\build.ps1 -Regenerate -Profile Calibration -RustOptLevel s
 ```
 
-Diagnostic、Calibration、Production 输出分别位于 `cmake-build`、
-`cmake-build-calibration`、`cmake-build-production`，Rust 静态库也按档位和优化等级
-隔离。默认 Rust 优化等级为实机比较后的 `s`；`3` 和 `z` 仅用于回归矩阵。详见
+Identification 参数辨识构建（S5.5C离线真值与包络门已完成；下一次powered参数门等待独立测量能力并须重新人工确认）：
+
+```powershell
+.\build.ps1 -Regenerate -Profile Identification -RustOptLevel s
+```
+
+Diagnostic、Calibration、Identification、Production 输出分别位于 `cmake-build`、
+`cmake-build-calibration`、`cmake-build-identification`、`cmake-build-production`，Rust 静态库也按档位和优化等级
+隔离。A21.1 回收浮点文本解析链、A21.2 选定 `s` 后，A21.3 对 V19 常态路径做了
+数值等价裁剪。Diagnostic + `s` 的 trace-off 最坏完整 ISR 由 10,612 降至
+9,627/12,750 cycles，占 12 kHz 物理周期 67.96%，已通过 70% 阶段门；trace-on
+最坏 10,047 cycles、0 miss。四档省略参数时仍统一默认 `s`；`z`、`3` 仅用于
+显式回归比较。这不代表闭环、长测或产品验收已通过。详见
 [构建档与优化等级](docs/构建档与优化等级.md)。
 
 Rust 算法/桥接、Clippy、交叉编译和 C 平台安全测试：
@@ -116,7 +132,13 @@ TIM1/ADC、固件默认和板上镜像仍保持 12/12 kHz，详见 A7 报告。
 
 - [A0～A28 已完成历史、后续任务阶段与验收清单](docs/后续任务阶段计划.md)
 - [项目操作记录、当前交接与 Git 追溯规则](docs/工程操作日志.md)
-- [Diagnostic / Calibration / Production 构建档与 Rust 优化等级](docs/构建档与优化等级.md)
+- [并行任务的文件隔离、串行集成与证据规则](docs/并行任务执行与集成规则.md)
+- [A22.1/A24.1 并行软件门与 A23 V19 输入 ABI 冻结](docs/performance/2026-09-27-A22.1-A24.1-并行软件门与A23-ABI冻结.md)
+- [A23.1～A24.3 V19 完整输入、Rust 传感器模型与 MATLAB 独立对拍](docs/performance/2026-09-27-A23.1-A24.3-V19输入与双仿真门.md)
+- [A22.2/A24.4 未标定平台锁门与 PC 完整相电压链](docs/performance/2026-09-28-A22.2-A24.4-平台锁门与PC完整链.md)
+- [A21.0/A22.3 Diagnostic 容量归因与 V19 组装门](docs/performance/2026-09-28-A21.0-A22.3-容量归因与V19组装门.md)
+- [A21.1 严格整数 CLI、输入拒绝契约与实际容量回收](docs/performance/2026-09-28-A21.1-严格整数CLI与容量回收.md)
+- [Diagnostic / Calibration / Identification / Production 构建档与 Rust 优化等级](docs/构建档与优化等级.md)
 - [A18 Calibration 构建档、能力隔离与标定契约](docs/performance/2026-09-24-A18-Calibration构建档与标定契约.md)
 - [A19 Calibration 板端安全门与静态原始码基线](docs/performance/2026-09-24-A19-Calibration板端安全门与静态基线.md)
 - [阶段 1.1 构建优化矩阵与 Production 候选报告](docs/performance/2026-09-23-A1构建档矩阵.md)

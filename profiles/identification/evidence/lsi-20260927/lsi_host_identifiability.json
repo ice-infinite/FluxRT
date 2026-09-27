@@ -1,0 +1,122 @@
+{
+  "format_version": 1,
+  "analysis_kind": "lsi-host-identifiability",
+  "model": {
+    "sample_rate_hz": 12000.0,
+    "rs_ohm": 4.9666667,
+    "bus_voltage_v": 12.3,
+    "dead_time_s": 5.5e-07,
+    "current_counts_per_amp": 626.5350000000001,
+    "current_noise_std_counts": 0.5,
+    "perturbation_v": 0.4,
+    "samples_per_trial": 48,
+    "trials_per_point": 30,
+    "seed": 431
+  },
+  "rows": [
+    {
+      "bias_current_a": 0.2,
+      "truth_h": 0.000893,
+      "mean_estimate_h": 0.0008935999999999999,
+      "mean_error_pct": 0.06718924972002327,
+      "range_over_mean_pct": 1.5666965085049258,
+      "classification_rate": 1.0,
+      "command_voltage_only_mean_h": 0.0008708333333333333,
+      "command_voltage_only_error_pct": -2.4822695035461084
+    },
+    {
+      "bias_current_a": 0.2,
+      "truth_h": 0.001058,
+      "mean_estimate_h": 0.0010583333333333332,
+      "mean_error_pct": 0.0315059861373701,
+      "range_over_mean_pct": 1.7952755905511735,
+      "classification_rate": 1.0,
+      "command_voltage_only_mean_h": 0.0010374,
+      "command_voltage_only_error_pct": -1.9470699432892258
+    },
+    {
+      "bias_current_a": 0.2,
+      "truth_h": 0.0011133333,
+      "mean_estimate_h": 0.0011133666666666667,
+      "mean_error_pct": 0.002997006077753994,
+      "range_over_mean_pct": 2.2454417532409265,
+      "classification_rate": 1.0,
+      "command_voltage_only_mean_h": 0.0010938666666666667,
+      "command_voltage_only_error_pct": -1.7485000523502991
+    },
+    {
+      "bias_current_a": 0.4,
+      "truth_h": 0.000893,
+      "mean_estimate_h": 0.0008907666666666666,
+      "mean_error_pct": -0.2500933184024001,
+      "range_over_mean_pct": 1.571679826366802,
+      "classification_rate": 1.0,
+      "command_voltage_only_mean_h": 0.0008682333333333333,
+      "command_voltage_only_error_pct": -2.773422918999635
+    },
+    {
+      "bias_current_a": 0.4,
+      "truth_h": 0.001058,
+      "mean_estimate_h": 0.0010601666666666667,
+      "mean_error_pct": 0.20478890989288345,
+      "range_over_mean_pct": 1.6978462505895302,
+      "classification_rate": 1.0,
+      "command_voltage_only_mean_h": 0.0010388666666666666,
+      "command_voltage_only_error_pct": -1.808443604284815
+    },
+    {
+      "bias_current_a": 0.4,
+      "truth_h": 0.0011133333,
+      "mean_estimate_h": 0.0011116666666666666,
+      "mean_error_pct": -0.14969760927239228,
+      "range_over_mean_pct": 2.1589205397301483,
+      "classification_rate": 1.0,
+      "command_voltage_only_mean_h": 0.0010926333333333333,
+      "command_voltage_only_error_pct": -1.859278498780803
+    },
+    {
+      "bias_current_a": 0.6,
+      "truth_h": 0.000893,
+      "mean_estimate_h": 0.0008933333333333333,
+      "mean_error_pct": 0.03732736095558575,
+      "range_over_mean_pct": 1.5671641791044792,
+      "classification_rate": 1.0,
+      "command_voltage_only_mean_h": 0.0008706333333333333,
+      "command_voltage_only_error_pct": -2.504665920119453
+    },
+    {
+      "bias_current_a": 0.6,
+      "truth_h": 0.001058,
+      "mean_estimate_h": 0.0010586666666666665,
+      "mean_error_pct": 0.063011972274718,
+      "range_over_mean_pct": 1.889168765743058,
+      "classification_rate": 1.0,
+      "command_voltage_only_mean_h": 0.0010377666666666666,
+      "command_voltage_only_error_pct": -1.912413358538123
+    },
+    {
+      "bias_current_a": 0.6,
+      "truth_h": 0.0011133333,
+      "mean_estimate_h": 0.0011127333333333332,
+      "mean_error_pct": -0.05388922317035583,
+      "range_over_mean_pct": 2.5163261638008536,
+      "classification_rate": 1.0,
+      "command_voltage_only_mean_h": 0.0010934999999999999,
+      "command_voltage_only_error_pct": -1.7814341850729054
+    }
+  ],
+  "maximum_quantised_current_a": 0.670353611530082,
+  "decision": {
+    "all_three_candidates_distinguished_at_all_bias_points": true,
+    "all_range_over_mean_below_10_pct": true,
+    "host_identifiability_gate": "pass",
+    "hardware_permission": "not-granted",
+    "next_gate": "Host state-machine and abort-path tests before any target PWM implementation"
+  },
+  "limitations": [
+    "ideal single-axis linear RL plant; magnetic saturation is represented only by choosing a different truth L",
+    "nominal ADC scale and Gaussian plus quantisation noise; no measured current-channel noise spectrum",
+    "applied-voltage fit assumes the 550 ns dead-time loss is reconstructed; command-voltage-only bias is reported separately",
+    "passing this host observability screen is not permission to inject the physical motor"
+  ]
+}

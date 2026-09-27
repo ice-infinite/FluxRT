@@ -69,7 +69,7 @@
 //! `docs/无感闭环接管.md`, `foc/include/foc_rust_bridge.h`
 
 use core::f32::consts::PI;
-use core::mem::{align_of, size_of};
+use core::mem::{align_of, offset_of, size_of};
 use core::ptr;
 use foc_algorithm::{
     clarke, svpwm_update, wrap_angle_0_to_2pi, Abc, AlphaBeta, PiParam, SvpwmParam,
@@ -77,17 +77,23 @@ use foc_algorithm::{
 #[cfg(any(feature = "fast-math-benchmark", feature = "fast-math-candidate"))]
 use foc_control::FastApproxMath;
 use foc_control::{
-    st_gbm2804_reference_parameters, ConfigurableObserver, ControlAngleOffsets, ControlMath,
-    ControlParameters, CpuMath, CurrentCommand, CurrentLoop, FeedbackSnapshot,
-    InverterVoltageModel, InverterVoltageModelConfig, ObserverBackend, ObserverReliabilityConfig,
-    ObserverVoltageSource, PhaseCurrents, PwmCommand, RevUpConfig, RevUpPhase, RevUpSequencer,
-    RotorEstimator, RotorFeedback, SmoPllTuning, SpeedCommand, SpeedLoop,
+    plan_lsi_actuation, st_gbm2804_reference_parameters, ConfigurableObserver, ControlAngleOffsets,
+    ControlMath, ControlParameters, CpuMath, CurrentCommand, CurrentLoop, FeedbackSnapshot,
+    InverterVoltageModel, InverterVoltageModelConfig, LsiActuationConfig, LsiActuationError,
+    LsiActuationInput, LsiActuationPlan, LsiDriveRequest, ObserverBackend,
+    ObserverReliabilityConfig, ObserverVoltageSource, PhaseCurrents, PwmCommand, RevUpConfig,
+    RevUpPhase, RevUpSequencer, RotorEstimator, RotorFeedback, SmoPllTuning, SpeedCommand,
+    SpeedLoop,
 };
 
 /// ABI 版本：主版本占高 16 位，`0x000E_0000` 表示第 14 代；必须与 C 侧宏逐位
 /// 一致，否则 `main.c` 启动自检会拒绝运行。
 /// ABI version packed as 16-bit halves; must match the C macro bit for bit.
-pub const FOC_RUST_ABI_VERSION: u32 = 0x0011_0000;
+pub const FOC_RUST_ABI_VERSION: u32 = 0x0013_0000;
+pub const FOC_REALTIME_INPUT_VERSION: u32 = 1;
+pub const FOC_LSI_ACTUATION_CONFIG_VERSION: u32 = 1;
+pub const FOC_LSI_ACTUATION_INPUT_VERSION: u32 = 1;
+pub const FOC_LSI_ACTUATION_OUTPUT_VERSION: u32 = 1;
 /// `FocRuntimeConfig` 自身的版本，与 ABI 版本独立演进；C 侧填错会被直接拒绝。
 /// Version of `FocRuntimeConfig`; it evolves independently of the ABI version.
 pub const FOC_RUST_CONFIG_VERSION: u32 = 11;
@@ -107,6 +113,71 @@ pub const FOC_FAULT_OBSERVER_STARTUP: u32 = 1 << 2;
 /// 观测器已接管角度后，连续失锁超过 `observer_loss_timeout_s`。
 /// The observer stayed unlocked longer than `observer_loss_timeout_s`.
 pub const FOC_FAULT_OBSERVER_LOST: u32 = 1 << 3;
+pub const FOC_FAULT_PLATFORM_INPUT: u32 = 1 << 4;
+
+pub const FOC_REALTIME_VALID_PHASE_CURRENTS: u32 = 1 << 0;
+pub const FOC_REALTIME_VALID_DC_BUS_VOLTAGE: u32 = 1 << 1;
+pub const FOC_REALTIME_VALID_PHASE_VOLTAGES: u32 = 1 << 2;
+pub const FOC_REALTIME_VALID_ELECTRICAL_ANGLE: u32 = 1 << 3;
+pub const FOC_REALTIME_VALID_SENSOR_TEMPERATURE: u32 = 1 << 4;
+pub const FOC_REALTIME_VALID_KNOWN_MASK: u32 = FOC_REALTIME_VALID_PHASE_CURRENTS
+    | FOC_REALTIME_VALID_DC_BUS_VOLTAGE
+    | FOC_REALTIME_VALID_PHASE_VOLTAGES
+    | FOC_REALTIME_VALID_ELECTRICAL_ANGLE
+    | FOC_REALTIME_VALID_SENSOR_TEMPERATURE;
+
+pub const FOC_REALTIME_HW_FAULT_DRIVER: u32 = 1 << 0;
+pub const FOC_REALTIME_HW_FAULT_BREAK: u32 = 1 << 1;
+pub const FOC_REALTIME_HW_FAULT_SOFTWARE_CURRENT_TRIP: u32 = 1 << 2;
+pub const FOC_REALTIME_HW_FAULT_BUS_UNDERVOLTAGE: u32 = 1 << 3;
+pub const FOC_REALTIME_HW_FAULT_BUS_OVERVOLTAGE: u32 = 1 << 4;
+pub const FOC_REALTIME_HW_FAULT_ADC_SAMPLE_ERROR: u32 = 1 << 5;
+pub const FOC_REALTIME_HW_FAULT_DEADLINE_MISSED: u32 = 1 << 6;
+pub const FOC_REALTIME_HW_FAULT_KNOWN_MASK: u32 = FOC_REALTIME_HW_FAULT_DRIVER
+    | FOC_REALTIME_HW_FAULT_BREAK
+    | FOC_REALTIME_HW_FAULT_SOFTWARE_CURRENT_TRIP
+    | FOC_REALTIME_HW_FAULT_BUS_UNDERVOLTAGE
+    | FOC_REALTIME_HW_FAULT_BUS_OVERVOLTAGE
+    | FOC_REALTIME_HW_FAULT_ADC_SAMPLE_ERROR
+    | FOC_REALTIME_HW_FAULT_DEADLINE_MISSED;
+
+pub const FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_NONE: u32 = 0;
+pub const FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_ST_NOMINAL: u32 = 1;
+pub const FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_BOARD_CALIBRATED: u32 = 2;
+
+pub const FOC_REALTIME_PHASE_VOLTAGE_QUALITY_UNCONFIGURED: u32 = 0;
+pub const FOC_REALTIME_PHASE_VOLTAGE_QUALITY_UNCALIBRATED: u32 = 1;
+pub const FOC_REALTIME_PHASE_VOLTAGE_QUALITY_VALID: u32 = 2;
+pub const FOC_REALTIME_PHASE_VOLTAGE_QUALITY_STALE: u32 = 3;
+pub const FOC_REALTIME_PHASE_VOLTAGE_QUALITY_OPEN_SUSPECT: u32 = 4;
+pub const FOC_REALTIME_PHASE_VOLTAGE_QUALITY_LOW_SATURATION: u32 = 5;
+pub const FOC_REALTIME_PHASE_VOLTAGE_QUALITY_HIGH_SATURATION: u32 = 6;
+pub const FOC_REALTIME_PHASE_VOLTAGE_QUALITY_THREE_PHASE_INCONSISTENT: u32 = 7;
+pub const FOC_REALTIME_PHASE_VOLTAGE_QUALITY_INVALID_SAMPLE: u32 = 8;
+
+pub const FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCONFIGURED: u32 = 1 << 0;
+pub const FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCALIBRATED: u32 = 1 << 1;
+pub const FOC_REALTIME_PHASE_VOLTAGE_REASON_INVALID_SAMPLE: u32 = 1 << 2;
+pub const FOC_REALTIME_PHASE_VOLTAGE_REASON_STALE: u32 = 1 << 3;
+pub const FOC_REALTIME_PHASE_VOLTAGE_REASON_LOW_SATURATION: u32 = 1 << 4;
+pub const FOC_REALTIME_PHASE_VOLTAGE_REASON_HIGH_SATURATION: u32 = 1 << 5;
+pub const FOC_REALTIME_PHASE_VOLTAGE_REASON_OPEN_SUSPECT: u32 = 1 << 6;
+pub const FOC_REALTIME_PHASE_VOLTAGE_REASON_THREE_PHASE_INCONSISTENT: u32 = 1 << 7;
+pub const FOC_REALTIME_PHASE_VOLTAGE_REASON_RECOVERY_HYSTERESIS: u32 = 1 << 8;
+pub const FOC_REALTIME_PHASE_VOLTAGE_REASON_KNOWN_MASK: u32 =
+    FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCONFIGURED
+        | FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCALIBRATED
+        | FOC_REALTIME_PHASE_VOLTAGE_REASON_INVALID_SAMPLE
+        | FOC_REALTIME_PHASE_VOLTAGE_REASON_STALE
+        | FOC_REALTIME_PHASE_VOLTAGE_REASON_LOW_SATURATION
+        | FOC_REALTIME_PHASE_VOLTAGE_REASON_HIGH_SATURATION
+        | FOC_REALTIME_PHASE_VOLTAGE_REASON_OPEN_SUSPECT
+        | FOC_REALTIME_PHASE_VOLTAGE_REASON_THREE_PHASE_INCONSISTENT
+        | FOC_REALTIME_PHASE_VOLTAGE_REASON_RECOVERY_HYSTERESIS;
+
+pub const FOC_REALTIME_OBSERVER_VOLTAGE_COMMAND_MODEL: u32 = 0;
+pub const FOC_REALTIME_OBSERVER_VOLTAGE_MEASURED: u32 = 1;
+pub const FOC_REALTIME_OBSERVER_VOLTAGE_UNAVAILABLE: u32 = 2;
 
 /// `Controller` 的哨兵值，取自 "FOCR"。C 在 `foc_rust_init()` 之前把存储清零，
 /// 于是"未初始化/被踩坏"与"已初始化"可区分：`magic` 不匹配时所有入口都返回
@@ -410,6 +481,88 @@ pub struct FocFeedback {
     pub electrical_angle_rad: f32,
 }
 
+/// V19 complete physical-input snapshot for one realtime control tick.
+///
+/// The integer fields remain raw `u32` so an unknown value arriving from C can
+/// be rejected instead of being materialised as an invalid Rust enum. Measured
+/// phase voltage is represented here but is deliberately not connected to the
+/// observer until the A19/A20/A21 hardware gates have passed.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FocRealtimeInput {
+    pub struct_size: u32,
+    pub version: u32,
+    pub control_sequence: u32,
+    pub valid_flags: u32,
+    pub hardware_fault_flags: u32,
+    pub phase_voltage_sequence: u32,
+    pub phase_voltage_age_ticks: u32,
+    pub phase_voltage_provenance: u32,
+    pub phase_voltage_quality_state: u32,
+    pub phase_voltage_reason_mask: u32,
+    pub observer_voltage_selection: u32,
+    pub phase_voltage_fallback_event_count: u32,
+    pub actual_dt_s: f32,
+    pub phase_current_a: f32,
+    pub phase_current_b: f32,
+    pub phase_current_c: f32,
+    pub dc_bus_voltage: f32,
+    pub phase_voltage_a_v: f32,
+    pub phase_voltage_b_v: f32,
+    pub phase_voltage_c_v: f32,
+    pub electrical_angle_rad: f32,
+    pub sensor_temperature_c: f32,
+}
+
+impl FocRealtimeInput {
+    /// Maps the legacy 20-byte feedback into the only currently enabled source:
+    /// CommandModel. No phase-voltage validity is claimed by this conversion.
+    pub fn command_model_from_legacy(
+        feedback: FocFeedback,
+        control_sequence: u32,
+        actual_dt_s: f32,
+    ) -> Self {
+        Self {
+            struct_size: size_of::<Self>() as u32,
+            version: FOC_REALTIME_INPUT_VERSION,
+            control_sequence,
+            valid_flags: FOC_REALTIME_VALID_PHASE_CURRENTS | FOC_REALTIME_VALID_DC_BUS_VOLTAGE,
+            hardware_fault_flags: 0,
+            phase_voltage_sequence: 0,
+            phase_voltage_age_ticks: 0,
+            phase_voltage_provenance: FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_NONE,
+            phase_voltage_quality_state: FOC_REALTIME_PHASE_VOLTAGE_QUALITY_UNCONFIGURED,
+            phase_voltage_reason_mask: FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCONFIGURED,
+            observer_voltage_selection: FOC_REALTIME_OBSERVER_VOLTAGE_COMMAND_MODEL,
+            phase_voltage_fallback_event_count: 0,
+            actual_dt_s,
+            phase_current_a: feedback.phase_current_a,
+            phase_current_b: feedback.phase_current_b,
+            phase_current_c: feedback.phase_current_c,
+            dc_bus_voltage: feedback.dc_bus_voltage,
+            phase_voltage_a_v: 0.0,
+            phase_voltage_b_v: 0.0,
+            phase_voltage_c_v: 0.0,
+            electrical_angle_rad: 0.0,
+            sensor_temperature_c: 0.0,
+        }
+    }
+
+    fn legacy_feedback(&self) -> FocFeedback {
+        FocFeedback {
+            phase_current_a: self.phase_current_a,
+            phase_current_b: self.phase_current_b,
+            phase_current_c: self.phase_current_c,
+            dc_bus_voltage: self.dc_bus_voltage,
+            electrical_angle_rad: if self.valid_flags & FOC_REALTIME_VALID_ELECTRICAL_ANGLE != 0 {
+                self.electrical_angle_rad
+            } else {
+                0.0
+            },
+        }
+    }
+}
+
 /// 电流环的 dq 给定 `[A]`，由 `foc_rust_fast_step()` 逐拍传入。
 /// dq current references `[A]` fed per tick into `foc_rust_fast_step()`.
 ///
@@ -436,7 +589,7 @@ pub struct FocReference {
 /// Dead time, minimum pulse width and gate enabling are the C platform's job; this
 /// struct carries only the checked algorithm output.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FocOutput {
     /// A 相占空比 `[--]` / Phase A duty.
     pub duty_a: f32,
@@ -444,6 +597,76 @@ pub struct FocOutput {
     pub duty_b: f32,
     /// C 相占空比 `[--]` / Phase C duty.
     pub duty_c: f32,
+}
+
+/// EXP-B3 Ls(I) 纯计划配置的 C ABI 镜像。
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FocLsiActuationConfig {
+    pub struct_size: u32,
+    pub version: u32,
+    pub sample_rate_hz: u32,
+    pub actuation_delay_control_ticks: u32,
+    pub stator_resistance_ohm: f32,
+    pub maximum_bias_current_a: f32,
+    pub maximum_perturbation_voltage_v: f32,
+    pub current_trip_a: f32,
+    pub minimum_bus_voltage_v: f32,
+    pub maximum_bus_voltage_v: f32,
+    pub minimum_duty: f32,
+    pub maximum_duty: f32,
+}
+
+/// EXP-B3 Ls(I) 状态机请求与平台安全门的 C ABI 输入。
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FocLsiActuationInput {
+    pub struct_size: u32,
+    pub version: u32,
+    pub drive_request: u32,
+    pub force_safe_output: u32,
+    pub capture_ready: u32,
+    pub capture_full: u32,
+    pub hardware_fault: u32,
+    pub software_trip: u32,
+    pub control_tick: u32,
+    pub requested_bias_current_a: f32,
+    pub requested_perturbation_voltage_v: f32,
+    pub phase_u_current_a: f32,
+    pub bus_voltage_v: f32,
+}
+
+/// Rust 返回给 C 平台所有者的“尚未施加”PWM 计划。
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FocLsiActuationOutput {
+    pub struct_size: u32,
+    pub version: u32,
+    pub safe_output_required: u32,
+    pub drive_active: u32,
+    pub source_control_tick: u32,
+    pub expected_active_control_tick: u32,
+    pub phase_u_voltage_command_v: f32,
+    pub duty_u: f32,
+    pub duty_v: f32,
+    pub duty_w: f32,
+}
+
+impl FocLsiActuationOutput {
+    fn safe(control_tick: u32) -> Self {
+        Self {
+            struct_size: size_of::<Self>() as u32,
+            version: FOC_LSI_ACTUATION_OUTPUT_VERSION,
+            safe_output_required: 1,
+            drive_active: 0,
+            source_control_tick: control_tick,
+            expected_active_control_tick: control_tick,
+            phase_u_voltage_command_v: 0.0,
+            duty_u: 0.0,
+            duty_v: 0.0,
+            duty_w: 0.0,
+        }
+    }
 }
 
 /// 主机仿真覆盖逆变器补偿的便捷入口参数，**不属于 C ABI**。
@@ -863,7 +1086,7 @@ pub struct FocRuntimeConfig {
 /// 注意 `measured_speed_rpm` 是观测器**估计值**，不是真值测量。
 /// `measured_speed_rpm` is an observer estimate, not a ground-truth measurement.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FocTelemetry {
     /// 控制器逻辑状态，取值见 `FocState` / Controller state.
     pub state: u32,
@@ -923,9 +1146,37 @@ const _: () = assert!(size_of::<FocObserverRunReliabilityConfig>() == 8);
 const _: () = assert!(size_of::<FocAngleCompensationConfig>() == 8);
 const _: () = assert!(size_of::<FocInverterVoltageModelConfig>() == 36);
 const _: () = assert!(size_of::<FocPiConfig>() == 28);
+const _: () = assert!(size_of::<FocFeedback>() == 20);
+const _: () = assert!(align_of::<FocRealtimeInput>() == 4);
+const _: () = assert!(size_of::<FocRealtimeInput>() == 88);
+const _: () = assert!(offset_of!(FocRealtimeInput, struct_size) == 0);
+const _: () = assert!(offset_of!(FocRealtimeInput, version) == 4);
+const _: () = assert!(offset_of!(FocRealtimeInput, control_sequence) == 8);
+const _: () = assert!(offset_of!(FocRealtimeInput, valid_flags) == 12);
+const _: () = assert!(offset_of!(FocRealtimeInput, hardware_fault_flags) == 16);
+const _: () = assert!(offset_of!(FocRealtimeInput, phase_voltage_sequence) == 20);
+const _: () = assert!(offset_of!(FocRealtimeInput, phase_voltage_age_ticks) == 24);
+const _: () = assert!(offset_of!(FocRealtimeInput, phase_voltage_provenance) == 28);
+const _: () = assert!(offset_of!(FocRealtimeInput, phase_voltage_quality_state) == 32);
+const _: () = assert!(offset_of!(FocRealtimeInput, phase_voltage_reason_mask) == 36);
+const _: () = assert!(offset_of!(FocRealtimeInput, observer_voltage_selection) == 40);
+const _: () = assert!(offset_of!(FocRealtimeInput, phase_voltage_fallback_event_count) == 44);
+const _: () = assert!(offset_of!(FocRealtimeInput, actual_dt_s) == 48);
+const _: () = assert!(offset_of!(FocRealtimeInput, phase_current_a) == 52);
+const _: () = assert!(offset_of!(FocRealtimeInput, phase_current_b) == 56);
+const _: () = assert!(offset_of!(FocRealtimeInput, phase_current_c) == 60);
+const _: () = assert!(offset_of!(FocRealtimeInput, dc_bus_voltage) == 64);
+const _: () = assert!(offset_of!(FocRealtimeInput, phase_voltage_a_v) == 68);
+const _: () = assert!(offset_of!(FocRealtimeInput, phase_voltage_b_v) == 72);
+const _: () = assert!(offset_of!(FocRealtimeInput, phase_voltage_c_v) == 76);
+const _: () = assert!(offset_of!(FocRealtimeInput, electrical_angle_rad) == 80);
+const _: () = assert!(offset_of!(FocRealtimeInput, sensor_temperature_c) == 84);
 const _: () = assert!(align_of::<FocRuntimeConfig>() == 4);
 const _: () = assert!(size_of::<FocRuntimeConfig>() == 296);
 const _: () = assert!(size_of::<FocTelemetry>() == 100);
+const _: () = assert!(size_of::<FocLsiActuationConfig>() == 48);
+const _: () = assert!(size_of::<FocLsiActuationInput>() == 52);
+const _: () = assert!(size_of::<FocLsiActuationOutput>() == 40);
 
 /// C 提供的控制器存储容器 `[bytes]`，对齐 8 字节。
 /// Controller storage container supplied by C `[bytes]`, 8-byte aligned.
@@ -1230,6 +1481,86 @@ fn feedback_is_valid(feedback: &FocFeedback) -> bool {
         && feedback.dc_bus_voltage.is_finite()
         && feedback.dc_bus_voltage > 0.0
         && feedback.electrical_angle_rad.is_finite()
+}
+
+/// Validates the stable V19 envelope before any control algorithm consumes it.
+/// Optional physical values are checked only when their corresponding valid bit
+/// is set; metadata enums and bitmasks are always checked so unknown C values
+/// cannot silently acquire meaning in a newer binary.
+fn realtime_input_envelope_is_valid(input: &FocRealtimeInput) -> bool {
+    let required_flags = FOC_REALTIME_VALID_PHASE_CURRENTS | FOC_REALTIME_VALID_DC_BUS_VOLTAGE;
+    if input.struct_size != size_of::<FocRealtimeInput>() as u32
+        || input.version != FOC_REALTIME_INPUT_VERSION
+        || input.valid_flags & !FOC_REALTIME_VALID_KNOWN_MASK != 0
+        || input.valid_flags & required_flags != required_flags
+        || input.hardware_fault_flags & !FOC_REALTIME_HW_FAULT_KNOWN_MASK != 0
+        || !input.actual_dt_s.is_finite()
+        || input.actual_dt_s <= 0.0
+    {
+        return false;
+    }
+
+    // 目标平台当前每拍都组装这一份严格的 CommandModel 包络。先识别完整常量组，
+    // 可以跳过 Measured/Hybrid 才需要的枚举分支与可选浮点检查；任一字段不同仍落回
+    // 下面的通用 V19 校验，绝不把未知元数据当成快速路径。
+    // The target emits this exact CommandModel envelope every tick. Recognising
+    // the complete constant tuple avoids the Measured/Hybrid-only branch chain;
+    // any difference still falls through to the full V19 validator below.
+    if input.valid_flags == required_flags
+        && input.hardware_fault_flags == 0
+        && input.phase_voltage_provenance == FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_NONE
+        && input.phase_voltage_quality_state == FOC_REALTIME_PHASE_VOLTAGE_QUALITY_UNCONFIGURED
+        && input.phase_voltage_reason_mask == FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCONFIGURED
+        && input.observer_voltage_selection == FOC_REALTIME_OBSERVER_VOLTAGE_COMMAND_MODEL
+    {
+        return true;
+    }
+
+    matches!(
+        input.phase_voltage_provenance,
+        FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_NONE
+            | FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_ST_NOMINAL
+            | FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_BOARD_CALIBRATED
+    ) && matches!(
+        input.phase_voltage_quality_state,
+        FOC_REALTIME_PHASE_VOLTAGE_QUALITY_UNCONFIGURED
+            | FOC_REALTIME_PHASE_VOLTAGE_QUALITY_UNCALIBRATED
+            | FOC_REALTIME_PHASE_VOLTAGE_QUALITY_VALID
+            | FOC_REALTIME_PHASE_VOLTAGE_QUALITY_STALE
+            | FOC_REALTIME_PHASE_VOLTAGE_QUALITY_OPEN_SUSPECT
+            | FOC_REALTIME_PHASE_VOLTAGE_QUALITY_LOW_SATURATION
+            | FOC_REALTIME_PHASE_VOLTAGE_QUALITY_HIGH_SATURATION
+            | FOC_REALTIME_PHASE_VOLTAGE_QUALITY_THREE_PHASE_INCONSISTENT
+            | FOC_REALTIME_PHASE_VOLTAGE_QUALITY_INVALID_SAMPLE
+    ) && input.phase_voltage_reason_mask & !FOC_REALTIME_PHASE_VOLTAGE_REASON_KNOWN_MASK == 0
+        && matches!(
+            input.observer_voltage_selection,
+            FOC_REALTIME_OBSERVER_VOLTAGE_COMMAND_MODEL
+                | FOC_REALTIME_OBSERVER_VOLTAGE_MEASURED
+                | FOC_REALTIME_OBSERVER_VOLTAGE_UNAVAILABLE
+        )
+        && (input.valid_flags & FOC_REALTIME_VALID_PHASE_VOLTAGES == 0
+            || (input.phase_voltage_a_v.is_finite()
+                && input.phase_voltage_b_v.is_finite()
+                && input.phase_voltage_c_v.is_finite()))
+        && (input.valid_flags & FOC_REALTIME_VALID_ELECTRICAL_ANGLE == 0
+            || input.electrical_angle_rad.is_finite())
+        && (input.valid_flags & FOC_REALTIME_VALID_SENSOR_TEMPERATURE == 0
+            || input.sensor_temperature_c.is_finite())
+}
+
+/// Eligibility contract for the future Measured path. The sequence relation is
+/// expressed with wrapping subtraction so the sample immediately before
+/// control sequence zero has age one rather than appearing billions of ticks old.
+fn measured_phase_voltage_is_eligible(input: &FocRealtimeInput) -> bool {
+    input.valid_flags & FOC_REALTIME_VALID_PHASE_VOLTAGES != 0
+        && input.phase_voltage_provenance == FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_BOARD_CALIBRATED
+        && input.phase_voltage_quality_state == FOC_REALTIME_PHASE_VOLTAGE_QUALITY_VALID
+        && input.phase_voltage_reason_mask == 0
+        && input
+            .control_sequence
+            .wrapping_sub(input.phase_voltage_sequence)
+            == input.phase_voltage_age_ticks
 }
 
 /// 校验兼容入口的 dq 电流给定 `[A]` 有限。
@@ -1805,6 +2136,163 @@ pub extern "C" fn foc_rust_context_required_align() -> u32 {
     align_of::<Controller>() as u32
 }
 
+fn lsi_default_actuation_config_abi() -> FocLsiActuationConfig {
+    let config = LsiActuationConfig::default();
+    FocLsiActuationConfig {
+        struct_size: size_of::<FocLsiActuationConfig>() as u32,
+        version: FOC_LSI_ACTUATION_CONFIG_VERSION,
+        sample_rate_hz: config.sample_rate_hz,
+        actuation_delay_control_ticks: config.actuation_delay_control_ticks,
+        stator_resistance_ohm: config.stator_resistance_ohm,
+        maximum_bias_current_a: config.maximum_bias_current_a,
+        maximum_perturbation_voltage_v: config.maximum_perturbation_voltage_v,
+        current_trip_a: config.current_trip_a,
+        minimum_bus_voltage_v: config.minimum_bus_voltage_v,
+        maximum_bus_voltage_v: config.maximum_bus_voltage_v,
+        minimum_duty: config.minimum_duty,
+        maximum_duty: config.maximum_duty,
+    }
+}
+
+fn lsi_actuation_config_from_abi(config: &FocLsiActuationConfig) -> Option<LsiActuationConfig> {
+    if config.struct_size != size_of::<FocLsiActuationConfig>() as u32
+        || config.version != FOC_LSI_ACTUATION_CONFIG_VERSION
+    {
+        return None;
+    }
+    let converted = LsiActuationConfig {
+        sample_rate_hz: config.sample_rate_hz,
+        actuation_delay_control_ticks: config.actuation_delay_control_ticks,
+        stator_resistance_ohm: config.stator_resistance_ohm,
+        maximum_bias_current_a: config.maximum_bias_current_a,
+        maximum_perturbation_voltage_v: config.maximum_perturbation_voltage_v,
+        current_trip_a: config.current_trip_a,
+        minimum_bus_voltage_v: config.minimum_bus_voltage_v,
+        maximum_bus_voltage_v: config.maximum_bus_voltage_v,
+        minimum_duty: config.minimum_duty,
+        maximum_duty: config.maximum_duty,
+    };
+    converted.is_valid().then_some(converted)
+}
+
+#[inline]
+fn lsi_bool_from_abi(value: u32) -> Option<bool> {
+    match value {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
+}
+
+fn lsi_drive_request_from_abi(value: u32) -> Option<LsiDriveRequest> {
+    match value {
+        0 => Some(LsiDriveRequest::Off),
+        1 => Some(LsiDriveRequest::Bias),
+        2 => Some(LsiDriveRequest::PulsePositive),
+        3 => Some(LsiDriveRequest::PulseNegative),
+        _ => None,
+    }
+}
+
+fn lsi_actuation_input_from_abi(input: &FocLsiActuationInput) -> Option<LsiActuationInput> {
+    if input.struct_size != size_of::<FocLsiActuationInput>() as u32
+        || input.version != FOC_LSI_ACTUATION_INPUT_VERSION
+    {
+        return None;
+    }
+    Some(LsiActuationInput {
+        drive_request: lsi_drive_request_from_abi(input.drive_request)?,
+        force_safe_output: lsi_bool_from_abi(input.force_safe_output)?,
+        capture_ready: lsi_bool_from_abi(input.capture_ready)?,
+        capture_full: lsi_bool_from_abi(input.capture_full)?,
+        hardware_fault: lsi_bool_from_abi(input.hardware_fault)?,
+        software_trip: lsi_bool_from_abi(input.software_trip)?,
+        control_tick: input.control_tick,
+        requested_bias_current_a: input.requested_bias_current_a,
+        requested_perturbation_voltage_v: input.requested_perturbation_voltage_v,
+        phase_u_current_a: input.phase_u_current_a,
+        bus_voltage_v: input.bus_voltage_v,
+    })
+}
+
+fn lsi_actuation_output_to_abi(plan: LsiActuationPlan) -> FocLsiActuationOutput {
+    FocLsiActuationOutput {
+        struct_size: size_of::<FocLsiActuationOutput>() as u32,
+        version: FOC_LSI_ACTUATION_OUTPUT_VERSION,
+        safe_output_required: u32::from(plan.safe_output_required),
+        drive_active: u32::from(plan.drive_active),
+        source_control_tick: plan.source_control_tick,
+        expected_active_control_tick: plan.expected_active_control_tick,
+        phase_u_voltage_command_v: plan.phase_u_voltage_command_v,
+        duty_u: plan.duty_u,
+        duty_v: plan.duty_v,
+        duty_w: plan.duty_w,
+    }
+}
+
+/// 写出 EXP-B3 的冻结 Ls(I) 计划配置；不修改普通 FOC 控制器。
+///
+/// # Safety
+/// `config` must be null or point to aligned, exclusively writable storage.
+#[no_mangle]
+pub unsafe extern "C" fn foc_rust_lsi_default_actuation_config(
+    config: *mut FocLsiActuationConfig,
+) -> FocStatus {
+    // SAFETY: the C ABI contract requires writable, aligned storage or null.
+    let Some(config) = (unsafe { config.as_mut() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    *config = lsi_default_actuation_config_abi();
+    FocStatus::Ok
+}
+
+/// 把 Ls(I) 状态请求转换为尚未施加的 PWM 计划。
+///
+/// 任何失败路径都会先把非空 `output` 写成 fail-closed；函数不访问寄存器、不使能
+/// 栅极，也不保存跨拍状态。`config`、`input` 和 `output` 不得重叠。
+///
+/// # Safety
+/// Non-null pointers must be aligned and valid for their declared types, and
+/// `output` must be exclusively writable and not alias either input.
+#[no_mangle]
+pub unsafe extern "C" fn foc_rust_lsi_plan(
+    config: *const FocLsiActuationConfig,
+    input: *const FocLsiActuationInput,
+    output: *mut FocLsiActuationOutput,
+) -> FocStatus {
+    // SAFETY: pointer validity, alignment, exclusivity and non-aliasing are the
+    // caller's ABI contract documented above.
+    let Some(output) = (unsafe { output.as_mut() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    *output = FocLsiActuationOutput::safe(0);
+    let Some(config) = (unsafe { config.as_ref() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    let Some(input) = (unsafe { input.as_ref() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    *output = FocLsiActuationOutput::safe(input.control_tick);
+
+    let Some(config) = lsi_actuation_config_from_abi(config) else {
+        return FocStatus::InvalidArgument;
+    };
+    let Some(input) = lsi_actuation_input_from_abi(input) else {
+        return FocStatus::InvalidArgument;
+    };
+    match plan_lsi_actuation(config, input) {
+        Ok(plan) => {
+            *output = lsi_actuation_output_to_abi(plan);
+            FocStatus::Ok
+        }
+        Err(LsiActuationError::NotReady) => FocStatus::NotConfigured,
+        Err(LsiActuationError::Fault) => FocStatus::HardwareFault,
+        Err(LsiActuationError::InvalidConfig | LsiActuationError::InvalidInput) => {
+            FocStatus::InvalidArgument
+        }
+    }
+}
+
 #[no_mangle]
 /// 导出 `[ST]` MCSDK 参考工程的默认配置，供 C 侧取默认值后再改字段。
 /// Writes the editable configuration profile derived from the working ST
@@ -2134,15 +2622,16 @@ pub unsafe extern "C" fn foc_rust_start_realtime(
 ///
 /// 这是实时路径的唯一入口（配合 `foc_rust_start_realtime()`），在 **12 kHz 的 ADC
 /// 中断**里执行。实时约束：无动态分配、无阻塞、无日志、无 Mutex 等待；三角运算走
-/// `PlatformMath`（目标板 CORDIC），`mat` 对象每拍在栈上新建。实测单次调用是 ISR
-/// 的主要开销（约 7,300 cycles @170 MHz `[HW]`）。
+/// `PlatformMath`（目标板 CORDIC），`mat` 对象每拍在栈上新建。A21.3 在
+/// Diagnostic + Rust `s` + V19 上实测的 trace-off control 段最坏为
+/// 8,524 cycles @170 MHz `[HW]`（同拍完整 ISR 为 9,627 cycles）。
 /// Runs inside the 12 kHz ADC ISR with no allocation, blocking or logging; the
 /// math object is rebuilt on the stack every tick.
 ///
 /// 关键语义 / Key semantics: 任何错误返回之前 `output` 都已被清零，调用方不得沿用
 /// 上一周期的占空比；本函数不接触硬件，栅极关断仍由 C 平台层负责。`telemetry` 可以
 /// 为 NULL，非 NULL 时在每条正常返回路径上被**完整覆盖**（多率时隙那一条除外，见
-/// 下文该分支）。`feedback` 与 `output`、`telemetry` 不得指向同一内存。
+/// 下文该分支）。`input` 与 `output`、`telemetry` 不得指向同一内存。
 /// Every error return has already zeroed `output`; `telemetry` may be NULL and is
 /// fully overwritten on every normal return path.
 ///
@@ -2152,7 +2641,7 @@ pub unsafe extern "C" fn foc_rust_start_realtime(
 ///
 /// # Safety
 /// `context` must be initialized and exclusively owned by the caller;
-/// `feedback` must be readable, `output` writable, and optional `telemetry`
+/// `input` must be readable, `output` writable, and optional `telemetry`
 /// writable. The pointed-to objects must not overlap.
 ///
 /// 具体契约 / Concrete contract: `context` 必须已由 `foc_rust_init()` 初始化且非空；
@@ -2162,7 +2651,7 @@ pub unsafe extern "C" fn foc_rust_start_realtime(
 /// mutate it concurrently with the ISR while the power stage is armed.
 pub unsafe extern "C" fn foc_rust_realtime_step(
     context: *mut FocRustContextStorage,
-    feedback: *const FocFeedback,
+    input: *const FocRealtimeInput,
     output: *mut FocOutput,
     telemetry: *mut FocTelemetry,
 ) -> FocStatus {
@@ -2173,15 +2662,55 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
     let Some(controller) = (unsafe { controller_mut(context) }) else {
         return FocStatus::InvalidArgument;
     };
-    let Some(feedback) = (unsafe { feedback.as_ref() }) else {
+    let Some(input) = (unsafe { input.as_ref() }) else {
         return FocStatus::InvalidArgument;
     };
-    // 先判故障再判配置：粘滞故障优先，即使配置被清掉也要保持 `HardwareFault`，
-    // 避免调用方把故障态误读成"只是没配置"。
-    // Fault is checked before configuration so a latched fault is never masked.
     if controller.state == FocState::Fault {
         return FocStatus::HardwareFault;
     }
+    if !realtime_input_envelope_is_valid(input) {
+        return FocStatus::InvalidArgument;
+    }
+    // The hardware mirror is evaluated before configuration and before any
+    // algorithm state advances. output was already cleared above.
+    if input.hardware_fault_flags != 0 {
+        controller.fault_flags |= FOC_FAULT_PLATFORM_INPUT;
+        controller.state = FocState::Fault;
+        return FocStatus::HardwareFault;
+    }
+    // Measured is represented and fully validated in V19, but it is not yet an
+    // implemented observer source. UNAVAILABLE is the fail-closed result of a
+    // pure-Measured request; Hybrid fallback arrives as CommandModel and is safe.
+    if input.observer_voltage_selection == FOC_REALTIME_OBSERVER_VOLTAGE_UNAVAILABLE {
+        return FocStatus::NotConfigured;
+    }
+    if input.observer_voltage_selection == FOC_REALTIME_OBSERVER_VOLTAGE_MEASURED {
+        // Both an ineligible sample and an otherwise eligible board-calibrated
+        // sample remain unavailable until the observer integration gate opens.
+        let _measured_eligible = measured_phase_voltage_is_eligible(input);
+        return FocStatus::NotConfigured;
+    }
+
+    let feedback = input.legacy_feedback();
+    // V19 在进入核心前只做一次指针、上下文和输入包络校验。核心接收已经验证的
+    // Rust 引用，避免旧实现再次创建一套 FFI 栈帧、清零输出和检查同一上下文。
+    // V19 validates the pointers, context and input envelope exactly once. The
+    // core receives validated Rust references, avoiding the duplicate FFI frame,
+    // output clear and context checks that the retained legacy wrapper required.
+    unsafe { foc_rust_realtime_step_core(controller, &feedback, output, telemetry) }
+}
+
+/// 已验证引用上的实时控制核心。FFI 指针检查、输出预清零和粘滞故障优先级由入口负责；
+/// 本函数只保留配置/状态/物理反馈门和确定性控制组合。
+/// Realtime control core over validated references. The FFI entry owns pointer
+/// checks, output pre-clear and sticky-fault priority; this function retains the
+/// configuration/state/physical-feedback gates and deterministic control body.
+unsafe fn foc_rust_realtime_step_core(
+    controller: &mut Controller,
+    feedback: &FocFeedback,
+    output: &mut FocOutput,
+    telemetry: *mut FocTelemetry,
+) -> FocStatus {
     if !controller.algorithm_configured {
         return FocStatus::NotConfigured;
     }
@@ -2323,9 +2852,16 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
     let observer_due =
         observer_enabled && observer_active_phase && controller.observer_counter == 0;
     if observer_due {
-        let observer_pwm = controller
+        let observer_pwm = if controller
             .inverter_voltage_model
-            .observer_equivalent_pwm(controller.previous_pwm, snapshot.dc_bus_voltage);
+            .observer_correction_enabled()
+        {
+            controller
+                .inverter_voltage_model
+                .observer_equivalent_pwm(controller.previous_pwm, snapshot.dc_bus_voltage)
+        } else {
+            controller.previous_pwm
+        };
         // 观测器吃的是**上一拍**真正下发的 PWM：本拍的占空比要到本函数末尾才算出来，
         // 用本拍值会造成代数环。分频 > 1 时 `previous_pwm` 仍是最近一次实际下发值，
         // 只是它对应的周期已经过去了 N 个，观测器的电压项因此偏旧——这是多率路径的
@@ -2720,14 +3256,22 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
     // 可选的死区/器件压降前馈。补偿会把占空比推近边界，`feedforward_pwm()` 内部虽已钳到 `[0,1]`，
     // 但第二道检查仍然保留，防止将来补偿逻辑改动后越界值被静默下发。
     // The second validity check guards the compensated duty before it reaches C.
-    let pwm = controller
-        .inverter_voltage_model
-        .feedforward_pwm(pwm, snapshot.dc_bus_voltage);
-    if !pwm.is_valid() {
-        controller.fault_flags |= FOC_FAULT_ALGORITHM_OUTPUT;
-        controller.state = FocState::Fault;
-        return FocStatus::HardwareFault;
-    }
+    let pwm = if controller.inverter_voltage_model.feedforward_enabled() {
+        let compensated = controller
+            .inverter_voltage_model
+            .feedforward_pwm(pwm, snapshot.dc_bus_voltage);
+        if !compensated.is_valid() {
+            controller.fault_flags |= FOC_FAULT_ALGORITHM_OUTPUT;
+            controller.state = FocState::Fault;
+            return FocStatus::HardwareFault;
+        }
+        compensated
+    } else {
+        // `pwm` was checked immediately above. With feed-forward disabled it is
+        // numerically unchanged, so repeating the same three finite/range checks
+        // would add no protection.
+        pwm
+    };
 
     // `previous_pwm` 必须保存**实际下发**的值（补偿之后），因为下一拍观测器用它重构
     // 相电压；保存补偿前的值会让观测器的电压项与真实相电压系统性偏差。
@@ -2774,6 +3318,33 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
         *telemetry = controller.telemetry;
     }
     FocStatus::Ok
+}
+
+/// Host-only pre-V19 wrapper used by the tick-equivalence regression. Keeping the
+/// legacy pointer and safety contract out of target builds lets the release image
+/// contain one FFI validation path while the test still compares both protocols
+/// against the exact same control core.
+#[cfg(test)]
+unsafe fn foc_rust_realtime_step_legacy_impl(
+    context: *mut FocRustContextStorage,
+    feedback: *const FocFeedback,
+    output: *mut FocOutput,
+    telemetry: *mut FocTelemetry,
+) -> FocStatus {
+    let Some(output) = (unsafe { output.as_mut() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    zero_output(output);
+    let Some(controller) = (unsafe { controller_mut(context) }) else {
+        return FocStatus::InvalidArgument;
+    };
+    let Some(feedback) = (unsafe { feedback.as_ref() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    if controller.state == FocState::Fault {
+        return FocStatus::HardwareFault;
+    }
+    unsafe { foc_rust_realtime_step_core(controller, feedback, output, telemetry) }
 }
 
 #[no_mangle]
@@ -3224,6 +3795,441 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 mod tests {
     use super::*;
 
+    fn realtime_input(feedback: FocFeedback) -> FocRealtimeInput {
+        FocRealtimeInput::command_model_from_legacy(feedback, 0, 1.0 / 12_000.0)
+    }
+
+    fn started_realtime_context() -> FocRustContextStorage {
+        let mut context = context();
+        let mut runtime = FocRuntimeConfig::default();
+        unsafe {
+            assert_eq!(foc_rust_init(&mut context), FocStatus::Ok);
+            assert_eq!(foc_rust_default_st_config(&mut runtime), FocStatus::Ok);
+            assert_eq!(foc_rust_configure(&mut context, &runtime), FocStatus::Ok);
+            assert_eq!(
+                foc_rust_start_realtime(&mut context, 1, runtime.startup_final_speed_rpm),
+                FocStatus::Ok
+            );
+        }
+        context
+    }
+
+    #[test]
+    fn realtime_input_layout_and_legacy_mapping_are_pinned_to_v19() {
+        assert_eq!(FOC_RUST_ABI_VERSION, 0x0013_0000);
+        assert_eq!(FOC_REALTIME_INPUT_VERSION, 1);
+        assert_eq!(FOC_REALTIME_HW_FAULT_DRIVER, 1 << 0);
+        assert_eq!(FOC_REALTIME_HW_FAULT_BREAK, 1 << 1);
+        assert_eq!(FOC_REALTIME_HW_FAULT_SOFTWARE_CURRENT_TRIP, 1 << 2);
+        assert_eq!(FOC_REALTIME_HW_FAULT_BUS_UNDERVOLTAGE, 1 << 3);
+        assert_eq!(FOC_REALTIME_HW_FAULT_BUS_OVERVOLTAGE, 1 << 4);
+        assert_eq!(FOC_REALTIME_HW_FAULT_ADC_SAMPLE_ERROR, 1 << 5);
+        assert_eq!(FOC_REALTIME_HW_FAULT_DEADLINE_MISSED, 1 << 6);
+        assert_eq!(size_of::<FocFeedback>(), 20);
+        assert_eq!(size_of::<FocRealtimeInput>(), 88);
+        assert_eq!(align_of::<FocRealtimeInput>(), 4);
+        assert_eq!(core::mem::offset_of!(FocRealtimeInput, struct_size), 0);
+        assert_eq!(core::mem::offset_of!(FocRealtimeInput, version), 4);
+        assert_eq!(core::mem::offset_of!(FocRealtimeInput, control_sequence), 8);
+        assert_eq!(core::mem::offset_of!(FocRealtimeInput, valid_flags), 12);
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, hardware_fault_flags),
+            16
+        );
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, phase_voltage_sequence),
+            20
+        );
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, phase_voltage_age_ticks),
+            24
+        );
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, phase_voltage_provenance),
+            28
+        );
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, phase_voltage_quality_state),
+            32
+        );
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, phase_voltage_reason_mask),
+            36
+        );
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, observer_voltage_selection),
+            40
+        );
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, phase_voltage_fallback_event_count),
+            44
+        );
+        assert_eq!(core::mem::offset_of!(FocRealtimeInput, actual_dt_s), 48);
+        assert_eq!(core::mem::offset_of!(FocRealtimeInput, phase_current_a), 52);
+        assert_eq!(core::mem::offset_of!(FocRealtimeInput, phase_current_b), 56);
+        assert_eq!(core::mem::offset_of!(FocRealtimeInput, phase_current_c), 60);
+        assert_eq!(core::mem::offset_of!(FocRealtimeInput, dc_bus_voltage), 64);
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, phase_voltage_a_v),
+            68
+        );
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, phase_voltage_b_v),
+            72
+        );
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, phase_voltage_c_v),
+            76
+        );
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, electrical_angle_rad),
+            80
+        );
+        assert_eq!(
+            core::mem::offset_of!(FocRealtimeInput, sensor_temperature_c),
+            84
+        );
+
+        let feedback = FocFeedback {
+            phase_current_a: 0.25,
+            phase_current_b: -0.10,
+            phase_current_c: -0.15,
+            dc_bus_voltage: 12.3,
+            electrical_angle_rad: 0.75,
+        };
+        let input = FocRealtimeInput::command_model_from_legacy(feedback, 17, 1.0 / 12_000.0);
+        assert_eq!(input.struct_size, 88);
+        assert_eq!(input.version, FOC_REALTIME_INPUT_VERSION);
+        assert_eq!(input.control_sequence, 17);
+        assert_eq!(input.hardware_fault_flags, 0);
+        assert_eq!(
+            input.valid_flags,
+            FOC_REALTIME_VALID_PHASE_CURRENTS | FOC_REALTIME_VALID_DC_BUS_VOLTAGE
+        );
+        assert_eq!(
+            input.phase_voltage_quality_state,
+            FOC_REALTIME_PHASE_VOLTAGE_QUALITY_UNCONFIGURED
+        );
+        assert_eq!(
+            input.phase_voltage_reason_mask,
+            FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCONFIGURED
+        );
+        assert_eq!(
+            input.observer_voltage_selection,
+            FOC_REALTIME_OBSERVER_VOLTAGE_COMMAND_MODEL
+        );
+        assert_eq!(input.legacy_feedback().phase_current_a, 0.25);
+    }
+
+    #[test]
+    fn realtime_input_rejects_old_layout_unknown_values_and_nan_dt() {
+        let mut context = started_realtime_context();
+        let base = realtime_input(FocFeedback {
+            dc_bus_voltage: 13.0,
+            ..FocFeedback::default()
+        });
+        let mut output = FocOutput {
+            duty_a: 1.0,
+            duty_b: 1.0,
+            duty_c: 1.0,
+        };
+        let mut telemetry = FocTelemetry::default();
+        let mut candidates = [base; 8];
+        candidates[0].struct_size = size_of::<FocFeedback>() as u32;
+        candidates[1].version = 0;
+        candidates[2].valid_flags |= 1 << 31;
+        candidates[3].hardware_fault_flags |= 1 << 31;
+        candidates[4].phase_voltage_provenance = 3;
+        candidates[5].phase_voltage_quality_state = 9;
+        candidates[6].observer_voltage_selection = 3;
+        candidates[7].actual_dt_s = f32::NAN;
+
+        for candidate in &candidates {
+            output = FocOutput {
+                duty_a: 1.0,
+                duty_b: 1.0,
+                duty_c: 1.0,
+            };
+            assert_eq!(
+                unsafe {
+                    foc_rust_realtime_step(&mut context, candidate, &mut output, &mut telemetry)
+                },
+                FocStatus::InvalidArgument
+            );
+            assert_eq!(output, FocOutput::default());
+            assert_ne!(unsafe { foc_rust_state(&mut context) }, FocState::Fault);
+        }
+
+        let mut unknown_reason = base;
+        unknown_reason.phase_voltage_reason_mask = 1 << 31;
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step(&mut context, &unknown_reason, &mut output, &mut telemetry)
+            },
+            FocStatus::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn realtime_hardware_fault_is_processed_before_control_and_clears_output() {
+        let mut context = started_realtime_context();
+        let mut input = realtime_input(FocFeedback {
+            dc_bus_voltage: 13.0,
+            ..FocFeedback::default()
+        });
+        input.hardware_fault_flags = FOC_REALTIME_HW_FAULT_DRIVER;
+        let mut output = FocOutput {
+            duty_a: 0.8,
+            duty_b: 0.2,
+            duty_c: 0.5,
+        };
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step(&mut context, &input, &mut output, core::ptr::null_mut())
+            },
+            FocStatus::HardwareFault
+        );
+        assert_eq!(output, FocOutput::default());
+        assert_eq!(unsafe { foc_rust_state(&mut context) }, FocState::Fault);
+        assert_ne!(
+            unsafe { foc_rust_fault_flags(&mut context) } & FOC_FAULT_PLATFORM_INPUT,
+            0
+        );
+    }
+
+    #[test]
+    fn measured_is_closed_and_hybrid_fallback_remains_command_model() {
+        let mut context = started_realtime_context();
+        let mut input = realtime_input(FocFeedback {
+            dc_bus_voltage: 13.0,
+            ..FocFeedback::default()
+        });
+        let mut output = FocOutput::default();
+        let mut telemetry = FocTelemetry::default();
+
+        input.observer_voltage_selection = FOC_REALTIME_OBSERVER_VOLTAGE_MEASURED;
+        assert_eq!(
+            unsafe { foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry) },
+            FocStatus::NotConfigured
+        );
+
+        input.observer_voltage_selection = FOC_REALTIME_OBSERVER_VOLTAGE_UNAVAILABLE;
+        assert_eq!(
+            unsafe { foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry) },
+            FocStatus::NotConfigured
+        );
+
+        input.valid_flags |= FOC_REALTIME_VALID_PHASE_VOLTAGES;
+        input.phase_voltage_provenance = FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_BOARD_CALIBRATED;
+        input.phase_voltage_quality_state = FOC_REALTIME_PHASE_VOLTAGE_QUALITY_VALID;
+        input.phase_voltage_reason_mask = 0;
+        input.observer_voltage_selection = FOC_REALTIME_OBSERVER_VOLTAGE_MEASURED;
+        input.phase_voltage_a_v = 7.0;
+        input.phase_voltage_b_v = 6.0;
+        input.phase_voltage_c_v = 5.0;
+        input.control_sequence = 42;
+        input.phase_voltage_sequence = 41;
+        input.phase_voltage_age_ticks = 1;
+        assert!(measured_phase_voltage_is_eligible(&input));
+        assert_eq!(
+            unsafe { foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry) },
+            FocStatus::NotConfigured
+        );
+
+        input.phase_voltage_age_ticks = 2;
+        assert!(!measured_phase_voltage_is_eligible(&input));
+        assert_eq!(
+            unsafe { foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry) },
+            FocStatus::NotConfigured
+        );
+
+        input.control_sequence = 0;
+        input.phase_voltage_sequence = u32::MAX;
+        input.phase_voltage_age_ticks = 1;
+        assert!(measured_phase_voltage_is_eligible(&input));
+
+        // A22 reports Hybrid fallback as the actual CommandModel selection.
+        input.phase_voltage_provenance = FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_ST_NOMINAL;
+        input.phase_voltage_quality_state = FOC_REALTIME_PHASE_VOLTAGE_QUALITY_STALE;
+        input.phase_voltage_reason_mask = FOC_REALTIME_PHASE_VOLTAGE_REASON_STALE;
+        input.observer_voltage_selection = FOC_REALTIME_OBSERVER_VOLTAGE_COMMAND_MODEL;
+        input.phase_voltage_fallback_event_count = 1;
+        input.control_sequence = 5;
+        input.phase_voltage_sequence = 99;
+        input.phase_voltage_age_ticks = 77;
+        assert_eq!(
+            unsafe { foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry) },
+            FocStatus::Ok
+        );
+    }
+
+    #[test]
+    fn v19_command_model_is_tick_exact_with_the_legacy_realtime_body() {
+        let mut new_context = started_realtime_context();
+        let mut legacy_context = started_realtime_context();
+        let feedback = FocFeedback {
+            phase_current_a: 0.20,
+            phase_current_b: -0.10,
+            phase_current_c: -0.10,
+            dc_bus_voltage: 13.0,
+            electrical_angle_rad: 0.0,
+        };
+        let mut input = FocRealtimeInput::command_model_from_legacy(
+            feedback,
+            0,
+            // Deliberately non-nominal: A23 carries and validates actual_dt_s,
+            // but does not yet alter the established fixed-frequency control law.
+            1.0 / 10_000.0,
+        );
+        let mut new_output = FocOutput::default();
+        let mut legacy_output = FocOutput::default();
+        let mut new_telemetry = FocTelemetry::default();
+        let mut legacy_telemetry = FocTelemetry::default();
+
+        for sequence in 0..128 {
+            input.control_sequence = sequence;
+            let new_status = unsafe {
+                foc_rust_realtime_step(
+                    &mut new_context,
+                    &input,
+                    &mut new_output,
+                    &mut new_telemetry,
+                )
+            };
+            let legacy_status = unsafe {
+                foc_rust_realtime_step_legacy_impl(
+                    &mut legacy_context,
+                    &feedback,
+                    &mut legacy_output,
+                    &mut legacy_telemetry,
+                )
+            };
+            assert_eq!(new_status, legacy_status);
+            assert_eq!(new_output, legacy_output);
+            assert_eq!(new_telemetry, legacy_telemetry);
+        }
+    }
+
+    fn lsi_input(request: u32, perturbation_v: f32) -> FocLsiActuationInput {
+        FocLsiActuationInput {
+            struct_size: size_of::<FocLsiActuationInput>() as u32,
+            version: FOC_LSI_ACTUATION_INPUT_VERSION,
+            drive_request: request,
+            force_safe_output: 0,
+            capture_ready: 1,
+            capture_full: 0,
+            hardware_fault: 0,
+            software_trip: 0,
+            control_tick: 100,
+            requested_bias_current_a: 0.2,
+            requested_perturbation_voltage_v: perturbation_v,
+            phase_u_current_a: 0.19,
+            bus_voltage_v: 12.3,
+        }
+    }
+
+    #[test]
+    fn lsi_ffi_defaults_and_layout_are_pinned_to_abi_v19() {
+        assert_eq!(FOC_RUST_ABI_VERSION, 0x0013_0000);
+        assert_eq!(size_of::<FocLsiActuationConfig>(), 48);
+        assert_eq!(size_of::<FocLsiActuationInput>(), 52);
+        assert_eq!(size_of::<FocLsiActuationOutput>(), 40);
+
+        let mut config = FocLsiActuationConfig::default();
+        // SAFETY: the test passes an aligned, exclusively writable value.
+        assert_eq!(
+            unsafe { foc_rust_lsi_default_actuation_config(&mut config) },
+            FocStatus::Ok
+        );
+        assert_eq!(config.struct_size, 48);
+        assert_eq!(config.version, FOC_LSI_ACTUATION_CONFIG_VERSION);
+        assert_eq!(config.sample_rate_hz, 12_000);
+        assert_eq!(config.actuation_delay_control_ticks, 1);
+        assert!((config.stator_resistance_ohm - 4.966_666_7).abs() < 1.0e-6);
+        assert_eq!(config.maximum_bias_current_a, 0.2);
+        assert_eq!(config.maximum_perturbation_voltage_v, 0.4);
+    }
+
+    #[test]
+    fn lsi_ffi_off_and_active_plans_preserve_fail_closed_contract() {
+        let mut config = FocLsiActuationConfig::default();
+        // SAFETY: all pointers in this test refer to distinct, valid stack values.
+        unsafe {
+            assert_eq!(
+                foc_rust_lsi_default_actuation_config(&mut config),
+                FocStatus::Ok
+            )
+        };
+
+        let mut off = lsi_input(0, 0.0);
+        off.force_safe_output = 1;
+        off.capture_ready = 0;
+        off.capture_full = 1;
+        off.hardware_fault = 1;
+        off.software_trip = 1;
+        off.requested_bias_current_a = 0.0;
+        off.phase_u_current_a = 0.0;
+        off.bus_voltage_v = 0.0;
+        let mut output = FocLsiActuationOutput::default();
+        // SAFETY: all pointers are valid, aligned and non-overlapping.
+        assert_eq!(
+            unsafe { foc_rust_lsi_plan(&config, &off, &mut output) },
+            FocStatus::Ok
+        );
+        assert_eq!(output.safe_output_required, 1);
+        assert_eq!(output.drive_active, 0);
+        assert_eq!(output.duty_u, 0.0);
+
+        let positive = lsi_input(2, 0.4);
+        assert_eq!(
+            unsafe { foc_rust_lsi_plan(&config, &positive, &mut output) },
+            FocStatus::Ok
+        );
+        assert_eq!(output.safe_output_required, 0);
+        assert_eq!(output.drive_active, 1);
+        assert_eq!(output.source_control_tick, 100);
+        assert_eq!(output.expected_active_control_tick, 101);
+        assert!((output.duty_u + output.duty_v + output.duty_w - 1.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn lsi_ffi_invalid_and_fault_paths_clear_output_first() {
+        let mut config = FocLsiActuationConfig::default();
+        unsafe {
+            assert_eq!(
+                foc_rust_lsi_default_actuation_config(&mut config),
+                FocStatus::Ok
+            )
+        };
+        let mut input = lsi_input(1, 0.0);
+        let mut output = FocLsiActuationOutput {
+            safe_output_required: 0,
+            drive_active: 1,
+            duty_u: 0.7,
+            duty_v: 0.4,
+            duty_w: 0.4,
+            ..FocLsiActuationOutput::default()
+        };
+
+        input.capture_ready = 2;
+        assert_eq!(
+            unsafe { foc_rust_lsi_plan(&config, &input, &mut output) },
+            FocStatus::InvalidArgument
+        );
+        assert_eq!(output.safe_output_required, 1);
+        assert_eq!(output.drive_active, 0);
+        assert_eq!(output.duty_u, 0.0);
+
+        input.capture_ready = 1;
+        input.capture_full = 1;
+        assert_eq!(
+            unsafe { foc_rust_lsi_plan(&config, &input, &mut output) },
+            FocStatus::HardwareFault
+        );
+        assert_eq!(output.safe_output_required, 1);
+        assert_eq!(output.duty_u, 0.0);
+    }
+
     #[test]
     fn handoff_torque_support_preserves_default_and_selects_a_fixed_target() {
         assert!((supported_handoff_iq(-0.2, 0.8, 0.0) + 0.2).abs() < f32::EPSILON);
@@ -3498,6 +4504,7 @@ mod tests {
             dc_bus_voltage: 13.0,
             ..FocFeedback::default()
         };
+        let input = realtime_input(feedback);
         let mut output = FocOutput::default();
         let mut telemetry = FocTelemetry::default();
         unsafe {
@@ -3559,7 +4566,7 @@ mod tests {
             );
             for _ in 0..300 {
                 assert_eq!(
-                    foc_rust_realtime_step(&mut context, &feedback, &mut output, &mut telemetry,),
+                    foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry,),
                     FocStatus::Ok
                 );
                 assert!(output.duty_a.is_finite());
@@ -3587,6 +4594,7 @@ mod tests {
             dc_bus_voltage: 13.0,
             ..FocFeedback::default()
         };
+        let input = realtime_input(feedback);
         let mut output = FocOutput::default();
         let mut telemetry = FocTelemetry::default();
         unsafe {
@@ -3614,7 +4622,7 @@ mod tests {
             );
             for _ in 0..32 {
                 assert_eq!(
-                    foc_rust_realtime_step(&mut context, &feedback, &mut output, &mut telemetry,),
+                    foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry,),
                     FocStatus::Ok
                 );
             }
@@ -3649,6 +4657,7 @@ mod tests {
             dc_bus_voltage: 13.0,
             ..FocFeedback::default()
         };
+        let input = realtime_input(feedback);
         let mut output = FocOutput::default();
         let mut telemetry = FocTelemetry::default();
         unsafe {
@@ -3664,7 +4673,7 @@ mod tests {
             let mut reached_ramp = false;
             for _ in 0..32 {
                 assert_eq!(
-                    foc_rust_realtime_step(&mut context, &feedback, &mut output, &mut telemetry),
+                    foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry),
                     FocStatus::Ok
                 );
                 assert_eq!(telemetry.observer_electrical_angle_rad, 0.0);
@@ -3680,7 +4689,7 @@ mod tests {
             assert!(reached_ramp);
 
             assert_eq!(
-                foc_rust_realtime_step(&mut context, &feedback, &mut output, &mut telemetry),
+                foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry),
                 FocStatus::Ok
             );
             // 首个升速拍只建立电流模型；由于估计电流等于同拍实测电流，首拍
@@ -3688,7 +4697,7 @@ mod tests {
             assert_eq!(telemetry.observer_bemf_alpha_v, 0.0);
             assert_eq!(telemetry.observer_bemf_beta_v, 0.0);
             assert_eq!(
-                foc_rust_realtime_step(&mut context, &feedback, &mut output, &mut telemetry),
+                foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry),
                 FocStatus::Ok
             );
         }
@@ -3709,6 +4718,7 @@ mod tests {
             dc_bus_voltage: 13.0,
             ..FocFeedback::default()
         };
+        let input = realtime_input(feedback);
         let mut output = FocOutput::default();
         let mut telemetry = FocTelemetry::default();
         unsafe {
@@ -3724,7 +4734,7 @@ mod tests {
 
             for _ in 0..64 {
                 assert_eq!(
-                    foc_rust_realtime_step(&mut context, &feedback, &mut output, &mut telemetry),
+                    foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry),
                     FocStatus::Ok
                 );
                 if telemetry.state == FocState::OpenLoopHold as u32 {
@@ -3738,7 +4748,7 @@ mod tests {
             assert_eq!(countdown, (runtime.pwm_frequency_hz / 3).max(1));
 
             assert_eq!(
-                foc_rust_realtime_step(&mut context, &feedback, &mut output, &mut telemetry),
+                foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry),
                 FocStatus::Ok
             );
             assert_eq!(
@@ -3866,6 +4876,7 @@ mod tests {
                 dc_bus_voltage: 13.0,
                 ..FocFeedback::default()
             };
+            let input = realtime_input(feedback);
             let mut output = FocOutput::default();
             unsafe {
                 assert_eq!(foc_rust_init(&mut context), FocStatus::Ok);
@@ -3884,7 +4895,7 @@ mod tests {
                 assert_eq!(
                     foc_rust_realtime_step(
                         &mut context,
-                        &feedback,
+                        &input,
                         &mut output,
                         core::ptr::null_mut(),
                     ),
@@ -3920,6 +4931,7 @@ mod tests {
             dc_bus_voltage: 13.0,
             ..FocFeedback::default()
         };
+        let input = realtime_input(feedback);
         let mut output = FocOutput::default();
         let mut telemetry = FocTelemetry::default();
         unsafe {
@@ -3936,8 +4948,7 @@ mod tests {
             );
             let mut status = FocStatus::Ok;
             for _ in 0..100 {
-                status =
-                    foc_rust_realtime_step(&mut context, &feedback, &mut output, &mut telemetry);
+                status = foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry);
                 if status != FocStatus::Ok {
                     break;
                 }
@@ -3972,6 +4983,7 @@ mod tests {
             dc_bus_voltage: 13.0,
             ..FocFeedback::default()
         };
+        let input = realtime_input(feedback);
         let mut output = FocOutput::default();
         let mut telemetry = FocTelemetry::default();
         unsafe {
@@ -3993,8 +5005,7 @@ mod tests {
 
             let mut status = FocStatus::Ok;
             for _ in 0..32 {
-                status =
-                    foc_rust_realtime_step(&mut context, &feedback, &mut output, &mut telemetry);
+                status = foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry);
                 if status != FocStatus::Ok {
                     break;
                 }

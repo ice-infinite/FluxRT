@@ -48,6 +48,7 @@
 //   params     被控对象与 PI 参数集，含来源标注与"未辨识"警告
 //   ports      反馈 / 功率级 / 安全 三个硬件端口 trait
 //   controller 电流环、速度环与串级控制器（MCSDK 参考拓扑）
+//   identification EXP-B3 Ls(I) 状态请求到 PWM 的纯计划层（不拥有硬件）
 //   observer   SMO+PLL 与浮点反电势观测器，含可靠性门控
 //   voltage    观察器电压来源策略；当前默认/唯一批准路径为 CommandModel
 //   startup    开环预启动时序与无感切换的角度渐变
@@ -57,6 +58,7 @@
 //   `controller` the cascaded loops, `observer` the sensorless estimators,
 //   `startup` the rev-up sequencer and `runtime` the stateful one-tick shell.
 pub mod controller;
+pub mod identification;
 pub mod math;
 pub mod observer;
 pub mod params;
@@ -71,6 +73,7 @@ pub mod voltage;
 // Flat re-exports so callers write `foc_control::Xxx`; `foc-rt-bridge` and
 // `foc-sim` both rely on this namespace.
 pub use controller::*;
+pub use identification::*;
 pub use math::*;
 pub use observer::*;
 pub use params::*;

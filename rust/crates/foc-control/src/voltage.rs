@@ -146,6 +146,22 @@ impl InverterVoltageModel {
         self.config
     }
 
+    /// 返回观测器电压修正是否真正启用。调用方可据此在默认关闭态跳过整个
+    /// 损失模型；配置校验仍保证子开关不能绕过总开关。
+    /// Returns whether observer-voltage correction is actually active, allowing
+    /// realtime callers to bypass the whole loss model in the default-off case.
+    #[inline]
+    pub fn observer_correction_enabled(&self) -> bool {
+        self.config.enabled && self.config.observer_voltage_correction_enabled
+    }
+
+    /// 返回 PWM 损失前馈是否真正启用。
+    /// Returns whether PWM loss feed-forward is actually active.
+    #[inline]
+    pub fn feedforward_enabled(&self) -> bool {
+        self.config.enabled && self.config.feedforward_enabled
+    }
+
     /// 清除电流滤波状态，不改变配置。
     #[inline]
     pub fn reset(&mut self) {

@@ -381,6 +381,7 @@ static void test_phase_voltage_nominal_model(void)
 int main(void)
 {
     foc_feedback_t feedback = {0};
+    foc_realtime_input_t realtime_input = {0};
     /* 三相占空比按归一化 [0,1] 给出，1.0 表示上桥臂全通；这里故意给满值，用来
      * 证明未配置的平台连"输出满占空比"都会拒绝，而不是写进比较寄存器。
      * Three-phase duty is normalised to [0,1] where 1.0 is a fully on high side.
@@ -405,26 +406,68 @@ int main(void)
 
     /* ABI 触发线 / ABI tripwires:
      *   ABI 版本必须与 foc/include/foc_rust_bridge.h 中的 FOC_RUST_ABI_VERSION
-     *   完全一致（当前 0x00110000）；上下文容量必须与静态断言一致；运行时配置 296 B、
+     *   完全一致（当前 0x00130000）；上下文容量必须与静态断言一致；运行时配置 296 B、
      *   遥测 100 B 是 C 与 Rust 双方共同约定的结构体尺寸。改任何一处都必须同时
      *   提升 ABI 版本并更新本测试，否则板上应拒绝启动（见 applications/main.c）。
      *   The ABI version must match FOC_RUST_ABI_VERSION in
-     *   foc/include/foc_rust_bridge.h exactly (currently 0x00110000); the context
+     *   foc/include/foc_rust_bridge.h exactly (currently 0x00130000); the context
      *   capacity must match its _Static_assert; and 296 B for the runtime
      *   configuration and 100 B
      *   for telemetry are the struct sizes both sides agreed on. Any change requires
      *   bumping the ABI version and updating this test, otherwise the board must
      *   refuse to start (see applications/main.c). */
-    assert(FOC_RUST_ABI_VERSION == 0x00110000UL);
+    assert(FOC_RUST_ABI_VERSION == 0x00130000UL);
+    assert(FOC_REALTIME_INPUT_VERSION == 1UL);
+    assert(sizeof(foc_feedback_t) == 20U);
+    assert(sizeof(foc_realtime_input_t) == 88U);
+    assert(_Alignof(foc_realtime_input_t) == 4U);
+    assert(offsetof(foc_realtime_input_t, actual_dt_s) == 48U);
+    assert(offsetof(foc_realtime_input_t, sensor_temperature_c) == 84U);
     assert(sizeof(foc_rust_context_t) == FOC_RUST_CONTEXT_CAPACITY);
     assert(sizeof(foc_observer_run_reliability_config_t) == 8U);
     assert(sizeof(foc_angle_compensation_config_t) == 8U);
     assert(sizeof(foc_inverter_voltage_model_config_t) == 36U);
     assert(sizeof(foc_runtime_config_t) == 296U);
     assert(sizeof(foc_telemetry_t) == 100U);
+    assert(sizeof(foc_lsi_actuation_config_t) == 48U);
+    assert(sizeof(foc_lsi_actuation_input_t) == 52U);
+    assert(sizeof(foc_lsi_actuation_output_t) == 40U);
     assert(sizeof(foc_trace_sample_t) == 72U);
     assert(sizeof(foc_phase_voltage_sample_t) == 16U);
     assert(sizeof(foc_phase_voltage_model_t) == 40U);
+    feedback.phase_current_a = 0.25f;
+    feedback.phase_current_b = -0.10f;
+    feedback.phase_current_c = -0.15f;
+    feedback.dc_bus_voltage = 12.3f;
+    feedback.electrical_angle_rad = 0.75f;
+    foc_realtime_input_from_legacy(&feedback, 17U, 1.0f / 12000.0f,
+                                   &realtime_input);
+    assert(realtime_input.struct_size == 88U);
+    assert(realtime_input.version == FOC_REALTIME_INPUT_VERSION);
+    assert(realtime_input.control_sequence == 17U);
+    assert(realtime_input.valid_flags ==
+           (FOC_REALTIME_VALID_PHASE_CURRENTS |
+            FOC_REALTIME_VALID_DC_BUS_VOLTAGE));
+    assert(realtime_input.hardware_fault_flags == 0U);
+    assert(realtime_input.phase_voltage_provenance ==
+           FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_NONE);
+    assert(realtime_input.phase_voltage_quality_state ==
+           FOC_REALTIME_PHASE_VOLTAGE_QUALITY_UNCONFIGURED);
+    assert(realtime_input.phase_voltage_reason_mask ==
+           FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCONFIGURED);
+    assert(realtime_input.observer_voltage_selection ==
+           FOC_REALTIME_OBSERVER_VOLTAGE_COMMAND_MODEL);
+    assert(realtime_input.phase_current_a == feedback.phase_current_a);
+    assert(realtime_input.dc_bus_voltage == feedback.dc_bus_voltage);
+    assert(realtime_input.phase_voltage_a_v == 0.0f);
+    assert(realtime_input.electrical_angle_rad == 0.0f);
+    assert(FOC_REALTIME_HW_FAULT_DRIVER == (1UL << 0));
+    assert(FOC_REALTIME_HW_FAULT_BREAK == (1UL << 1));
+    assert(FOC_REALTIME_HW_FAULT_SOFTWARE_CURRENT_TRIP == (1UL << 2));
+    assert(FOC_REALTIME_HW_FAULT_BUS_UNDERVOLTAGE == (1UL << 3));
+    assert(FOC_REALTIME_HW_FAULT_BUS_OVERVOLTAGE == (1UL << 4));
+    assert(FOC_REALTIME_HW_FAULT_ADC_SAMPLE_ERROR == (1UL << 5));
+    assert(FOC_REALTIME_HW_FAULT_DEADLINE_MISSED == (1UL << 6));
     /* 主机没有 STM32G4 CORDIC，后端必须是 CPU；加速函数在 CPU 后端下返回 0 且
      * 把输出清零，因此两个断言要一起看：调用被拒绝，且没有泄漏未初始化值。
      * There is no STM32G4 CORDIC on the host, so the backend must be CPU; on that
@@ -491,6 +534,7 @@ int main(void)
      * foc_platform_control_start); it is exercised to prove that not even the legacy
      * path can arm an unconfigured platform. */
     assert(foc_platform_trial_arm() == FOC_STATUS_NOT_CONFIGURED);
+    assert(foc_platform_lsi_start(0x4C534931UL) == FOC_STATUS_DISABLED);
     assert(foc_platform_apply_output(&output) == FOC_STATUS_NOT_CONFIGURED);
     foc_platform_trial_disarm();
     /* 空状态下诊断全 0，尤其是 flags 里不能出现 GATE_SAFE/OUTPUT_ACTIVE 这类

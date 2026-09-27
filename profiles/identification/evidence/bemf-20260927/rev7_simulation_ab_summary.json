@@ -1,0 +1,121 @@
+{
+  "format_version": 1,
+  "analysis_kind": "runtime-profile-simulation-ab",
+  "candidate": "profiles/candidates/rev7-gbm2804h-rsl-flux-screening.json",
+  "candidate_runtime_crc32": "0xDBD2A17C",
+  "method": {
+    "binary": "foc-bringup-sim",
+    "duration_s": 15.0,
+    "dc_bus_voltage_v": 12.3,
+    "dead_time_ns": 550.0,
+    "plant_truth": {
+      "stator_resistance_ohm": 4.9666667,
+      "stator_inductance_h": 0.0011133333,
+      "flux_linkage_wb": 0.0053756875
+    },
+    "comparison_rule": "plant truth is identical; only controller model and current PI differ"
+  },
+  "uncompensated_dead_time": {
+    "forward_no_load": {
+      "rev6": {
+        "hold_speed_rmse_rpm": 9.66,
+        "hold_angle_rmse_rad": 0.3882,
+        "steady_observer_rmse_rpm": 0.301,
+        "steady_iq_rmse_a": 0.012626,
+        "final_state": 7
+      },
+      "rev7": {
+        "hold_speed_rmse_rpm": 6.19,
+        "hold_angle_rmse_rad": 0.258,
+        "steady_observer_rmse_rpm": 0.272,
+        "steady_iq_rmse_a": 0.011889,
+        "final_state": 7
+      },
+      "rev7_change_pct": {
+        "hold_speed_rmse": -35.92,
+        "hold_angle_rmse": -33.54,
+        "steady_observer_rmse": -9.63,
+        "steady_iq_rmse": -5.84
+      }
+    },
+    "reverse_no_load": {
+      "rev6_hold_speed_rmse_rpm": 7.94,
+      "rev7_hold_speed_rmse_rpm": 5.81,
+      "rev6_hold_angle_rmse_rad": 0.2789,
+      "rev7_hold_angle_rmse_rad": 0.2686,
+      "rev6_final_state": 7,
+      "rev7_final_state": 7
+    },
+    "forward_load_0p001_nm": {
+      "rev6_hold_speed_rmse_rpm": 6.91,
+      "rev7_hold_speed_rmse_rpm": 6.49,
+      "rev6_hold_angle_rmse_rad": 0.1698,
+      "rev7_hold_angle_rmse_rad": 0.2552,
+      "rev6_steady_observer_rmse_rpm": 0.461,
+      "rev7_steady_observer_rmse_rpm": 0.477,
+      "rev6_final_state": 7,
+      "rev7_final_state": 7,
+      "assessment": "mixed: speed slightly improves while angle and observer metrics regress"
+    },
+    "forward_load_0p005_nm": {
+      "rev6": "Bridge(HardwareFault)",
+      "rev7": "not run after the bounded baseline failed",
+      "assessment": "rejected scenario; constant load is applied from alignment and exceeded the simulated protection envelope"
+    }
+  },
+  "dead_time_compensated": {
+    "forward_no_load": {
+      "rev6_hold_speed_rmse_rpm": 6.91,
+      "rev7_hold_speed_rmse_rpm": 9.92,
+      "rev6_hold_angle_rmse_rad": 0.1961,
+      "rev7_hold_angle_rmse_rad": 0.3569,
+      "assessment": "rev7 regresses"
+    },
+    "forward_load_0p001_nm": {
+      "rev6_hold_speed_rmse_rpm": 7.39,
+      "rev7_hold_speed_rmse_rpm": 9.22,
+      "rev6_hold_angle_rmse_rad": 0.1823,
+      "rev7_hold_angle_rmse_rad": 0.3533,
+      "assessment": "rev7 regresses"
+    }
+  },
+  "decomposition_forward_no_load": {
+    "rev6_baseline": {
+      "hold_speed_rmse_rpm": 9.66,
+      "hold_angle_rmse_rad": 0.3882
+    },
+    "measured_model_old_pi": {
+      "hold_speed_rmse_rpm": 6.21,
+      "hold_angle_rmse_rad": 0.2579
+    },
+    "old_model_scaled_pi": {
+      "hold_speed_rmse_rpm": 9.7,
+      "hold_angle_rmse_rad": 0.3932
+    },
+    "measured_flux_only": {
+      "hold_speed_rmse_rpm": 9.66,
+      "hold_angle_rmse_rad": 0.3882
+    },
+    "measured_rs_ls_scaled_pi": {
+      "hold_speed_rmse_rpm": 6.19,
+      "hold_angle_rmse_rad": 0.258
+    }
+  },
+  "traces": [
+    {
+      "path": "profiles/identification/evidence/bemf-20260927/rev6_model_on_measured_plant.csv",
+      "sha256": "7ca42c4a1d5cba94f7f18eacc2b277a13bff1b916b35a63a91dfced15466a109"
+    },
+    {
+      "path": "profiles/identification/evidence/bemf-20260927/rev7_model_on_measured_plant.csv",
+      "sha256": "facf8bf6a2009c3cd2d04d253227880bd7ff06f29eb407fc818d89c93147dccc"
+    }
+  ],
+  "decision": {
+    "functional_gate": "pass",
+    "performance_promotion_gate": "inconclusive",
+    "firmware_integration": "blocked",
+    "reason": "small-signal Ls is not proven at the 0.8 A operating point; loaded and compensated scenarios are mixed or regressive",
+    "next_required_evidence": "bounded Ls(I) identification with a reviewed MCU injection path or a DC-bias-capable instrument"
+  }
+}

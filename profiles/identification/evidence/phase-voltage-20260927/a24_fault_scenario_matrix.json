@@ -1,0 +1,349 @@
+{
+  "mode_semantics": {
+    "CommandModel": "always select compensated command voltage",
+    "Hybrid": "select valid measured candidate, otherwise fall back to CommandModel",
+    "Measured": "accept valid calibrated measured voltage only; otherwise unavailable"
+  },
+  "operating_assumption": "Hybrid speed gate already declares measured candidate eligible",
+  "scenarios": [
+    {
+      "category": "normal",
+      "description": "quantized 12-bit calibrated samples",
+      "name": "baseline",
+      "quality": {
+        "age_ticks": 0,
+        "measured_eligible": true,
+        "reason": "quality_gate_passed",
+        "state": "valid"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_measured_candidate_valid",
+          "selected_source": "Measured"
+        },
+        "Measured": {
+          "reason": "measured_quality_valid",
+          "selected_source": "Measured"
+        }
+      }
+    },
+    {
+      "category": "nonideality",
+      "description": "+80 mV common-mode offset",
+      "name": "offset",
+      "quality": {
+        "age_ticks": 0,
+        "measured_eligible": true,
+        "reason": "quality_gate_passed",
+        "state": "valid"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_measured_candidate_valid",
+          "selected_source": "Measured"
+        },
+        "Measured": {
+          "reason": "measured_quality_valid",
+          "selected_source": "Measured"
+        }
+      }
+    },
+    {
+      "category": "nonideality",
+      "description": "+1 percent common gain error",
+      "name": "gain",
+      "quality": {
+        "age_ticks": 0,
+        "measured_eligible": true,
+        "reason": "quality_gate_passed",
+        "state": "valid"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_measured_candidate_valid",
+          "selected_source": "Measured"
+        },
+        "Measured": {
+          "reason": "measured_quality_valid",
+          "selected_source": "Measured"
+        }
+      }
+    },
+    {
+      "category": "nonideality",
+      "description": "12-bit samples reduced to 9 effective bits",
+      "name": "quantization",
+      "quality": {
+        "age_ticks": 0,
+        "measured_eligible": true,
+        "reason": "quality_gate_passed",
+        "state": "valid"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_measured_candidate_valid",
+          "selected_source": "Measured"
+        },
+        "Measured": {
+          "reason": "measured_quality_valid",
+          "selected_source": "Measured"
+        }
+      }
+    },
+    {
+      "category": "nonideality",
+      "description": "two-control-tick delay within freshness limit",
+      "name": "delay",
+      "quality": {
+        "age_ticks": 2,
+        "measured_eligible": true,
+        "reason": "quality_gate_passed",
+        "state": "valid"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_measured_candidate_valid",
+          "selected_source": "Measured"
+        },
+        "Measured": {
+          "reason": "measured_quality_valid",
+          "selected_source": "Measured"
+        }
+      }
+    },
+    {
+      "category": "fault",
+      "description": "sample age exceeds freshness limit",
+      "name": "stale",
+      "quality": {
+        "age_ticks": 3,
+        "measured_eligible": false,
+        "reason": "sample_age_exceeds_limit",
+        "state": "stale"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_fallback_stale",
+          "selected_source": "CommandModel"
+        },
+        "Measured": {
+          "reason": "measured_rejected_stale",
+          "selected_source": "Unavailable"
+        }
+      }
+    },
+    {
+      "category": "fault",
+      "description": "no phase-voltage sample available",
+      "name": "dropout",
+      "quality": {
+        "age_ticks": 0,
+        "measured_eligible": false,
+        "reason": "sample_not_available",
+        "state": "dropout"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_fallback_dropout",
+          "selected_source": "CommandModel"
+        },
+        "Measured": {
+          "reason": "measured_rejected_dropout",
+          "selected_source": "Unavailable"
+        }
+      }
+    },
+    {
+      "category": "fault",
+      "description": "one phase reaches the ADC low rail",
+      "name": "low_saturation",
+      "quality": {
+        "age_ticks": 0,
+        "measured_eligible": false,
+        "reason": "adc_code_at_low_rail",
+        "state": "low_saturation"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_fallback_low_saturation",
+          "selected_source": "CommandModel"
+        },
+        "Measured": {
+          "reason": "measured_rejected_low_saturation",
+          "selected_source": "Unavailable"
+        }
+      }
+    },
+    {
+      "category": "fault",
+      "description": "one phase reaches the ADC high rail",
+      "name": "high_saturation",
+      "quality": {
+        "age_ticks": 0,
+        "measured_eligible": false,
+        "reason": "adc_code_at_high_rail",
+        "state": "high_saturation"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_fallback_high_saturation",
+          "selected_source": "CommandModel"
+        },
+        "Measured": {
+          "reason": "measured_rejected_high_saturation",
+          "selected_source": "Unavailable"
+        }
+      }
+    },
+    {
+      "category": "fault",
+      "description": "one measured phase is stuck while its command changes",
+      "name": "open_suspicion",
+      "quality": {
+        "age_ticks": 0,
+        "measured_eligible": false,
+        "reason": "excited_phase_is_stuck",
+        "state": "open_suspicion"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_fallback_open_suspicion",
+          "selected_source": "CommandModel"
+        },
+        "Measured": {
+          "reason": "measured_rejected_open_suspicion",
+          "selected_source": "Unavailable"
+        }
+      }
+    },
+    {
+      "category": "fault",
+      "description": "one phase has an excessive line-to-line residual",
+      "name": "three_phase_inconsistency",
+      "quality": {
+        "age_ticks": 0,
+        "measured_eligible": false,
+        "reason": "line_to_line_residual_exceeds_limit",
+        "state": "three_phase_inconsistency"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_fallback_three_phase_inconsistency",
+          "selected_source": "CommandModel"
+        },
+        "Measured": {
+          "reason": "measured_rejected_three_phase_inconsistency",
+          "selected_source": "Unavailable"
+        }
+      }
+    },
+    {
+      "category": "configuration",
+      "description": "phase-voltage acquisition is not configured",
+      "name": "unconfigured",
+      "quality": {
+        "age_ticks": 0,
+        "measured_eligible": false,
+        "reason": "phase_voltage_path_not_configured",
+        "state": "unconfigured"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_fallback_unconfigured",
+          "selected_source": "CommandModel"
+        },
+        "Measured": {
+          "reason": "measured_rejected_unconfigured",
+          "selected_source": "Unavailable"
+        }
+      }
+    },
+    {
+      "category": "configuration",
+      "description": "only nominal, non-observer-eligible scaling exists",
+      "name": "uncalibrated",
+      "quality": {
+        "age_ticks": 0,
+        "measured_eligible": false,
+        "reason": "board_calibration_not_observer_eligible",
+        "state": "uncalibrated"
+      },
+      "selection": {
+        "CommandModel": {
+          "reason": "mode_forces_command_model",
+          "selected_source": "CommandModel"
+        },
+        "Hybrid": {
+          "reason": "hybrid_fallback_uncalibrated",
+          "selected_source": "CommandModel"
+        },
+        "Measured": {
+          "reason": "measured_rejected_uncalibrated",
+          "selected_source": "Unavailable"
+        }
+      }
+    }
+  ],
+  "schema": "fluxrt.phase-voltage-fault-scenarios",
+  "schema_version": 1,
+  "scope": "host-only deterministic contract; no hardware authorization",
+  "thresholds": {
+    "adc_max_code": 4095,
+    "line_residual_limit_v": 0.35,
+    "max_age_ticks": 2,
+    "open_expected_span_min_v": 0.5,
+    "open_measured_span_max_v": 0.04,
+    "phase_full_scale_v": 18.3,
+    "raw_high_rail_min": 4087,
+    "raw_low_rail_max": 8
+  },
+  "thresholds_are_production_approved": false
+}

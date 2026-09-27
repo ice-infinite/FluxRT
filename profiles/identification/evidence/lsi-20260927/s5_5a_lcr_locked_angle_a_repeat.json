@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "evidence_id": "EXP-B3-S5.5A-LCR-LOCKED-ANGLE-A",
+  "date_local": "2026-09-27",
+  "reported_by": "user",
+  "instrument": {
+    "model": "正点原子 LT1 迷你数字电桥镊子",
+    "frequency_hz": 1000,
+    "test_voltage_display_v": 0.6,
+    "reported_fields": ["Q", "R_ohm", "L_mH"],
+    "equivalent_model": "series relationship checked with Q = 2*pi*f*L/R",
+    "calibration_note": "Earlier shorted resistance display was 0.1 ohm; no new open/short calibration was reported for this session."
+  },
+  "conditions": {
+    "motor": "GBM2804H-100T",
+    "rotor": "mechanically locked at unchanged angle A",
+    "main_12v3_supply": "physically not connected, confirmed by user",
+    "phase_wires_disconnected_from_driver": "not independently reconfirmed in this data message",
+    "temperature_c": null
+  },
+  "raw_order": [
+    {"round": 1, "order": ["WV", "VU", "WU"]},
+    {"round": 2, "order": ["WU", "VU", "WV"]},
+    {"round": 3, "order": ["WV", "VU", "WU"]}
+  ],
+  "pair_summary": {
+    "WV": {
+      "l_mh": [2.138, 2.130, 2.138],
+      "mean_l_mh": 2.1353333333,
+      "sample_std_l_mh": 0.0046188022,
+      "range_over_mean_percent": 0.3746487668,
+      "mean_q": 1.318,
+      "mean_r_ohm": 10.18
+    },
+    "VU": {
+      "l_mh": [2.822, 2.820, 2.820],
+      "mean_l_mh": 2.8206666667,
+      "sample_std_l_mh": 0.0011547005,
+      "range_over_mean_percent": 0.0709052234,
+      "mean_q": 1.698,
+      "mean_r_ohm": 10.4266666667
+    },
+    "WU": {
+      "l_mh": [2.130, 2.138, 2.130],
+      "mean_l_mh": 2.1326666667,
+      "sample_std_l_mh": 0.0046188022,
+      "range_over_mean_percent": 0.3751172241,
+      "mean_q": 1.3116666667,
+      "mean_r_ohm": 10.2133333333
+    }
+  },
+  "cross_pair_summary": {
+    "mean_of_pair_means_mh": 2.3628888889,
+    "min_pair_mean_mh": 2.1326666667,
+    "max_pair_mean_mh": 2.8206666667,
+    "range_over_mean_percent": 29.1169002163,
+    "vu_above_mean_of_wv_wu_percent": 32.1747425884,
+    "diagnostic_half_of_line_mean_mh": 1.1814444444,
+    "warning": "Dividing line-to-line inductance by two is only a diagnostic approximation and is not an Ld/Lq identification method for a salient machine."
+  },
+  "comparison_to_s5_4": {
+    "s5_4_dynamic_l_mh": 1.950,
+    "dynamic_above_diagnostic_half_mean_percent": 65.0521959936,
+    "dynamic_above_half_of_max_pair_percent": 38.2651855353
+  },
+  "decision": {
+    "same_angle_repeatability": "PASS",
+    "pair_difference_is_repeatable": true,
+    "rotor_angle_dependence_proven": false,
+    "interpretation": "The stable VU versus WV/WU split is consistent with saliency, rotor-angle dependence, or a repeatable phase-specific effect. A controlled no-power rotor-angle sweep is required to distinguish them.",
+    "parameter_update": "REJECT",
+    "powered_repeat": "NOT_AUTHORIZED",
+    "next_gate": "S5.5B no-power mechanical-angle sweep over approximately one 25.7 degree inductance period"
+  }
+}

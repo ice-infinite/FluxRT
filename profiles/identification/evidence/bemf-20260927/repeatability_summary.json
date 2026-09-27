@@ -1,0 +1,74 @@
+{
+  "format_version": 1,
+  "analysis_kind": "bemf-flux-repeatability",
+  "motor": "GBM2804H-100T",
+  "firmware_profile_revision": 6,
+  "firmware_runtime_config_crc32": "0xEDF4F6CA",
+  "requested_rpm": 582.0,
+  "pole_pairs": 7,
+  "nominal_uv_per_count": 4469,
+  "runs": [
+    {
+      "name": "run3",
+      "analysis": "profiles/identification/evidence/bemf-20260927/bemf_0582rpm_run3.analysis.json",
+      "analysis_sha256": "288623ee7f248db8d1fee03ebfc6e624fd86321b3f850b87f88e42432faa94a4",
+      "frequency_hz": 62.68,
+      "mechanical_speed_rpm": 537.2571428571429,
+      "flux_si_wb": 0.00541756852961604,
+      "ke_line_vll_rms_per_krpm": 4.863811118284517,
+      "balanced_fit_normalized_residual": 0.035707264647893644,
+      "measurement_validity": "ok"
+    },
+    {
+      "name": "run4",
+      "analysis": "profiles/identification/evidence/bemf-20260927/bemf_0582rpm_run4.analysis.json",
+      "analysis_sha256": "27098eb938725dd56d293b7e62f253e6e32c9d1807d85da9b8be5c7557bf1aaf",
+      "frequency_hz": 65.82,
+      "mechanical_speed_rpm": 564.1714285714286,
+      "flux_si_wb": 0.005446506504991376,
+      "ke_line_vll_rms_per_krpm": 4.889791195066523,
+      "balanced_fit_normalized_residual": 0.03839877494627834,
+      "measurement_validity": "ok"
+    },
+    {
+      "name": "run5",
+      "analysis": "profiles/identification/evidence/bemf-20260927/bemf_0582rpm_run5.analysis.json",
+      "analysis_sha256": "240e0f6c11bc8574cda4250c5974cb2bd42f272ceb60c0c4ff6597c535c5a262",
+      "frequency_hz": 63.9,
+      "mechanical_speed_rpm": 547.7142857142857,
+      "flux_si_wb": 0.00526298713976661,
+      "ke_line_vll_rms_per_krpm": 4.725030283576216,
+      "balanced_fit_normalized_residual": 0.04119741760958731,
+      "measurement_validity": "ok"
+    }
+  ],
+  "acceptance": {
+    "required_valid_runs": 3,
+    "maximum_flux_range_over_mean_pct": 10.0,
+    "all_measurements_valid": true,
+    "operator_reported_no_abnormal_sound_vibration_or_stall": true
+  },
+  "aggregate": {
+    "valid_runs": 3,
+    "mean_frequency_hz": 64.13333333333334,
+    "mean_mechanical_speed_rpm": 549.7142857142857,
+    "mean_flux_si_wb": 0.005375687391458009,
+    "flux_range_over_mean_pct": 3.413877181853606,
+    "flux_sample_coefficient_of_variation_pct": 1.8354478062501618,
+    "mean_flux_vs_firmware_baseline_pct": -2.773338532717906,
+    "mean_ke_line_vll_rms_per_krpm": 4.826210865642418,
+    "repeatability_gate": "pass"
+  },
+  "sc_ke_comparison": {
+    "sc_ke": 3.75248,
+    "profiler_snapshot_range_over_mean_pct": 43.2,
+    "convention_decision": "ambiguous",
+    "disposition": "do not convert SC_KE; use the directly measured SI flux for the unapproved candidate"
+  },
+  "limitations": [
+    "phase-voltage conversion uses the nominal 4469 uV/count divider model, not a per-board calibrated gain",
+    "the 256-sample stop window covers only about 1.4 electrical cycles at the measured frequency",
+    "the result is an unloaded low-speed measurement and is not parameter approval",
+    "rated-load, thermal and independent torque/speed truth evidence remain open"
+  ]
+}

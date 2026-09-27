@@ -20,7 +20,7 @@
         "motor_name": {"type": "string", "minLength": 1}
       }
     },
-    "runtime_config": {"$ref": "#/$defs/runtimeConfigV7"},
+    "runtime_config": {"$ref": "#/$defs/runtimeConfig"},
     "approval": {
       "type": "object",
       "additionalProperties": false,
@@ -82,7 +82,7 @@
         "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}
       }
     },
-    "runtimeConfigV7": {
+    "runtimeConfig": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -102,8 +102,8 @@
         "observer_run_reliability", "angle_compensation", "inverter_voltage_model"
       ],
       "properties": {
-        "struct_size": {"const": 284},
-        "config_version": {"const": 8},
+        "struct_size": {"type": "integer", "enum": [284, 296]},
+        "config_version": {"type": "integer", "enum": [8, 11]},
         "observer_backend": {"type": "integer", "enum": [0, 1, 2]},
         "observer_enable": {"type": "integer", "enum": [0, 1]},
         "closed_loop_enable": {"type": "integer", "enum": [0, 1]},
@@ -179,8 +179,34 @@
             "current_sign_filter_alpha": {"$ref": "#/$defs/finiteNumber"},
             "device_drop_v": {"$ref": "#/$defs/finiteNumber"}
           }
+        },
+        "startup_alignment_current_a": {"$ref": "#/$defs/finiteNumber"},
+        "observer_acquisition_maximum_phase_error_rad": {"$ref": "#/$defs/finiteNumber"},
+        "handoff_torque_support_ratio": {"$ref": "#/$defs/finiteNumber"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"config_version": {"const": 8}},
+            "required": ["config_version"]
+          },
+          "then": {"properties": {"struct_size": {"const": 284}}}
+        },
+        {
+          "if": {
+            "properties": {"config_version": {"const": 11}},
+            "required": ["config_version"]
+          },
+          "then": {
+            "properties": {"struct_size": {"const": 296}},
+            "required": [
+              "startup_alignment_current_a",
+              "observer_acquisition_maximum_phase_error_rad",
+              "handoff_torque_support_ratio"
+            ]
+          }
         }
-      }
+      ]
     }
   }
 }

@@ -103,6 +103,27 @@ enum
     FOC_PLATFORM_DIAG_OUTPUT_REJECTED = (1UL << 17),
     /* Diagnostic 档已把 PC0/PC3/PC1 配为 U/V/W 端电压同步注入通道。 */
     FOC_PLATFORM_DIAG_PHASE_VOLTAGE_CONFIGURED = (1UL << 18),
+    /* Identification 档已把 Vbus 配为电流 U 之后的同一注入序列 rank2。
+     * 该位只证明采样路径已配置，不代表 PWM 注入适配器存在或允许启动。 */
+    FOC_PLATFORM_DIAG_LSI_SYNC_BUS_CONFIGURED = (1UL << 19),
+    /* Ls(I) 原始样本契约或固定窗写入失败，锁存后禁止任何 arm。 */
+    FOC_PLATFORM_DIAG_LSI_CAPTURE_ERROR = (1UL << 20),
+    /* Identification 已通过 Rust 纯计划器的启动期 fail-closed 自检。
+     * 该位不表示存在 CCR 写入器，更不表示允许 start/arm。 */
+    FOC_PLATFORM_DIAG_LSI_ACTUATION_PLAN_CONFIGURED = (1UL << 21),
+    /* Identification 已把板级 raw->SI、Rust 计划、CCR 量化和下一拍账本
+     * 组合成执行契约并通过启动期算而不写自检。仍不表示 start/arm 已开放。 */
+    FOC_PLATFORM_DIAG_LSI_EXECUTOR_CONFIGURED = (1UL << 22),
+    /* Identification 已绑定真实 TIM1 CCR1/2/3 并完成一次输出关闭状态下的
+     * one-shot preload 写入/读回/清零自检。该位不表示 powered session、
+     * gate/MOE/CCER 或 start 已开放。 */
+    FOC_PLATFORM_DIAG_LSI_PRELOAD_SINK_CONFIGURED = (1UL << 23),
+    /* Bounded active-session permit logic passed outputs-off startup self-test.
+     * This bit does not mean an ISR caller, start command or gate path exists. */
+    FOC_PLATFORM_DIAG_LSI_ACTIVE_SESSION_CONFIGURED = (1UL << 24),
+    /* Identification-only bounded Ls(I) session is currently owned by the ADC
+     * ISR.  This is a live-state bit, not a build capability bit. */
+    FOC_PLATFORM_DIAG_LSI_SESSION_RUNNING = (1UL << 25),
 };
 
 /*
@@ -232,6 +253,11 @@ typedef struct
     uint16_t temperature_raw;
     uint16_t potentiometer_raw;
     uint16_t reserved;
+    /* EXP-B3 Identification-only：与 U 相电流同一 ADC1 注入序列的 Vbus。
+     * valid 只会在收到 JEOS 并读出 rank2 后置 1。 */
+    uint16_t lsi_sync_bus_voltage_raw;
+    uint16_t lsi_sync_bus_valid;
+    uint32_t lsi_sync_bus_sample_count;
 } foc_platform_diagnostics_t;
 
 /*
@@ -393,5 +419,9 @@ foc_status_t foc_platform_phase_voltage_raw_to_mv(
  */
 foc_status_t foc_platform_trial_arm(void);
 void foc_platform_trial_disarm(void);
+/* Identification-only one-run-per-boot start. The exact LSI1 confirmation is
+ * still only a request; all live hardware preflight gates run before it is
+ * consumed. Other profiles return FOC_STATUS_DISABLED/NOT_CONFIGURED. */
+foc_status_t foc_platform_lsi_start(uint32_t confirmation);
 
 #endif

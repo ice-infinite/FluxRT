@@ -25,6 +25,8 @@
 //!
 //! 量纲 / Units: `--duration` `[s]`、`--target-rpm` `[rpm]`、`--bus-voltage` `[V]`、
 //!   `--load-torque` `[N*m]`、`--sample-every` 为控制拍数、`--smo-slide` `[V]`、
+//!   `--plant-rs/--model-rs` `[ohm]`、`--plant-ls/--model-ls` `[H]`、
+//!   `--plant-flux/--model-flux` `[Wb]`，
 //!   `--smo-boundary` `[A]`、`--emf-filter` 无量纲、`--pll-kp` `[1/s]`、
 //!   `--pll-acq-ratio` 无量纲、`--pll-ki` `[1/s^2]`、
 //!   `--acquire-phase-rad/--run-phase-rad` `[rad]`、
@@ -179,6 +181,14 @@ fn parse_args() -> Result<(BringupSimulationConfig, Option<PathBuf>), String> {
             | "--startup-current-a"
             | "--bus-voltage"
             | "--load-torque"
+            | "--plant-rs"
+            | "--plant-ls"
+            | "--plant-flux"
+            | "--model-rs"
+            | "--model-ls"
+            | "--model-flux"
+            | "--current-kp"
+            | "--current-ki"
             | "--sample-every"
             | "--pwm-hz"
             | "--control-hz"
@@ -238,6 +248,14 @@ fn parse_args() -> Result<(BringupSimulationConfig, Option<PathBuf>), String> {
             "--startup-current-a" => config.startup_current_a = parse_number(&argument, &value)?,
             "--bus-voltage" => config.dc_bus_voltage_v = parse_number(&argument, &value)?,
             "--load-torque" => config.load_torque_nm = parse_number(&argument, &value)?,
+            "--plant-rs" => config.plant_stator_resistance_ohm = parse_number(&argument, &value)?,
+            "--plant-ls" => config.plant_stator_inductance_h = parse_number(&argument, &value)?,
+            "--plant-flux" => config.plant_flux_linkage_wb = parse_number(&argument, &value)?,
+            "--model-rs" => config.model_stator_resistance_ohm = parse_number(&argument, &value)?,
+            "--model-ls" => config.model_stator_inductance_h = parse_number(&argument, &value)?,
+            "--model-flux" => config.model_flux_linkage_wb = parse_number(&argument, &value)?,
+            "--current-kp" => config.current_pi_kp = parse_number(&argument, &value)?,
+            "--current-ki" => config.current_pi_ki = parse_number(&argument, &value)?,
             "--sample-every" => config.trace_decimation = parse_number(&argument, &value)?,
             "--pwm-hz" => config.timing.pwm_frequency_hz = parse_number(&argument, &value)?,
             "--control-hz" => config.timing.control_frequency_hz = parse_number(&argument, &value)?,
@@ -331,7 +349,10 @@ fn print_help() {
          [--closed-loop] [--alignment-ms MS] [--ramp-ms MS] [--startup-speed-rpm RPM] \
          [--alignment-current-a A] \
          [--startup-current-a A] \
-         [--bus-voltage VOLTS] [--load-torque NM] [--sample-every TICKS] \
+         [--bus-voltage VOLTS] [--load-torque NM] \
+         [--plant-rs OHM] [--plant-ls H] [--plant-flux WB] \
+         [--model-rs OHM] [--model-ls H] [--model-flux WB] \
+         [--current-kp KP] [--current-ki KI] [--sample-every TICKS] \
          [--pwm-hz HZ] [--control-hz HZ] [--actuation-delay-pwm-ticks TICKS] \
          [--park-delay-ticks TICKS] [--rev-park-delay-ticks TICKS] \
          [--smo-slide V] [--smo-boundary A] [--emf-filter ALPHA] \

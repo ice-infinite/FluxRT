@@ -1,0 +1,62 @@
+{
+  "format_version": 1,
+  "evidence_kind": "exp-b3-s4-no-power-management",
+  "date": "2026-09-27",
+  "hardware": {
+    "board": "NUCLEO-G431RB",
+    "power_stage": "X-NUCLEO-IHM16M1",
+    "stlink_serial": "00400027544B500120343637",
+    "serial_port": "COM6",
+    "baud": 115200,
+    "target_voltage_v": 3.3,
+    "main_power": "off"
+  },
+  "firmware": {
+    "profile": "identification",
+    "rust_opt_level": "s",
+    "rom_bytes": 99940,
+    "ram_bytes": 9080,
+    "hex_sha256": "980F2F072397D6FF01528853C3A4B858EF5DAC5B0030B64C7FAA0DDCBB0B7DE8",
+    "bin_sha256": "AED75B3A447D5C44B03E0884718E815F0ADE2F9A65F4AB64ECDF0EE86875F7C3",
+    "download_verified": true
+  },
+  "preflash": {
+    "bus_voltage_mv": 877,
+    "state": 0,
+    "realtime_steps": 0,
+    "realtime_errors": 0,
+    "deadline_misses": 0,
+    "duty": [0, 0, 0]
+  },
+  "management": {
+    "commands": [
+      "foc_lsi_status",
+      "foc_lsi_dump",
+      "foc_lsi_abort",
+      "foc_lsi_reset"
+    ],
+    "identification_start_exposed": false,
+    "pwm_adapter_present": false,
+    "adc_adapter_present": false,
+    "normal_foc_start_refused": true,
+    "shell_stack_overflow_observed": false
+  },
+  "recovery": {
+    "software_reset_pass": true,
+    "hardware_reset_pass": true,
+    "state_after_hardware_reset": 0,
+    "abort_count_after_hardware_reset": 0,
+    "reset_count_after_hardware_reset": 0,
+    "realtime_steps": 0,
+    "realtime_errors": 0,
+    "deadline_misses": 0,
+    "duty": [0, 0, 0],
+    "final_bus_voltage_mv": 193
+  },
+  "decision": {
+    "s4_gate": "pass",
+    "s5_hardware_permission": "not-granted",
+    "motor_run": false,
+    "power_injection": false
+  }
+}

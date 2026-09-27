@@ -58,20 +58,22 @@ extern "C" {
 #endif
 
 /*
- * ABI 版本。主/次版本各占 16 位：0x0011_0000 表示第 17 代主版本。
- * ABI version. Major and minor occupy one 16-bit half each: 0x0011_0000 is
- * major revision 17.
+ * ABI 版本。主/次版本各占 16 位：0x0013_0000 表示第 19 代主版本。
+ * ABI version. Major and minor occupy one 16-bit half each: 0x0013_0000 is
+ * major revision 19.
  *
  * 提升规则 / Bump rule: 任何结构体字段、函数签名或语义（不仅是尺寸）变化
  * 都必须提升；main.c 会在启动时比对并拒绝不匹配的固件组合。
  * Bump for any struct field, signature or semantic change, not only size
  * changes. main.c compares this at boot and rejects a mismatched combination.
  */
-#define FOC_RUST_ABI_VERSION        (0x00110000UL)
+#define FOC_RUST_ABI_VERSION        (0x00130000UL)
 /* 运行时配置结构体的版本，与 ABI 版本独立演进，用于结构体内自检。
  * Version of the runtime configuration struct; it evolves independently of the
  * ABI version and is used for the struct's internal self-check. */
 #define FOC_RUST_CONFIG_VERSION     (11UL)
+/* V19 实时输入结构自身的版本；与运行配置版本独立。 */
+#define FOC_REALTIME_INPUT_VERSION  (1UL)
 /* C 侧提供的控制器存储容量 [bytes]，对齐 8 字节。
  * 容量大于当前控制器尺寸（编译期 assert 保证装得下），留有余量供后续
  * 增加状态字段而不必立刻改动 C 侧。
@@ -103,6 +105,8 @@ extern "C" {
  * The observer stayed unlocked for longer than observer_loss_timeout_s while
  * closed loop was active. */
 #define FOC_RUST_FAULT_OBSERVER_LOST     (1UL << 3)
+/* V19 实时输入携带稳定硬件故障镜像；任一已知位命中时在算法前锁存。 */
+#define FOC_RUST_FAULT_PLATFORM_INPUT    (1UL << 4)
 
 /*
  * 观测器后端选择。数值与 ABI 绑定，只能追加不能重排。
@@ -424,6 +428,74 @@ typedef struct
     foc_inverter_voltage_model_config_t inverter_voltage_model;
 } foc_runtime_config_t;
 
+/* ---------------------------------------------------------------- Ls(I) 注入计划
+ *
+ * 这是 Identification 状态机与平台 PWM 所有者之间的纯计算 ABI。Rust 只返回
+ * 一个“尚未施加”的计划；C 平台必须再次检查硬件状态并决定是否写 CCR/开栅极。
+ * This is the pure-computation ABI between the Identification sequencer and
+ * the platform PWM owner. Rust returns a plan that has not been applied; the C
+ * platform must re-check hardware state before writing CCR or enabling gates.
+ */
+#define FOC_LSI_ACTUATION_CONFIG_VERSION (1UL)
+#define FOC_LSI_ACTUATION_INPUT_VERSION  (1UL)
+#define FOC_LSI_ACTUATION_OUTPUT_VERSION (1UL)
+
+typedef uint32_t foc_lsi_drive_request_abi_t;
+enum
+{
+    FOC_LSI_DRIVE_ABI_OFF = 0,
+    FOC_LSI_DRIVE_ABI_BIAS = 1,
+    FOC_LSI_DRIVE_ABI_PULSE_POSITIVE = 2,
+    FOC_LSI_DRIVE_ABI_PULSE_NEGATIVE = 3,
+};
+
+typedef struct
+{
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t sample_rate_hz;
+    uint32_t actuation_delay_control_ticks;
+    float stator_resistance_ohm;
+    float maximum_bias_current_a;
+    float maximum_perturbation_voltage_v;
+    float current_trip_a;
+    float minimum_bus_voltage_v;
+    float maximum_bus_voltage_v;
+    float minimum_duty;
+    float maximum_duty;
+} foc_lsi_actuation_config_t;
+
+typedef struct
+{
+    uint32_t struct_size;
+    uint32_t version;
+    foc_lsi_drive_request_abi_t drive_request;
+    uint32_t force_safe_output;
+    uint32_t capture_ready;
+    uint32_t capture_full;
+    uint32_t hardware_fault;
+    uint32_t software_trip;
+    uint32_t control_tick;
+    float requested_bias_current_a;
+    float requested_perturbation_voltage_v;
+    float phase_u_current_a;
+    float bus_voltage_v;
+} foc_lsi_actuation_input_t;
+
+typedef struct
+{
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t safe_output_required;
+    uint32_t drive_active;
+    uint32_t source_control_tick;
+    uint32_t expected_active_control_tick;
+    float phase_u_voltage_command_v;
+    float duty_u;
+    float duty_v;
+    float duty_w;
+} foc_lsi_actuation_output_t;
+
 /*
  * 一次快环调用的遥测快照，供 Shell 与 trace 使用。
  * Telemetry snapshot of one fast-loop call, for the shell and trace.
@@ -499,6 +571,18 @@ uint32_t foc_rust_abi_version(void);
 uint32_t foc_rust_context_required_size(void);
 /* 返回控制器结构体的对齐要求 [bytes] / Returns the controller alignment. */
 uint32_t foc_rust_context_required_align(void);
+
+/* 写出 EXP-B3 的冻结 12 kHz / 0.2 A / 0.4 V 安全包络。该配置只用于
+ * Identification 筛查，不会修改普通 FOC 运行配置。 */
+foc_status_t foc_rust_lsi_default_actuation_config(
+    foc_lsi_actuation_config_t *config);
+
+/* 把状态机请求变成未施加的三相 duty 计划。任何失败路径都会先把 output 写成
+ * safe_output_required=1、duty=0；本函数不访问硬件。 */
+foc_status_t foc_rust_lsi_plan(
+    const foc_lsi_actuation_config_t *config,
+    const foc_lsi_actuation_input_t *input,
+    foc_lsi_actuation_output_t *output);
 
 #if defined(FLUXRT_MATH_DIAGNOSTICS_BUILD) && \
     defined(FOC_MATH_CPU_FAST_APPROX_BENCHMARK)
@@ -628,6 +712,55 @@ foc_status_t foc_rust_start_realtime(foc_rust_context_t *context,
                                      float target_speed_rpm);
 
 /*
+ * 把旧 20 B feedback 确定性组装为 V19 CommandModel 快照。
+ * Deterministically assembles the legacy 20-byte feedback into a V19
+ * CommandModel snapshot.
+ *
+ * 本辅助函数只做字段映射，不校验数值。相电压明确标为未配置且无有效位，所以
+ * 不可能因调用此函数而开放 Measured/Hybrid。actual_dt_s 必须由调用方填入本拍
+ * 实际控制周期；V19 第一阶段只校验和携带该字段，控制律仍使用固定配置周期。
+ */
+static inline void foc_realtime_input_from_legacy(
+    const foc_feedback_t *feedback,
+    uint32_t control_sequence,
+    float actual_dt_s,
+    foc_realtime_input_t *input)
+{
+    if ((feedback == NULL) || (input == NULL))
+    {
+        return;
+    }
+
+    input->struct_size = sizeof(*input);
+    input->version = FOC_REALTIME_INPUT_VERSION;
+    input->control_sequence = control_sequence;
+    input->valid_flags = FOC_REALTIME_VALID_PHASE_CURRENTS |
+                         FOC_REALTIME_VALID_DC_BUS_VOLTAGE;
+    input->hardware_fault_flags = 0U;
+    input->phase_voltage_sequence = 0U;
+    input->phase_voltage_age_ticks = 0U;
+    input->phase_voltage_provenance =
+        FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_NONE;
+    input->phase_voltage_quality_state =
+        FOC_REALTIME_PHASE_VOLTAGE_QUALITY_UNCONFIGURED;
+    input->phase_voltage_reason_mask =
+        FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCONFIGURED;
+    input->observer_voltage_selection =
+        FOC_REALTIME_OBSERVER_VOLTAGE_COMMAND_MODEL;
+    input->phase_voltage_fallback_event_count = 0U;
+    input->actual_dt_s = actual_dt_s;
+    input->phase_current_a = feedback->phase_current_a;
+    input->phase_current_b = feedback->phase_current_b;
+    input->phase_current_c = feedback->phase_current_c;
+    input->dc_bus_voltage = feedback->dc_bus_voltage;
+    input->phase_voltage_a_v = 0.0f;
+    input->phase_voltage_b_v = 0.0f;
+    input->phase_voltage_c_v = 0.0f;
+    input->electrical_angle_rad = 0.0f;
+    input->sensor_temperature_c = 0.0f;
+}
+
+/*
  * 执行一次完整快环：观测器 -> 启动时序 -> 电流环 -> 圆限幅 -> SVPWM。
  * Runs one complete fast loop: observer, sequencer, current loop, circle limit,
  * SVPWM.
@@ -654,7 +787,7 @@ foc_status_t foc_rust_start_realtime(foc_rust_context_t *context,
  * dominates the ISR cost (about 7,300 cycles at 170 MHz).
  */
 foc_status_t foc_rust_realtime_step(foc_rust_context_t *context,
-                                    const foc_feedback_t *feedback,
+                                    const foc_realtime_input_t *input,
                                     foc_output_t *output,
                                     foc_telemetry_t *telemetry);
 
@@ -798,6 +931,54 @@ uint32_t foc_rust_fault_flags(foc_rust_context_t *context);
 _Static_assert(sizeof(foc_status_t) == sizeof(uint32_t), "FOC status ABI changed");
 _Static_assert(sizeof(foc_state_t) == sizeof(uint32_t), "FOC state ABI changed");
 _Static_assert(sizeof(foc_feedback_t) == 20U, "FOC feedback ABI changed");
+_Static_assert(sizeof(foc_realtime_input_t) == 88U,
+               "FOC realtime input ABI changed");
+_Static_assert(_Alignof(foc_realtime_input_t) == 4U,
+               "FOC realtime input alignment changed");
+_Static_assert(offsetof(foc_realtime_input_t, struct_size) == 0U,
+               "FOC realtime input struct_size offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, version) == 4U,
+               "FOC realtime input version offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, control_sequence) == 8U,
+               "FOC realtime input control_sequence offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, valid_flags) == 12U,
+               "FOC realtime input valid_flags offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, hardware_fault_flags) == 16U,
+               "FOC realtime input hardware_fault_flags offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, phase_voltage_sequence) == 20U,
+               "FOC realtime input phase_voltage_sequence offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, phase_voltage_age_ticks) == 24U,
+               "FOC realtime input phase_voltage_age_ticks offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, phase_voltage_provenance) == 28U,
+               "FOC realtime input provenance offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, phase_voltage_quality_state) == 32U,
+               "FOC realtime input quality offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, phase_voltage_reason_mask) == 36U,
+               "FOC realtime input reason offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, observer_voltage_selection) == 40U,
+               "FOC realtime input selection offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, phase_voltage_fallback_event_count) == 44U,
+               "FOC realtime input fallback offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, actual_dt_s) == 48U,
+               "FOC realtime input dt offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, phase_current_a) == 52U,
+               "FOC realtime input current offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, phase_current_b) == 56U,
+               "FOC realtime input current offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, phase_current_c) == 60U,
+               "FOC realtime input current offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, dc_bus_voltage) == 64U,
+               "FOC realtime input Vbus offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, phase_voltage_a_v) == 68U,
+               "FOC realtime input phase voltage offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, phase_voltage_b_v) == 72U,
+               "FOC realtime input phase voltage offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, phase_voltage_c_v) == 76U,
+               "FOC realtime input phase voltage offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, electrical_angle_rad) == 80U,
+               "FOC realtime input angle offset changed");
+_Static_assert(offsetof(foc_realtime_input_t, sensor_temperature_c) == 84U,
+               "FOC realtime input temperature offset changed");
 _Static_assert(sizeof(foc_reference_t) == 8U, "FOC reference ABI changed");
 _Static_assert(sizeof(foc_output_t) == 12U, "FOC output ABI changed");
 _Static_assert(sizeof(foc_basic_config_t) == 60U, "FOC config ABI changed");
@@ -809,6 +990,14 @@ _Static_assert(sizeof(foc_inverter_voltage_model_config_t) == 36U,
                "FOC inverter model config ABI changed");
 _Static_assert(sizeof(foc_runtime_config_t) == 296U, "FOC runtime config ABI changed");
 _Static_assert(sizeof(foc_telemetry_t) == 100U, "FOC telemetry ABI changed");
+_Static_assert(sizeof(foc_lsi_drive_request_abi_t) == sizeof(uint32_t),
+               "FOC LSI drive request ABI changed");
+_Static_assert(sizeof(foc_lsi_actuation_config_t) == 48U,
+               "FOC LSI actuation config ABI changed");
+_Static_assert(sizeof(foc_lsi_actuation_input_t) == 52U,
+               "FOC LSI actuation input ABI changed");
+_Static_assert(sizeof(foc_lsi_actuation_output_t) == 40U,
+               "FOC LSI actuation output ABI changed");
 _Static_assert(sizeof(foc_rust_context_t) == FOC_RUST_CONTEXT_CAPACITY,
                "Rust context storage ABI changed");
 #endif

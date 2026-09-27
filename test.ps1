@@ -2,7 +2,7 @@
 # FluxRT - full regression entry point (Rust, simulation, cross build, C host test).
 #
 # 职责 / Responsibility:
-#   依次执行 cargo fmt --check、cargo test、闭环 PMSM 仿真、clippy -D warnings、
+#   依次执行 Python 参数/采集分析测试、cargo fmt --check、cargo test、闭环 PMSM 仿真、clippy -D warnings、
 #   两个 thumbv7em-none-eabihf 交叉构建（CPU 后端与 CORDIC 特性），最后配置、构建
 #   并运行 tests/host 的 C 安全测试。任一步非零退出即抛错停止。
 #   Runs cargo fmt --check, cargo test, the closed-loop PMSM simulation,
@@ -48,11 +48,21 @@ Write-Host '[Profile] Candidate/identification schemas, CRC, evidence gates and 
 & $python -m unittest discover -s (Join-Path $projectDir 'tests\profile') -p 'test_*.py'
 if ($LASTEXITCODE -ne 0) { throw 'Production-profile tool tests failed.' }
 
+Write-Host '[Simulation tools] BEMF and Ls(I) host tests ...' -ForegroundColor Cyan
+& $python -m unittest discover -s (Join-Path $projectDir 'tests\simulation') -p 'test_*.py'
+if ($LASTEXITCODE -ne 0) { throw 'Simulation-tool tests failed.' }
+
 & $python (Join-Path $projectDir 'tools\foc_profile_tool.py') generate `
     (Join-Path $projectDir 'profiles\candidates\rev1-gbm2804h-unapproved.json') `
     --output (Join-Path $projectDir 'profiles\generated\rev1-gbm2804h-unapproved.inc') `
     --check
 if ($LASTEXITCODE -ne 0) { throw 'Generated production-profile candidate is stale.' }
+
+& $python (Join-Path $projectDir 'tools\foc_profile_tool.py') generate `
+    (Join-Path $projectDir 'profiles\candidates\rev7-gbm2804h-rsl-flux-screening.json') `
+    --output (Join-Path $projectDir 'profiles\generated\rev7-gbm2804h-rsl-flux-screening.inc') `
+    --check
+if ($LASTEXITCODE -ne 0) { throw 'Generated V11 screening candidate is stale.' }
 
 & $python (Join-Path $projectDir 'tools\foc_identification_tool.py') analyze `
     (Join-Path $projectDir 'profiles\identification\sessions\a16-screening-20260924.json') `

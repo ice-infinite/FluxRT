@@ -29,13 +29,13 @@
 
 #include <rtthread.h>
 #include <finsh.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "foc_math_accel.h"
 #include "foc_platform.h"
 #include "foc_production_profile.h"
 #include "foc_rust_bridge.h"
+#include "foc_shell_parse.h"
 
 /* 构建档名与 Rust 优化等级名由 custom.cmake 以 -D 传入，只用于打印。
  * 缺省值让本文件脱离 CMake 单独编译时仍可构建。
@@ -189,13 +189,13 @@ static uint32_t foc_bus_voltage_mv(uint16_t raw)
  */
 static int foc_start(int argc, char **argv)
 {
-#if defined(FLUXRT_CALIBRATION_CAPTURE_ONLY_BUILD)
-    /* Calibration 固件不允许 arm。应用层先停机，平台层还会做第二道编译期拒绝，
-     * 防止未来新增调用点绕过 Shell。 */
+#if defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD)
+    /* Calibration/Identification 固件都不允许普通电机 arm。应用层先停机，
+     * 平台层还会做第二道编译期拒绝，防止未来新增调用点绕过 Shell。 */
     (void)argc;
     (void)argv;
     foc_platform_control_stop();
-    rt_kprintf("FOC start REFUSED: Calibration profile is capture-only; motor arm is compiled out.\n");
+    rt_kprintf("FOC start REFUSED: this profile compiles out normal motor arm.\n");
     return -1;
 #else
     float target_rpm = g_foc_runtime_config.startup_final_speed_rpm;
@@ -208,16 +208,11 @@ static int foc_start(int argc, char **argv)
     }
     if (argc == 2)
     {
-/* Production 档裁掉了 strtof，改用 strtol 走整数路径再转 float：转速是
- * 整数 rpm，精度足够，且避免把 newlib strtod 依赖链拉进镜像。
- * Production drops strtof and parses an integer with strtol before widening to
- * float: speed is an integer number of rpm, which is precise enough, and this
- * keeps newlib strtod out of the image. */
-#if defined(FLUXRT_PRODUCTION_BUILD)
-        target_rpm = (float)strtol(argv[1], RT_NULL, 10);
-#else
-        target_rpm = strtof(argv[1], RT_NULL);
-#endif
+        if (foc_shell_parse_i32_scaled(argv[1], 1U, &target_rpm) == 0U)
+        {
+            rt_kprintf("foc_start [rpm]\n");
+            return -1;
+        }
     }
     status = foc_platform_control_start(target_rpm);
     if (status != FOC_STATUS_OK)
@@ -486,7 +481,11 @@ static int foc_math_bench(int argc, char **argv)
     }
     if (argc == 2)
     {
-        repeats = (uint32_t)strtoul(argv[1], RT_NULL, 10);
+        if (foc_shell_parse_u32(argv[1], &repeats) == 0U)
+        {
+            rt_kprintf("FMATH,ERR,repeats\n");
+            return -1;
+        }
     }
     if ((repeats == 0U) || (repeats > FOC_MATH_BENCHMARK_MAX_REPEATS))
     {
@@ -925,7 +924,11 @@ static int foc_trace(int argc, char **argv)
     }
     if (argc == 3)
     {
-        sample_hz = (uint32_t)strtoul(argv[2], RT_NULL, 10);
+        if (foc_shell_parse_u32(argv[2], &sample_hz) == 0U)
+        {
+            rt_kprintf("FTRACE rate\n");
+            return -1;
+        }
     }
     if ((sample_hz < 10U) || (sample_hz > 50U))
     {
@@ -1095,6 +1098,7 @@ static int foc_cfg(int argc, char **argv)
 {
     foc_runtime_config_t *candidate = &g_foc_runtime_candidate;
     foc_status_t status;
+    uint32_t parsed_u32;
 
     if ((argc == 1) || ((argc == 2) && (strcmp(argv[1], "show") == 0)))
     {
@@ -1133,145 +1137,190 @@ static int foc_cfg(int argc, char **argv)
     }
     else if (strcmp(argv[1], "closedloop") == 0)
     {
-        int value = atoi(argv[2]);
-        if ((value != 0) && (value != 1)) return -1;
-        candidate->closed_loop_enable = (uint32_t)value;
+        if ((foc_shell_parse_u32(argv[2], &parsed_u32) == 0U) ||
+            (parsed_u32 > 1U)) return -1;
+        candidate->closed_loop_enable = parsed_u32;
     }
     else if (strcmp(argv[1], "observe") == 0)
     {
-        int value = atoi(argv[2]);
-        if ((value != 0) && (value != 1)) return -1;
-        candidate->observer_enable = (uint32_t)value;
+        if ((foc_shell_parse_u32(argv[2], &parsed_u32) == 0U) ||
+            (parsed_u32 > 1U)) return -1;
+        candidate->observer_enable = parsed_u32;
     }
     else if (strcmp(argv[1], "invstage") == 0)
     {
-        uint32_t stage = (uint32_t)strtoul(argv[2], RT_NULL, 10);
-        if (stage > 4U) return -1;
-        candidate->inverter_voltage_model.enabled = (stage != 0U) ? 1U : 0U;
+        if ((foc_shell_parse_u32(argv[2], &parsed_u32) == 0U) ||
+            (parsed_u32 > 4U)) return -1;
+        candidate->inverter_voltage_model.enabled =
+            (parsed_u32 != 0U) ? 1U : 0U;
         candidate->inverter_voltage_model.observer_voltage_correction_enable =
-            ((stage == 2U) || (stage == 4U)) ? 1U : 0U;
+            ((parsed_u32 == 2U) || (parsed_u32 == 4U)) ? 1U : 0U;
         candidate->inverter_voltage_model.pwm_feedforward_enable =
-            ((stage == 3U) || (stage == 4U)) ? 1U : 0U;
+            ((parsed_u32 == 3U) || (parsed_u32 == 4U)) ? 1U : 0U;
     }
     else if (strcmp(argv[1], "obsdiv") == 0)
     {
-        candidate->observer_update_divider = (uint32_t)strtoul(argv[2], RT_NULL, 10);
+        if (foc_shell_parse_u32(
+                argv[2], &candidate->observer_update_divider) == 0U) return -1;
     }
     else if (strcmp(argv[1], "startup") == 0)
     {
-        candidate->startup_final_speed_rpm = strtof(argv[2], RT_NULL);
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1U, &candidate->startup_final_speed_rpm) == 0U) return -1;
     }
     else if (strcmp(argv[1], "current") == 0)
     {
-        candidate->startup_current_a = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U, &candidate->startup_current_a) == 0U) return -1;
     }
     else if (strcmp(argv[1], "aligncurrent") == 0)
     {
-        candidate->startup_alignment_current_a = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->startup_alignment_current_a) == 0U) return -1;
     }
     else if (strcmp(argv[1], "align") == 0)
     {
-        candidate->alignment_duration_s = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U, &candidate->alignment_duration_s) == 0U) return -1;
     }
     else if (strcmp(argv[1], "ramp") == 0)
     {
-        candidate->open_loop_ramp_duration_s = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->open_loop_ramp_duration_s) == 0U) return -1;
     }
     else if (strcmp(argv[1], "util") == 0)
     {
-        candidate->voltage_utilization = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U, &candidate->voltage_utilization) == 0U) return -1;
     }
     else if (strcmp(argv[1], "slide") == 0)
     {
-        candidate->observer_smo_k_slide_v = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U, &candidate->observer_smo_k_slide_v) == 0U) return -1;
     }
     else if (strcmp(argv[1], "boundary") == 0)
     {
-        candidate->observer_smo_boundary_a = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U, &candidate->observer_smo_boundary_a) == 0U) return -1;
     }
     else if (strcmp(argv[1], "filter") == 0)
     {
-        candidate->observer_emf_filter_alpha = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->observer_emf_filter_alpha) == 0U) return -1;
     }
     else if (strcmp(argv[1], "pll_kp") == 0)
     {
-        candidate->observer_pll_kp = strtof(argv[2], RT_NULL);
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1U, &candidate->observer_pll_kp) == 0U) return -1;
     }
     else if (strcmp(argv[1], "pll_acq") == 0)
     {
-        candidate->observer_acquisition_pll_kp_ratio = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->observer_acquisition_pll_kp_ratio) == 0U) return -1;
     }
     else if (strcmp(argv[1], "pll_ki") == 0)
     {
-        candidate->observer_pll_ki = strtof(argv[2], RT_NULL);
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1U, &candidate->observer_pll_ki) == 0U) return -1;
     }
     else if (strcmp(argv[1], "minspeed") == 0)
     {
-        candidate->observer_minimum_speed_rpm = strtof(argv[2], RT_NULL);
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1U,
+                &candidate->observer_minimum_speed_rpm) == 0U) return -1;
     }
     else if (strcmp(argv[1], "runminspeed") == 0)
     {
-        candidate->observer_run_reliability.minimum_speed_rpm = strtof(argv[2], RT_NULL);
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1U,
+                &candidate->observer_run_reliability.minimum_speed_rpm) == 0U) return -1;
     }
     else if (strcmp(argv[1], "runphase") == 0)
     {
-        candidate->observer_run_reliability.maximum_phase_error_rad =
-            strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->observer_run_reliability.maximum_phase_error_rad) == 0U) return -1;
     }
     else if (strcmp(argv[1], "acqphase") == 0)
     {
-        candidate->observer_acquisition_maximum_phase_error_rad =
-            strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->observer_acquisition_maximum_phase_error_rad) == 0U) return -1;
     }
     else if (strcmp(argv[1], "parkdelay") == 0)
     {
-        candidate->angle_compensation.park_prediction_ticks =
-            strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->angle_compensation.park_prediction_ticks) == 0U) return -1;
     }
     else if (strcmp(argv[1], "revparkdelay") == 0)
     {
-        candidate->angle_compensation.reverse_park_prediction_ticks =
-            strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->angle_compensation.reverse_park_prediction_ticks) == 0U) return -1;
     }
     else if (strcmp(argv[1], "minbemf") == 0)
     {
-        candidate->observer_minimum_bemf_v = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->observer_minimum_bemf_v) == 0U) return -1;
     }
     else if (strcmp(argv[1], "variance") == 0)
     {
-        candidate->observer_speed_variance_ratio = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->observer_speed_variance_ratio) == 0U) return -1;
     }
     else if (strcmp(argv[1], "confirm") == 0)
     {
-        candidate->observer_consecutive_samples = (uint32_t)strtoul(argv[2], RT_NULL, 10);
+        if (foc_shell_parse_u32(
+                argv[2], &candidate->observer_consecutive_samples) == 0U) return -1;
     }
     else if (strcmp(argv[1], "acquire") == 0)
     {
-        candidate->observer_acquisition_timeout_s = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->observer_acquisition_timeout_s) == 0U) return -1;
     }
     else if (strcmp(argv[1], "transition") == 0)
     {
-        candidate->observer_transition_duration_s = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->observer_transition_duration_s) == 0U) return -1;
     }
     else if (strcmp(argv[1], "loss") == 0)
     {
-        candidate->observer_loss_timeout_s = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->observer_loss_timeout_s) == 0U) return -1;
     }
     else if (strcmp(argv[1], "accel") == 0)
     {
-        candidate->closed_loop_speed_ramp_rpm_per_s = strtof(argv[2], RT_NULL);
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1U,
+                &candidate->closed_loop_speed_ramp_rpm_per_s) == 0U) return -1;
     }
     else if (strcmp(argv[1], "preload") == 0)
     {
-        candidate->speed_pi_preload_ratio = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->speed_pi_preload_ratio) == 0U) return -1;
     }
     else if (strcmp(argv[1], "support") == 0)
     {
-        candidate->handoff_torque_support_ratio = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->handoff_torque_support_ratio) == 0U) return -1;
     }
     else if (strcmp(argv[1], "islew") == 0)
     {
-        candidate->closed_loop_current_slew_a_per_s = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->closed_loop_current_slew_a_per_s) == 0U) return -1;
     }
     else if (strcmp(argv[1], "trip") == 0)
     {
@@ -1281,7 +1330,9 @@ static int foc_cfg(int argc, char **argv)
          * the Rust runtime configuration, so it is validated separately through
          * foc_platform_configure() and the local copy is synced on success. */
         foc_platform_config_t platform_candidate = g_foc_platform_config;
-        platform_candidate.software_current_trip_a = strtof(argv[2], RT_NULL) / 1000.0f;
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &platform_candidate.software_current_trip_a) == 0U) return -1;
         status = foc_platform_configure(&platform_candidate);
         if (status != FOC_STATUS_OK)
         {

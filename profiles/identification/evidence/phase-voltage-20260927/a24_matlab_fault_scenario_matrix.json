@@ -1,0 +1,117 @@
+{
+  "schema": "fluxrt.phase-voltage-fault-scenarios.matlab",
+  "schema_version": 1,
+  "scope": "PC-only independent MATLAB formulas; no hardware authorization",
+  "thresholds_are_production_approved": false,
+  "reference_schema": "fluxrt.phase-voltage-fault-scenarios",
+  "matlab_version": "25.2.0.2998904 (R2025b)",
+  "scenario_count": 13,
+  "mismatch_count": 0,
+  "mismatches": [],
+  "scenarios": [
+    {
+      "name": "baseline",
+      "quality_state": "valid",
+      "quality_reason": "quality_gate_passed",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Measured",
+      "hybrid_selection": "Measured"
+    },
+    {
+      "name": "offset",
+      "quality_state": "valid",
+      "quality_reason": "quality_gate_passed",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Measured",
+      "hybrid_selection": "Measured"
+    },
+    {
+      "name": "gain",
+      "quality_state": "valid",
+      "quality_reason": "quality_gate_passed",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Measured",
+      "hybrid_selection": "Measured"
+    },
+    {
+      "name": "quantization",
+      "quality_state": "valid",
+      "quality_reason": "quality_gate_passed",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Measured",
+      "hybrid_selection": "Measured"
+    },
+    {
+      "name": "delay",
+      "quality_state": "valid",
+      "quality_reason": "quality_gate_passed",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Measured",
+      "hybrid_selection": "Measured"
+    },
+    {
+      "name": "stale",
+      "quality_state": "stale",
+      "quality_reason": "sample_age_exceeds_limit",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Unavailable",
+      "hybrid_selection": "CommandModel"
+    },
+    {
+      "name": "dropout",
+      "quality_state": "dropout",
+      "quality_reason": "sample_not_available",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Unavailable",
+      "hybrid_selection": "CommandModel"
+    },
+    {
+      "name": "low_saturation",
+      "quality_state": "low_saturation",
+      "quality_reason": "adc_code_at_low_rail",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Unavailable",
+      "hybrid_selection": "CommandModel"
+    },
+    {
+      "name": "high_saturation",
+      "quality_state": "high_saturation",
+      "quality_reason": "adc_code_at_high_rail",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Unavailable",
+      "hybrid_selection": "CommandModel"
+    },
+    {
+      "name": "open_suspicion",
+      "quality_state": "open_suspicion",
+      "quality_reason": "excited_phase_is_stuck",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Unavailable",
+      "hybrid_selection": "CommandModel"
+    },
+    {
+      "name": "three_phase_inconsistency",
+      "quality_state": "three_phase_inconsistency",
+      "quality_reason": "line_to_line_residual_exceeds_limit",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Unavailable",
+      "hybrid_selection": "CommandModel"
+    },
+    {
+      "name": "unconfigured",
+      "quality_state": "unconfigured",
+      "quality_reason": "phase_voltage_path_not_configured",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Unavailable",
+      "hybrid_selection": "CommandModel"
+    },
+    {
+      "name": "uncalibrated",
+      "quality_state": "uncalibrated",
+      "quality_reason": "board_calibration_not_observer_eligible",
+      "command_model_selection": "CommandModel",
+      "measured_selection": "Unavailable",
+      "hybrid_selection": "CommandModel"
+    }
+  ]
+}

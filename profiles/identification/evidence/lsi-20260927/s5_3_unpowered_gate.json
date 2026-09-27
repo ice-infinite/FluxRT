@@ -1,0 +1,128 @@
+{
+  "format_version": 1,
+  "evidence_kind": "fluxrt-exp-b3-s5.3-unpowered-board-gate",
+  "date_local": "2026-09-27",
+  "hardware": {
+    "control_board": "NUCLEO-G431RB",
+    "power_board": "X-NUCLEO-IHM16M1",
+    "motor": "GBM2804H-100T",
+    "stlink_serial": "00400027544B500120343637",
+    "serial_port": "COM6",
+    "serial_baud": 115200,
+    "user_confirmed_main_power_off": true
+  },
+  "firmware": {
+    "profile": "identification",
+    "rust_opt_level": "s",
+    "hex_sha256": "744DBF78112FDA26274D06B64331F99DED54FB4B7BBDD4407E5E4B716BDEEEFB",
+    "bin_sha256": "A0897315497D9AF0DF638E55A053CCAF55A747C12906EEC772FA6DB743228566",
+    "rom_bytes": 113104,
+    "ram_bytes": 15552,
+    "cube_programmer_version": "2.19.0",
+    "download_verified": true,
+    "reset_completed": true
+  },
+  "preflash": {
+    "state": "complete",
+    "drive": "off",
+    "duty_u_v_w": [0, 0, 0],
+    "token_start_count": 1,
+    "token_consumed": 1,
+    "lsi_sync_sample_count": 21463785,
+    "lsi_bus_raw": 451,
+    "bus_value_was_stale": true,
+    "stale_reason": "sample count did not advance across a 15 second read-only interval after the old completed session"
+  },
+  "boot": {
+    "rt_thread_version": "5.3.1",
+    "reported_profile": "identification",
+    "reported_rust_opt_level": "s",
+    "diagnostic_flags_hex": "01E8231F",
+    "live_session_bit_25": false,
+    "pwm_period_ticks": 7083
+  },
+  "config_readback": {
+    "version": 1,
+    "sample_rate_hz": 12000,
+    "offset_sample_count": 256,
+    "bias_settle_ticks": 24,
+    "pulse_ticks_per_polarity": 6,
+    "pulse_pair_count": 6,
+    "cooldown_zero_ticks": 24,
+    "max_active_ticks": 600,
+    "total_timeout_ticks": 6000,
+    "bias_current_ma": 200,
+    "perturbation_voltage_mv": 400,
+    "current_trip_ma": 1150,
+    "cooldown_current_threshold_ma": 50,
+    "bus_voltage_min_mv": 7000,
+    "bus_voltage_max_mv": 18000
+  },
+  "refusal_gates": {
+    "wrong_password_refused": true,
+    "low_bus_correct_password_platform_status": 2,
+    "low_bus_correct_password_refused": true,
+    "normal_motor_start_refused": true,
+    "token_start_count_after_all_refusals": 0,
+    "token_consumed_after_all_refusals": 0,
+    "management_state_after_all_refusals": "idle",
+    "drive_after_all_refusals": "off"
+  },
+  "independent_capture": {
+    "sample_rate_hz": 12000,
+    "capacity": 256,
+    "sample_count": 256,
+    "unread_count_after_dump": 0,
+    "overflow_count": 0,
+    "contract_error_count": 0,
+    "storage_error_count": 0,
+    "sequence_first": 0,
+    "sequence_last": 255,
+    "sequence_continuous": true,
+    "control_tick_first": 1079826,
+    "control_tick_last": 1080081,
+    "control_tick_continuous": true,
+    "current_u_raw_min": 1946,
+    "current_u_raw_max": 1957,
+    "current_v_raw_min": 1930,
+    "current_v_raw_max": 1935,
+    "bus_voltage_raw_min": 0,
+    "bus_voltage_raw_max": 5,
+    "compare_u_v_w_all_zero": true,
+    "pwm_period_ticks_values": [7083],
+    "flags_values": [128],
+    "first_sample": "FLSI_RAW,0,1079826,1952,1933,0,0,0,0,7083,128",
+    "last_sample": "FLSI_RAW,255,1080081,1952,1933,0,0,0,0,7083,128"
+  },
+  "timing": {
+    "monitor_isr_min_cycles": 275,
+    "monitor_isr_max_cycles": 1606,
+    "deadline_cycles": 12750,
+    "deadline_miss_count": 0,
+    "active_isr_measured": false
+  },
+  "final_state": {
+    "explicit_foc_stop_sent": true,
+    "management_state": "idle",
+    "drive": "off",
+    "duty_u_v_w": [0, 0, 0],
+    "control_step_count": 0,
+    "control_error_count": 0,
+    "deadline_miss_count": 0,
+    "token_start_count": 0,
+    "token_consumed": 0,
+    "bus_voltage_raw": 0,
+    "main_power_remained_off": true
+  },
+  "decision": {
+    "unpowered_board_gate": "pass",
+    "powered_repeat_permission": "not-granted",
+    "parameter_update_permission": "not-granted",
+    "next_gate": "mechanically lock or independently prove rotor stationarity, then obtain explicit powered-run authorization"
+  },
+  "limitations": [
+    "the 256-point capture is the independent no-power safety window, not the 120-point active identification window",
+    "low bus voltage intentionally prevents a 120-point active session and 377-tick automatic completion from being measured",
+    "active ISR WCET, dynamic current response, rotor stationarity, and parameter repeatability remain unverified for the new sequence"
+  ]
+}

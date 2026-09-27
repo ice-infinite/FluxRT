@@ -1,0 +1,106 @@
+{
+  "format_version": 5,
+  "analysis_kind": "bemf-ke-convention",
+  "method": "balanced three-line frequency method (V/f): common-mode-cancelled U-V/V-W/W-U with shared amplitude/frequency and 120-degree phases",
+  "csv": "profiles\\identification\\evidence\\bemf-20260927\\bemf_0582rpm_run5.csv",
+  "commanded_rpm": 582.0,
+  "sc_ke_compared": 3.75248,
+  "pole_pairs": 7,
+  "nominal_uv_per_count": 4469,
+  "phase_to_ground_diagnostic": {
+    "u": {
+      "half_peak_peak_counts": 383.5,
+      "peak_v": 1.7138615,
+      "rms_v": 1.211883088664548
+    },
+    "v": {
+      "half_peak_peak_counts": 477.0,
+      "peak_v": 2.131713,
+      "rms_v": 1.5073487178435188
+    },
+    "w": {
+      "half_peak_peak_counts": 503.5,
+      "peak_v": 2.2501415,
+      "rms_v": 1.5910903132792695
+    }
+  },
+  "frequency_method": {
+    "electrical_hz_by_line_zero_crossing": {
+      "uv": 63.65647659491625,
+      "vw": null,
+      "wu": 65.03214334047293
+    },
+    "rising_crossings_by_line": {
+      "uv": 2,
+      "vw": 1,
+      "wu": 2
+    },
+    "electrical_hz_median": 63.9,
+    "electrical_hz_balanced_fit": 63.9,
+    "balanced_fit_normalized_residual": 0.04119741760958731,
+    "balanced_fit_line_offsets_counts": {
+      "uv": 172.07340144699882,
+      "vw": -64.58513767591577,
+      "wu": -107.4882637710829
+    },
+    "line_spread_hz": 1.3756667455566784
+  },
+  "line_to_line_amplitude": {
+    "by_line": {
+      "uv": {
+        "sine_fit_peak_counts": 763.6478365774229,
+        "peak_v": 3.412742181664503
+      },
+      "vw": {
+        "sine_fit_peak_counts": 948.7084478444123,
+        "peak_v": 4.2397780534166785
+      },
+      "wu": {
+        "sine_fit_peak_counts": 772.9058975663962,
+        "peak_v": 3.4541164562242246
+      }
+    },
+    "line_peak_v_median": 3.659937445946462,
+    "balanced_line_peak_v": 3.659937445946462,
+    "independent_line_peak_v_median": 3.4541164562242246,
+    "phase_peak_v_from_line": 2.1130658696343816,
+    "line_peak_spread_pct": 22.596994729190058,
+    "conversion": "V_ph_pk = median(V_ll_pk) / sqrt(3)"
+  },
+  "flux_frequency_method": {
+    "flux_si_wb": 0.00526298713976661,
+    "convention": "V_ph_pk per electrical rad/s; firmware params.rs convention",
+    "note": "psi = V_ph_pk / (2*pi*f_e); commanded rpm NOT used"
+  },
+  "ke_candidates": {
+    "ke_base_rpm": "measured-from-frequency",
+    "ke_line_rms_per_krpm": 4.725030283576216,
+    "ke_phase_rms_per_krpm": 2.727997506151863,
+    "flux_mcsdk_if_line_convention": 0.03684090997836626,
+    "flux_mcsdk_if_phase_convention": 0.03684090997836627,
+    "flux_mcsdk_note": "MCSDK/convert-tool convention divides by mechanical speed = pole_pairs x SI flux; NEVER compare it directly with the firmware baseline (that mixing produced the historical 7x/3.83x alarms)"
+  },
+  "decision": {
+    "sc_ke_matches": "ambiguous",
+    "sc_ke_best_candidate": "ke-phph-rms",
+    "sc_ke_convention_validity": "ambiguous",
+    "ratio_line_vs_sc": 1.2591753409948132,
+    "ratio_phase_vs_sc": 0.7269852220802944,
+    "distance_line_from_unity": 0.2591753409948132,
+    "distance_phase_from_unity": 0.27301477791970563,
+    "decision_rule": "best distance <= 0.15 and distance separation >= 0.10",
+    "flux_selected_convention": "SI (per electrical rad)",
+    "flux_selected_wb": 0.00526298713976661,
+    "baseline_flux_wb": 0.005529026,
+    "flux_vs_baseline_factor": 0.9518832321943521,
+    "convert_command": null
+  },
+  "diagnostics": {
+    "rpm_measured_from_frequency": 547.7142857142857,
+    "tracking_deviation_pct": -5.891016200294559,
+    "line_frequency_spread_pct": null,
+    "line_amplitude_spread_pct": 22.596994729190058
+  },
+  "measurement_validity": "ok",
+  "validity": "degraded-sc-ke-convention-ambiguous"
+}

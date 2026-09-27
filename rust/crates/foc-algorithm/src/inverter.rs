@@ -99,6 +99,56 @@ pub fn average_inverter_phase_voltage_loss_v(
     }
 }
 
+/// Reconstruct the average line-to-neutral phase voltage actually applied to
+/// a floating-neutral motor from PWM duty, measured DC bus, phase current and
+/// the shared inverter-loss model.
+///
+/// The loss is removed from each bridge-leg voltage before common-mode
+/// rejection.  This is important for identification: subtracting the loss
+/// directly from an already neutral-referenced command leaves an artificial
+/// common-mode term.  The caller owns ADC/CCR scaling and sample alignment;
+/// this pure function knows no register or board calibration.
+///
+/// Returns `None` for non-finite values, duty outside `[0, 1]`, non-positive
+/// DC bus, or an invalid loss configuration.  It never clamps invalid evidence.
+#[inline]
+pub fn reconstruct_applied_phase_voltage_v(
+    phase_duty: Abc,
+    dc_bus_voltage_v: f32,
+    phase_currents_a: Abc,
+    parameters: InverterLossParameters,
+) -> Option<Abc> {
+    let duty_is_valid = phase_duty.a.is_finite()
+        && phase_duty.b.is_finite()
+        && phase_duty.c.is_finite()
+        && (0.0..=1.0).contains(&phase_duty.a)
+        && (0.0..=1.0).contains(&phase_duty.b)
+        && (0.0..=1.0).contains(&phase_duty.c);
+    let current_is_valid = phase_currents_a.a.is_finite()
+        && phase_currents_a.b.is_finite()
+        && phase_currents_a.c.is_finite();
+    if !duty_is_valid
+        || !current_is_valid
+        || !dc_bus_voltage_v.is_finite()
+        || dc_bus_voltage_v <= 0.0
+        || !parameters.is_valid()
+    {
+        return None;
+    }
+
+    let loss =
+        average_inverter_phase_voltage_loss_v(parameters, dc_bus_voltage_v, phase_currents_a);
+    let leg_a = phase_duty.a * dc_bus_voltage_v - loss.a;
+    let leg_b = phase_duty.b * dc_bus_voltage_v - loss.b;
+    let leg_c = phase_duty.c * dc_bus_voltage_v - loss.c;
+    let common = (leg_a + leg_b + leg_c) / 3.0;
+    Some(Abc {
+        a: leg_a - common,
+        b: leg_b - common,
+        c: leg_c - common,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,5 +203,95 @@ mod tests {
             ..InverterLossParameters::default()
         }
         .is_valid());
+    }
+
+    #[test]
+    fn applied_voltage_reconstruction_removes_common_mode() {
+        let reconstructed = reconstruct_applied_phase_voltage_v(
+            Abc {
+                a: 0.6,
+                b: 0.4,
+                c: 0.5,
+            },
+            12.3,
+            Abc::default(),
+            InverterLossParameters::default(),
+        )
+        .unwrap();
+        assert!((reconstructed.a - 1.23).abs() < 1.0e-6);
+        assert!((reconstructed.b + 1.23).abs() < 1.0e-6);
+        assert!(reconstructed.c.abs() < 1.0e-6);
+        assert!((reconstructed.a + reconstructed.b + reconstructed.c).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn applied_voltage_reconstruction_uses_shared_loss_model() {
+        let parameters = InverterLossParameters {
+            dead_time_s: 550.0e-9,
+            pwm_period_s: 1.0 / 12_000.0,
+            device_drop_v: 0.08,
+            current_zero_band_a: 0.01,
+        };
+        let duty = Abc {
+            a: 0.6,
+            b: 0.4,
+            c: 0.5,
+        };
+        let currents = Abc {
+            a: 0.2,
+            b: -0.1,
+            c: -0.1,
+        };
+        let reconstructed =
+            reconstruct_applied_phase_voltage_v(duty, 12.3, currents, parameters).unwrap();
+        let loss = average_inverter_phase_voltage_loss_v(parameters, 12.3, currents);
+        let leg_a = duty.a * 12.3 - loss.a;
+        let leg_b = duty.b * 12.3 - loss.b;
+        let leg_c = duty.c * 12.3 - loss.c;
+        let common = (leg_a + leg_b + leg_c) / 3.0;
+        assert!((reconstructed.a - (leg_a - common)).abs() < 1.0e-6);
+        assert!((reconstructed.b - (leg_b - common)).abs() < 1.0e-6);
+        assert!((reconstructed.c - (leg_c - common)).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn applied_voltage_reconstruction_rejects_invalid_evidence() {
+        assert!(reconstruct_applied_phase_voltage_v(
+            Abc {
+                a: 1.01,
+                b: 0.5,
+                c: 0.5,
+            },
+            12.3,
+            Abc::default(),
+            InverterLossParameters::default(),
+        )
+        .is_none());
+        assert!(reconstruct_applied_phase_voltage_v(
+            Abc {
+                a: 0.5,
+                b: 0.5,
+                c: 0.5,
+            },
+            0.0,
+            Abc::default(),
+            InverterLossParameters::default(),
+        )
+        .is_none());
+        assert!(reconstruct_applied_phase_voltage_v(
+            Abc {
+                a: 0.5,
+                b: 0.5,
+                c: 0.5,
+            },
+            12.3,
+            Abc {
+                a: f32::NAN,
+                b: 0.0,
+                c: 0.0,
+            },
+            InverterLossParameters::default(),
+        )
+        .is_none());
     }
 }

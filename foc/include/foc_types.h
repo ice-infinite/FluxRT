@@ -118,6 +118,137 @@ typedef struct
 } foc_feedback_t;
 
 /*
+ * V19 实时输入中的有效位。可选传感器必须用这些位区分“真实为零”和
+ * “本拍没有数据”；未知位一律由 Rust 拒绝。
+ * Validity bits for the V19 realtime input. Unknown bits are rejected.
+ */
+enum
+{
+    FOC_REALTIME_VALID_PHASE_CURRENTS = (1UL << 0),
+    FOC_REALTIME_VALID_DC_BUS_VOLTAGE = (1UL << 1),
+    FOC_REALTIME_VALID_PHASE_VOLTAGES = (1UL << 2),
+    FOC_REALTIME_VALID_ELECTRICAL_ANGLE = (1UL << 3),
+    FOC_REALTIME_VALID_SENSOR_TEMPERATURE = (1UL << 4),
+    FOC_REALTIME_VALID_KNOWN_MASK =
+        FOC_REALTIME_VALID_PHASE_CURRENTS |
+        FOC_REALTIME_VALID_DC_BUS_VOLTAGE |
+        FOC_REALTIME_VALID_PHASE_VOLTAGES |
+        FOC_REALTIME_VALID_ELECTRICAL_ANGLE |
+        FOC_REALTIME_VALID_SENSOR_TEMPERATURE,
+};
+
+/*
+ * 跨 ABI 的稳定硬件故障镜像。它不是 foc_platform_diagnostics_t.flags 的副本；
+ * 平台诊断位可以继续增长，而下面的位序属于 C/Rust ABI，只能追加。
+ * Stable hardware-fault mirror. This is deliberately independent from the
+ * platform diagnostics bitfield and may only be extended by appending bits.
+ */
+enum
+{
+    FOC_REALTIME_HW_FAULT_DRIVER = (1UL << 0),
+    FOC_REALTIME_HW_FAULT_BREAK = (1UL << 1),
+    FOC_REALTIME_HW_FAULT_SOFTWARE_CURRENT_TRIP = (1UL << 2),
+    FOC_REALTIME_HW_FAULT_BUS_UNDERVOLTAGE = (1UL << 3),
+    FOC_REALTIME_HW_FAULT_BUS_OVERVOLTAGE = (1UL << 4),
+    FOC_REALTIME_HW_FAULT_ADC_SAMPLE_ERROR = (1UL << 5),
+    FOC_REALTIME_HW_FAULT_DEADLINE_MISSED = (1UL << 6),
+    FOC_REALTIME_HW_FAULT_KNOWN_MASK =
+        FOC_REALTIME_HW_FAULT_DRIVER |
+        FOC_REALTIME_HW_FAULT_BREAK |
+        FOC_REALTIME_HW_FAULT_SOFTWARE_CURRENT_TRIP |
+        FOC_REALTIME_HW_FAULT_BUS_UNDERVOLTAGE |
+        FOC_REALTIME_HW_FAULT_BUS_OVERVOLTAGE |
+        FOC_REALTIME_HW_FAULT_ADC_SAMPLE_ERROR |
+        FOC_REALTIME_HW_FAULT_DEADLINE_MISSED,
+};
+
+/* 相电压来源、质量状态、原因和实际选择的稳定 ABI 数值。 */
+typedef uint32_t foc_realtime_phase_voltage_provenance_t;
+enum
+{
+    FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_NONE = 0,
+    FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_ST_NOMINAL = 1,
+    FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_BOARD_CALIBRATED = 2,
+};
+
+typedef uint32_t foc_realtime_phase_voltage_quality_t;
+enum
+{
+    FOC_REALTIME_PHASE_VOLTAGE_QUALITY_UNCONFIGURED = 0,
+    FOC_REALTIME_PHASE_VOLTAGE_QUALITY_UNCALIBRATED = 1,
+    FOC_REALTIME_PHASE_VOLTAGE_QUALITY_VALID = 2,
+    FOC_REALTIME_PHASE_VOLTAGE_QUALITY_STALE = 3,
+    FOC_REALTIME_PHASE_VOLTAGE_QUALITY_OPEN_SUSPECT = 4,
+    FOC_REALTIME_PHASE_VOLTAGE_QUALITY_LOW_SATURATION = 5,
+    FOC_REALTIME_PHASE_VOLTAGE_QUALITY_HIGH_SATURATION = 6,
+    FOC_REALTIME_PHASE_VOLTAGE_QUALITY_THREE_PHASE_INCONSISTENT = 7,
+    FOC_REALTIME_PHASE_VOLTAGE_QUALITY_INVALID_SAMPLE = 8,
+};
+
+enum
+{
+    FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCONFIGURED = (1UL << 0),
+    FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCALIBRATED = (1UL << 1),
+    FOC_REALTIME_PHASE_VOLTAGE_REASON_INVALID_SAMPLE = (1UL << 2),
+    FOC_REALTIME_PHASE_VOLTAGE_REASON_STALE = (1UL << 3),
+    FOC_REALTIME_PHASE_VOLTAGE_REASON_LOW_SATURATION = (1UL << 4),
+    FOC_REALTIME_PHASE_VOLTAGE_REASON_HIGH_SATURATION = (1UL << 5),
+    FOC_REALTIME_PHASE_VOLTAGE_REASON_OPEN_SUSPECT = (1UL << 6),
+    FOC_REALTIME_PHASE_VOLTAGE_REASON_THREE_PHASE_INCONSISTENT = (1UL << 7),
+    FOC_REALTIME_PHASE_VOLTAGE_REASON_RECOVERY_HYSTERESIS = (1UL << 8),
+    FOC_REALTIME_PHASE_VOLTAGE_REASON_KNOWN_MASK =
+        FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCONFIGURED |
+        FOC_REALTIME_PHASE_VOLTAGE_REASON_UNCALIBRATED |
+        FOC_REALTIME_PHASE_VOLTAGE_REASON_INVALID_SAMPLE |
+        FOC_REALTIME_PHASE_VOLTAGE_REASON_STALE |
+        FOC_REALTIME_PHASE_VOLTAGE_REASON_LOW_SATURATION |
+        FOC_REALTIME_PHASE_VOLTAGE_REASON_HIGH_SATURATION |
+        FOC_REALTIME_PHASE_VOLTAGE_REASON_OPEN_SUSPECT |
+        FOC_REALTIME_PHASE_VOLTAGE_REASON_THREE_PHASE_INCONSISTENT |
+        FOC_REALTIME_PHASE_VOLTAGE_REASON_RECOVERY_HYSTERESIS,
+};
+
+typedef uint32_t foc_realtime_observer_voltage_selection_t;
+enum
+{
+    FOC_REALTIME_OBSERVER_VOLTAGE_COMMAND_MODEL = 0,
+    FOC_REALTIME_OBSERVER_VOLTAGE_MEASURED = 1,
+    FOC_REALTIME_OBSERVER_VOLTAGE_UNAVAILABLE = 2,
+};
+
+/*
+ * 一次实时控制拍的完整物理量输入。字段顺序和 offset 属于 V19 ABI。
+ * 原始 ADC 码、HAL 类型和 A22 内部滞回计数不得跨过此边界。
+ * Complete physical-input snapshot for one realtime control tick. Raw ADC
+ * codes, HAL types and A22's internal hysteresis state stay on the C side.
+ */
+typedef struct
+{
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t control_sequence;
+    uint32_t valid_flags;
+    uint32_t hardware_fault_flags;
+    uint32_t phase_voltage_sequence;
+    uint32_t phase_voltage_age_ticks;
+    uint32_t phase_voltage_provenance;
+    uint32_t phase_voltage_quality_state;
+    uint32_t phase_voltage_reason_mask;
+    uint32_t observer_voltage_selection;
+    uint32_t phase_voltage_fallback_event_count;
+    float actual_dt_s;
+    float phase_current_a;
+    float phase_current_b;
+    float phase_current_c;
+    float dc_bus_voltage;
+    float phase_voltage_a_v;
+    float phase_voltage_b_v;
+    float phase_voltage_c_v;
+    float electrical_angle_rad;
+    float sensor_temperature_c;
+} foc_realtime_input_t;
+
+/*
  * Id/Iq 电流给定。
  * Id/Iq current reference.
  *

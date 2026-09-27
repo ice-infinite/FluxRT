@@ -1,0 +1,20 @@
+{
+  "format_version": 2,
+  "capture_kind": "bemf-post-stop-window",
+  "purpose": "settle the SC_KE unit convention with one open-circuit BEMF measurement",
+  "requested_rpm": 1000.0,
+  "alignment_s": 2.0,
+  "open_loop_ramp_s": 5.0,
+  "hold_s": 3.0,
+  "command_to_stop_s": 10.25,
+  "stop_to_arm_host_ms": 123.89869999606162,
+  "observer_speed_estimate_rpm_at_hold": 584.0,
+  "sample_rate_hz": 12000,
+  "samples": 256,
+  "nominal_uv_per_count": 4469,
+  "model_caveat": "nominal ST divider model, not board-calibrated (A19 pending)",
+  "output": "profiles\\identification\\evidence\\bemf-20260927\\bemf_1000rpm_run1.csv",
+  "output_sha256": "e70b05f04f783388912fed29e6954bdc9664de473913017859ec27a7296d5806",
+  "log": "profiles\\identification\\evidence\\bemf-20260927\\bemf_1000rpm_run1.log",
+  "log_sha256": "55071248cd6f96b7321c99a8b4cf7155f0267b5102787e44c1e0966f9c328817"
+}

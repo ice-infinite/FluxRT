@@ -1,0 +1,137 @@
+{
+  "format_version": 1,
+  "analysis_kind": "lsi-s5.1-model-sensitivity-audit",
+  "reference": {
+    "source": "ST MCSDK 6.4.1 P-IHM03-Potentiometer generated project",
+    "ioc_sha256": "77D8EF34453AE2050793425A08F72B302D68FBBAF2A672A5D15B3BBF3B6B9281",
+    "parameters_conversion_sha256": "367AC8997AB2E7A487437980AE5B3F79FFB3AD508F64E7C7EE4711F7ABB4A882",
+    "power_stage_parameters_sha256": "4030848606D0D63B5D2E6F7D0784E825416B7AA705108C7DE23379C91330F26B",
+    "motor_parameters_sha256": "2E07D89F3383950E9127738BA128765200F35CFB7473EB7935B039FCC762B9C2",
+    "rshunt_ohm": 0.33,
+    "amplification_gain": 1.53,
+    "bus_partitioning_factor": 0.0625,
+    "hardware_dead_time_ns": 550.0,
+    "software_dead_time_ns": 525.0,
+    "database_stator_resistance_ohm": 5.29,
+    "database_stator_inductance_h": 0.001058
+  },
+  "scale_cross_check": {
+    "fluxrt_current_counts_per_amp": 626.5350000000001,
+    "st_4096_current_counts_per_amp": 626.6880000000001,
+    "difference_pct": -0.0244140625,
+    "fluxrt_bus_volts_per_count": 0.012893772893772894,
+    "st_4096_bus_volts_per_count": 0.012890625,
+    "bus_difference_pct": 0.024420024420024333,
+    "official_scale_fit": {
+      "transition_count": 47,
+      "inductance_h": 0.00174,
+      "rmse_a": 0.007108785691661009,
+      "maximum_absolute_residual_a": 0.015772857430373405
+    }
+  },
+  "dead_time_sensitivity": [
+    {
+      "dead_time_ns": 0.0,
+      "transition_count": 47,
+      "inductance_h": 0.002065,
+      "rmse_a": 0.0104485170616841,
+      "maximum_absolute_residual_a": 0.02088057740908625
+    },
+    {
+      "dead_time_ns": 250.0,
+      "transition_count": 47,
+      "inductance_h": 0.001802,
+      "rmse_a": 0.008112217531931703,
+      "maximum_absolute_residual_a": 0.019941886410733828
+    },
+    {
+      "dead_time_ns": 525.0,
+      "transition_count": 47,
+      "inductance_h": 0.001735,
+      "rmse_a": 0.007066357808179772,
+      "maximum_absolute_residual_a": 0.0162506740685181
+    },
+    {
+      "dead_time_ns": 550.0,
+      "transition_count": 47,
+      "inductance_h": 0.00174,
+      "rmse_a": 0.007110521658862879,
+      "maximum_absolute_residual_a": 0.01577670916600965
+    },
+    {
+      "dead_time_ns": 750.0,
+      "transition_count": 47,
+      "inductance_h": 0.0018479999999999998,
+      "rmse_a": 0.008190579306864182,
+      "maximum_absolute_residual_a": 0.015848140158098878
+    },
+    {
+      "dead_time_ns": 1000.0,
+      "transition_count": 47,
+      "inductance_h": 0.0021449999999999998,
+      "rmse_a": 0.010411185469984992,
+      "maximum_absolute_residual_a": 0.02033463148182066
+    }
+  ],
+  "best_tested_dead_time_ns": 525.0,
+  "device_drop_sensitivity": [
+    {
+      "device_drop_v": 0.0,
+      "transition_count": 47,
+      "inductance_h": 0.00174,
+      "rmse_a": 0.007110521658862879,
+      "maximum_absolute_residual_a": 0.01577670916600965
+    },
+    {
+      "device_drop_v": 0.05,
+      "transition_count": 47,
+      "inductance_h": 0.0018239999999999999,
+      "rmse_a": 0.007961685127983509,
+      "maximum_absolute_residual_a": 0.015688898908472138
+    },
+    {
+      "device_drop_v": 0.1,
+      "transition_count": 47,
+      "inductance_h": 0.001992,
+      "rmse_a": 0.009393143927302972,
+      "maximum_absolute_residual_a": 0.01793090063334457
+    },
+    {
+      "device_drop_v": 0.2,
+      "transition_count": 47,
+      "inductance_h": 0.0025729999999999998,
+      "rmse_a": 0.01239440731701955,
+      "maximum_absolute_residual_a": 0.024794643313999304
+    }
+  ],
+  "measured_noise": {
+    "bias_tail_u_detrended_std_counts": 1.250751499694696,
+    "bias_tail_v_detrended_std_counts": 0.7696124427804405,
+    "cooldown_u_std_counts": 1.7610932046210157,
+    "cooldown_v_std_counts": 1.0215078369104984,
+    "cooldown_bus_std_counts": 1.141287094417552,
+    "old_host_model_std_counts": 0.5
+  },
+  "joint_rs_l_fit": {
+    "transition_count": 47,
+    "stator_resistance_ohm": 4.79,
+    "stator_inductance_h": 0.0017259999999999999,
+    "rmse_a": 0.006993906308971206,
+    "maximum_absolute_residual_a": 0.01702408897415056
+  },
+  "decision": {
+    "reference_constants_match": true,
+    "dead_time_model_supported": true,
+    "resistance_model_supported": true,
+    "conversion_constants_explain_l_mismatch": false,
+    "old_host_noise_model_is_representative": false,
+    "repeat_hardware": "not-authorized",
+    "next_gate": "redesign or independently validate stationarity/current waveform before another powered run"
+  },
+  "remaining_hypotheses": [
+    "the unloaded rotor was not independently locked or angle-tracked during the DC-bias interval",
+    "six short pulse pairs contain switching-correlated current variation above the host noise model",
+    "the 1 kHz LCR equivalent and the 12 kHz PWM dynamic model may not share the same effective inductance",
+    "device nonlinearities not represented by a constant voltage-drop term may remain"
+  ]
+}

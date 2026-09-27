@@ -22,8 +22,7 @@ import zlib
 PROFILE_MAGIC = 0x46505246
 PROFILE_STRUCT_SIZE = 40
 PROFILE_SCHEMA_VERSION = 1
-RUNTIME_STRUCT_SIZE = 284
-RUNTIME_CONFIG_VERSION = 8
+SUPPORTED_RUNTIME_LAYOUTS = {(284, 8), (296, 11)}
 
 PARAMETER_APPROVAL = 1 << 0
 CLOSED_LOOP_APPROVAL = 1 << 1
@@ -84,7 +83,7 @@ INVERTER_MODEL_KEYS = {
 }
 
 # Canonical C ABI order. Each entry contributes exactly one little-endian word.
-RUNTIME_LAYOUT = [
+RUNTIME_LAYOUT_V8 = [
     ("struct_size", "u32"),
     ("config_version", "u32"),
     ("observer_backend", "u32"),
@@ -140,8 +139,25 @@ RUNTIME_LAYOUT = [
     ("inverter_voltage_model.device_drop_v", "f32"),
 ]
 
-RUNTIME_TOP_KEYS = {
-    path.split(".", 1)[0] for path, _kind in RUNTIME_LAYOUT
+
+def layout_with_v11_fields() -> list[tuple[str, str]]:
+    """Return the current ABI layout while preserving the historical V8 layout."""
+    output: list[tuple[str, str]] = []
+    for item in RUNTIME_LAYOUT_V8:
+        output.append(item)
+        if item[0] == "startup_final_speed_rpm":
+            output.append(("startup_alignment_current_a", "f32"))
+        elif item[0] == "observer_minimum_speed_rpm":
+            output.append(("observer_acquisition_maximum_phase_error_rad", "f32"))
+        elif item[0] == "closed_loop_speed_ramp_rpm_per_s":
+            output.append(("handoff_torque_support_ratio", "f32"))
+    return output
+
+
+RUNTIME_LAYOUT_V11 = layout_with_v11_fields()
+RUNTIME_LAYOUT_BY_ABI = {
+    (284, 8): RUNTIME_LAYOUT_V8,
+    (296, 11): RUNTIME_LAYOUT_V11,
 }
 
 
@@ -190,23 +206,47 @@ def nested_value(root: dict, path: str) -> object:
     return value
 
 
+def runtime_layout(runtime: dict) -> list[tuple[str, str]]:
+    struct_size = require_u32(runtime.get("struct_size"), "runtime_config.struct_size")
+    config_version = require_u32(
+        runtime.get("config_version"), "runtime_config.config_version"
+    )
+    abi = (struct_size, config_version)
+    if abi not in SUPPORTED_RUNTIME_LAYOUTS:
+        supported = ", ".join(
+            f"size={size}/version={version}"
+            for size, version in sorted(SUPPORTED_RUNTIME_LAYOUTS)
+        )
+        raise CandidateError(
+            f"unsupported runtime ABI size={struct_size}/version={config_version}; "
+            f"supported: {supported}"
+        )
+    return RUNTIME_LAYOUT_BY_ABI[abi]
+
+
 def canonical_runtime_bytes(runtime: dict) -> bytes:
+    layout = runtime_layout(runtime)
     output = bytearray()
-    for path, kind in RUNTIME_LAYOUT:
+    for path, kind in layout:
         value = nested_value(runtime, path)
         if kind == "u32":
             output.extend(struct.pack("<I", require_u32(value, f"runtime_config.{path}")))
         else:
             output.extend(struct.pack("<f", require_finite_number(value, f"runtime_config.{path}")))
-    if len(output) != RUNTIME_STRUCT_SIZE:
+    expected_size = require_u32(runtime["struct_size"], "runtime_config.struct_size")
+    if len(output) != expected_size:
         raise CandidateError(
-            f"internal layout error: expected {RUNTIME_STRUCT_SIZE} bytes, got {len(output)}"
+            f"internal layout error: expected {expected_size} bytes, got {len(output)}"
         )
     return bytes(output)
 
 
 def validate_runtime_shape(runtime: object) -> dict:
-    runtime = require_exact_keys(runtime, RUNTIME_TOP_KEYS, "runtime_config")
+    if not isinstance(runtime, dict):
+        raise CandidateError("runtime_config must be an object")
+    layout = runtime_layout(runtime)
+    runtime_top_keys = {path.split(".", 1)[0] for path, _kind in layout}
+    runtime = require_exact_keys(runtime, runtime_top_keys, "runtime_config")
     require_exact_keys(runtime["id_pi"], PI_KEYS, "runtime_config.id_pi")
     require_exact_keys(runtime["iq_pi"], PI_KEYS, "runtime_config.iq_pi")
     require_exact_keys(runtime["speed_pi"], PI_KEYS, "runtime_config.speed_pi")
@@ -226,12 +266,6 @@ def validate_runtime_shape(runtime: object) -> dict:
         "runtime_config.inverter_voltage_model",
     )
     canonical_runtime_bytes(runtime)
-    if runtime["struct_size"] != RUNTIME_STRUCT_SIZE:
-        raise CandidateError(f"runtime_config.struct_size must be {RUNTIME_STRUCT_SIZE}")
-    if runtime["config_version"] != RUNTIME_CONFIG_VERSION:
-        raise CandidateError(
-            f"runtime_config.config_version must be {RUNTIME_CONFIG_VERSION}"
-        )
     if runtime["observer_enable"] not in (0, 1) or runtime["closed_loop_enable"] not in (0, 1):
         raise CandidateError("runtime enable fields must be 0 or 1")
     if runtime["closed_loop_enable"] and not runtime["observer_enable"]:
@@ -240,6 +274,17 @@ def validate_runtime_shape(runtime: object) -> dict:
         raise CandidateError("observer_backend is unknown")
     if not 1 <= runtime["observer_update_divider"] <= 32:
         raise CandidateError("observer_update_divider must be in 1..32")
+    if runtime["config_version"] >= 11:
+        if not 0.0 <= runtime["startup_alignment_current_a"] <= runtime["rated_current_a"]:
+            raise CandidateError(
+                "startup_alignment_current_a must stay within rated current"
+            )
+        if not 0.0 < runtime["observer_acquisition_maximum_phase_error_rad"] <= math.pi / 2.0:
+            raise CandidateError(
+                "observer acquisition phase-error gate must be in (0, pi/2]"
+            )
+        if not 0.0 <= runtime["handoff_torque_support_ratio"] <= 1.0:
+            raise CandidateError("handoff_torque_support_ratio must be in 0..1")
     inverter = runtime["inverter_voltage_model"]
     for field in (
         "enabled",
@@ -459,7 +504,7 @@ def render_initializer(
     {profile['revision']}U,
     0x{parse_hex_u32(profile['board_id'], 'profile.board_id'):08X}UL,
     0x{parse_hex_u32(profile['motor_id'], 'profile.motor_id'):08X}UL,
-    {RUNTIME_CONFIG_VERSION}U,
+    {candidate['runtime_config']['config_version']}U,
     0x{runtime_crc:08X}UL,
     0x{flags:08X}UL,
     0x{record_crc:08X}UL,

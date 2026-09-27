@@ -23,8 +23,8 @@
 |---|---|---|
 | 控制器 | STM32G431RBT6，170 MHz，128 KiB Flash | 只要换算法就有充足资源 |
 | PWM/控制环 | 当前均约 12 kHz | 已经实现高频 PWM、低频控制环解耦 |
-| 闭环 WCET | 已记录最大约 10,083 cycles；软件截止 12,500 cycles | `pre/control/post` 三个独立最大值可以相加 |
-| Flash | A14 Diagnostic `text + data = 126,748 B`（96.70%）；Production 为 95,700 B（73.01%） | Production 容量充足就等于闭环和发布已经验证 |
+| 完整 ISR WCET | A21.3开环：trace-off 9,627/12,750 cycles，0 miss；占12 kHz物理周期67.96%，trace-on最坏10,047 | 已可直接提频、长测或开放闭环 |
+| Flash | A21.3 Diagnostic + `s` 为108,008 B（82.40%），Production + `s` 为99,204 B（75.69%） | 容量充足就等于闭环和发布已经验证 |
 | 电机参数 | Rs=5.29 Ω、Ld=Lq=1.058 mH、磁链来自 Workbench | 参数已经由当前实物辨识 |
 | 无感闭环 | 两轮 5 秒短时接管成功，上电默认仍关闭 | 已完成全工况或量产验证 |
 | 死区补偿 | 仅 Host/Rust/Matlab 仿真有实验实现 | MCU 目标固件已经补偿 |
@@ -117,7 +117,7 @@ TIM1 ARR，否则 PI、观察器、Rev-Up、trace 分频和死区补偿都会使
 | 优先级 | 当前缺口 | 改进内容 | 主要位置 | 完成证据 |
 |---|---|---|---|---|
 | P0 | 时序字段是独立最大值 | 增加同一拍完整 ISR WCET 和分段记录 | C 平台层 | DWT 与 GPIO 示波器结果一致 |
-| P0 | Diagnostic Flash 仅余 560 B（0.43%） | 继续拆分应用层，裁剪重复格式化和调试功能 | 构建系统/应用层 | size/map 报告和 WCET 同时通过 |
+| P0 | A21.3已完成V19常态路径等价裁剪；trace-off占物理周期67.96% | 保留`s`默认与回归门；后续只在有新功能或新频率时重开WCET门 | 构建系统/bridge/control/平台层 | 0 invalid/error/fault/miss；trace-off 9,627 cycles已通过70%阶段门 |
 | P0 | 没有独立轴端真值 | 接编码器或外部测速仪 | 平台层/测试台 | 可计算真实角度和速度误差 |
 | P1 | PWM 与控制环绑定 12 kHz | 评估 24 kHz PWM + 12 kHz 控制 | TIM1/ADC/ABI | 无漏采样、无超时、声学和波形改善 |
 | P1 | 重复电流变换 | 每拍只做一次 Clarke 并共享 αβ | Rust control/bridge | 数值对拍一致，WCET 降低 |
@@ -197,7 +197,8 @@ docs/performance/<date>-<commit>-baseline.md
 
 构建配置 A/B、map 审计和 Diagnostic/Production 分档已完成，结果见
 [`performance/2026-09-23-A1构建档矩阵.md`](performance/2026-09-23-A1构建档矩阵.md)。
-当前默认 Rust `s`；构建分档已完成。后续共享 Clarke、混合 CORDIC/FPU 模长优化、
+当前四档默认 Rust `s`；A21.2确认`s`同时优于`z`和`3`的最坏实机WCET，
+A21.3又使trace-off完整ISR通过70%物理周期门，构建分档与快环常态门已完成。后续共享 Clarke、混合 CORDIC/FPU 模长优化、
 `sin/cos`/`atan2` 分项基准和固定延迟候选 A/B 的最新尺寸与 WCET 见各自阶段报告。
 阶段 1 已完成单次 CORDIC 未就绪故障注入和 CPU 快速近似同口径 A/B。CPU-fast 在专项
 开环短测中把最坏完整 ISR 从 7,975 降到 7,771 cycles，但没有实机闭环角度真值，因此
@@ -208,6 +209,15 @@ A13 已重建 Production 并完成同口径 582 rpm 开环 5 s 对比：ROM/RAM 
 没有显著改变控制计算成本。Production 当前无法在线把闭环从安全默认 0 改成 1，闭环
 产品参数必须以后通过带版本/CRC/审批的不可变档案注入，不能恢复现场 `foc_cfg`。详见
 [`performance/2026-09-24-A13-Production尺寸与开环WCET.md`](performance/2026-09-24-A13-Production尺寸与开环WCET.md)。
+
+A21.1进一步处理了Diagnostic容量根因，而没有裁保护或诊断能力：应用层36处libc数字转换
+统一改为严格整数token和显式单位缩放，Diagnostic + `z` ROM从129,952 B降至106,416 B，
+实际回收23,536 B。A21.2随后完成`z/s/3`九组实机比较并选择`s`：最坏10,695 cycles、
+0 miss/fault、Flash余23,200 B。A21.3在不改控制和保护参数的前提下，把trace-off完整
+ISR从10,612降到9,627 cycles（67.96%），三组5 s场景均0 invalid/error/fault/miss。详见
+[`A21.1容量报告`](performance/2026-09-28-A21.1-严格整数CLI与容量回收.md)和
+[`A21.2实机WCET报告`](performance/2026-09-28-A21.2-V19优化等级实机WCET.md)和
+[`A21.3常态裁剪报告`](performance/2026-09-28-A21.3-V19快环常态裁剪.md)。
 
 A14 已实现该档案的最小安全骨架：ABI V12 由 Rust 对完整配置做规范化
 CRC，C 应用层校验 schema/revision、板卡/电机 ID、档案 CRC 与审批位依赖，

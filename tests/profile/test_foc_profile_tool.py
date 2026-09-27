@@ -16,6 +16,12 @@ CANDIDATE_PATH = (
 GENERATED_PATH = (
     PROJECT_ROOT / "profiles" / "generated" / "rev1-gbm2804h-unapproved.inc"
 )
+V11_CANDIDATE_PATH = (
+    PROJECT_ROOT
+    / "profiles"
+    / "candidates"
+    / "rev7-gbm2804h-rsl-flux-screening.json"
+)
 
 SPEC = importlib.util.spec_from_file_location("foc_profile_tool", TOOL_PATH)
 assert SPEC is not None and SPEC.loader is not None
@@ -43,6 +49,23 @@ class FocProfileToolTests(unittest.TestCase):
         self.assertEqual(runtime_crc, 0x46BB0507)
         self.assertEqual(record_crc, 0x83C4CF8A)
         self.assertEqual(flags, 0)
+
+    def test_revision7_matches_current_v11_abi_candidate(self) -> None:
+        candidate, runtime_crc, record_crc, flags = profile_tool.load_and_verify(
+            V11_CANDIDATE_PATH
+        )
+        self.assertEqual(candidate["runtime_config"]["struct_size"], 296)
+        self.assertEqual(candidate["runtime_config"]["config_version"], 11)
+        self.assertEqual(runtime_crc, 0xDBD2A17C)
+        self.assertEqual(record_crc, 0x00D488A2)
+        self.assertEqual(flags, 0)
+
+    def test_runtime_size_and_version_must_select_one_known_layout(self) -> None:
+        changed = copy.deepcopy(self.candidate)
+        changed["runtime_config"]["struct_size"] = 296
+        path = self.write_temporary_candidate(changed)
+        with self.assertRaisesRegex(profile_tool.CandidateError, "unsupported runtime ABI"):
+            profile_tool.load_and_verify(path)
 
     def test_any_runtime_edit_requires_new_expected_crc(self) -> None:
         changed = copy.deepcopy(self.candidate)

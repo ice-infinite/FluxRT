@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "evidence_id": "EXP-B3-S5.5B-LCR-MANUAL-ANGLE-SWEEP",
+  "date_local": "2026-09-27",
+  "reported_by": "user",
+  "measurement_context": {
+    "instrument_and_settings": "inherited from S5.5A: LT1, 1 kHz, displayed 0.6 V",
+    "rotor_motion": "manually moved in multiple directions",
+    "exact_mechanical_angles_logged": false,
+    "pair_identity_per_extreme_logged": false,
+    "main_power": "no powered action was requested or executed; treated as continuation of the S5.5A no-main-power measurement session"
+  },
+  "user_reported_coarse_range": {
+    "min_line_to_line_l_mh": 1.96,
+    "max_line_to_line_l_mh": 2.60,
+    "span_mh": 0.64,
+    "max_over_min": 1.3265306122,
+    "diagnostic_half_range_mh": [0.98, 1.30]
+  },
+  "combined_with_s5_5a": {
+    "minimum_observed_line_to_line_l_mh": 1.96,
+    "maximum_observed_line_to_line_l_mh": 2.8206666667,
+    "maximum_source": "S5.5A locked angle A, VU three-run mean",
+    "max_over_min": 1.4391156463,
+    "diagnostic_half_envelope_mh": [0.98, 1.4103333334],
+    "warning": "Line-to-line inductance divided by two is only a diagnostic envelope, not an Ld/Lq estimate for a salient motor."
+  },
+  "comparison_to_s5_4": {
+    "dynamic_l_mh": 1.950,
+    "dynamic_above_combined_diagnostic_upper_percent": 38.2651855288,
+    "interpretation": "Rotor-position variation is material but does not by itself close the S5.4 dynamic versus LCR gap."
+  },
+  "decision": {
+    "qualitative_angle_sensitivity_screen": "PASS",
+    "quantitative_ld_lq_identification": "DEFERRED",
+    "dense_manual_angle_map_required_now": false,
+    "parameter_update": "REJECT",
+    "powered_repeat": "NOT_AUTHORIZED",
+    "next_gate": "S5.5C offline dynamic voltage/current truth design and parameter-range simulation"
+  }
+}

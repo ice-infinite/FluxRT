@@ -35,10 +35,18 @@ hal_src = os.path.abspath(os.path.join(
     'Src',
 ))
 src = [
+    'runtime/foc_lsi_actuation_executor.c',
+    'runtime/foc_lsi_capture_service.c',
+    'runtime/foc_lsi_raw_capture.c',
+    'runtime/foc_lsi_sample_contract.c',
     'runtime/foc_phase_voltage_capture.c',
     'runtime/foc_phase_voltage_model.c',
+    'runtime/foc_phase_voltage_quality.c',
+    'runtime/foc_phase_voltage_realtime_input.c',
     'runtime/foc_pwm_timing.c',
     'runtime/foc_realtime_timing.c',
+    'platform/stm32g431/foc_lsi_preload_sink.c',
+    'platform/stm32g431/foc_phase_voltage_platform_adapter.c',
     'platform/stm32g431/foc_platform_stm32g431.c',
     'platform/stm32g431/foc_math_accel_stm32g431.c',
     os.path.join(hal_src, 'stm32g4xx_hal_adc.c'),

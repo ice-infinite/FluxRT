@@ -42,6 +42,13 @@
  */
 
 #include "foc_platform.h"
+#include "foc_lsi_actuation_executor.h"
+#include "foc_lsi_capture_service.h"
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+#include "foc_lsi_management.h"
+#endif
+#include "foc_lsi_preload_sink_internal.h"
 #include "foc_math_accel.h"
 #include "foc_pwm_timing.h"
 
@@ -106,6 +113,8 @@ static foc_realtime_timing_stats_t g_foc_timing_stats;
 #if defined(FOC_TARGET_STM32G431)
 #include "rtconfig.h"
 #include "stm32g4xx_hal.h"
+
+#include <string.h>
 
 /* 引脚映射来自 ST 官方参考工程：NUCLEO-G431RB + X-NUCLEO-IHM16M1。
  * Pin mapping taken from the official ST reference project for the
@@ -230,6 +239,13 @@ static const foc_pwm_timing_plan_t g_foc_pwm_timing_plan =
  * Minimum divider 120 gives at most 100 Hz sampling at 12 kHz. */
 #define FOC_TRACE_MIN_DIVIDER            (120U)
 #endif
+#if defined(FOC_ISR_TIMING_PROBE) || defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+/* Identification 的无功率门必须能量化增加同步 Vbus rank 后的 ISR 开销，
+ * 因此即使没有占用 PA5 的物理探针，也保留 DWT 周期统计。 */
+#define FOC_MONITOR_DWT_TIMING            (1U)
+static uint32_t g_foc_sync_previous_cycle;
+static uint32_t g_foc_sync_interval_valid;
+#endif
 #if defined(FOC_ISR_TIMING_PROBE)
 /* 可选示波器探针：PA5（NUCLEO 的 LD2/D13）在 ISR 区间输出高脉冲。
  * 用于把 DWT 计时与示波器实测对拍；默认关闭，因为它会占用一个 LED 引脚并
@@ -241,8 +257,6 @@ static const foc_pwm_timing_plan_t g_foc_pwm_timing_plan =
 #define FOC_TIMING_PROBE_PIN             GPIO_PIN_5
 #define FOC_TIMING_PROBE_HIGH()          (FOC_TIMING_PROBE_PORT->BSRR = FOC_TIMING_PROBE_PIN)
 #define FOC_TIMING_PROBE_LOW()           (FOC_TIMING_PROBE_PORT->BSRR = ((uint32_t)FOC_TIMING_PROBE_PIN << 16U))
-static uint32_t g_foc_sync_previous_cycle;
-static uint32_t g_foc_sync_interval_valid;
 #else
 /* 默认展开为无操作，保证探针分支对时序测量本身没有影响。
  * Expands to nothing by default, so the probe branch cannot influence the
@@ -267,7 +281,22 @@ static uint32_t g_foc_sync_interval_valid;
                                            FOC_PLATFORM_DIAG_ADC_READ_ERROR | \
                                            FOC_PLATFORM_DIAG_BREAK_LATCHED | \
                                            FOC_PLATFORM_DIAG_CURRENT_TRIP | \
+                                           FOC_PLATFORM_DIAG_LSI_CAPTURE_ERROR | \
                                            FOC_PLATFORM_DIAG_TRIAL_ARMED)
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+#define FOC_LSI_REQUIRED_FLAGS            (FOC_TRIAL_REQUIRED_FLAGS | \
+                                           FOC_PLATFORM_DIAG_LSI_SYNC_BUS_CONFIGURED | \
+                                           FOC_PLATFORM_DIAG_LSI_ACTUATION_PLAN_CONFIGURED | \
+                                           FOC_PLATFORM_DIAG_LSI_EXECUTOR_CONFIGURED | \
+                                           FOC_PLATFORM_DIAG_LSI_PRELOAD_SINK_CONFIGURED | \
+                                           FOC_PLATFORM_DIAG_LSI_ACTIVE_SESSION_CONFIGURED)
+#define FOC_LSI_FORBIDDEN_FLAGS           (FOC_TRIAL_FORBIDDEN_FLAGS | \
+                                           FOC_PLATFORM_DIAG_DEADLINE_MISSED | \
+                                           FOC_PLATFORM_DIAG_CONTROL_ERROR | \
+                                           FOC_PLATFORM_DIAG_OUTPUT_REJECTED | \
+                                           FOC_PLATFORM_DIAG_LSI_SESSION_RUNNING)
+#define FOC_LSI_START_MAX_CURRENT_A       (0.05f)
+#endif
 
 /* ---------------------------------------------------------------- 平台状态 */
 
@@ -294,7 +323,14 @@ static volatile uint32_t g_foc_control_armed;
 /* 绑定的 Rust 控制器上下文；由 foc_platform_bind_controller() 设置一次。
  * Bound Rust controller context; set once by foc_platform_bind_controller(). */
 static foc_rust_context_t *g_foc_controller;
-static volatile foc_telemetry_t g_foc_telemetry;
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+/* S4.9 keeps the physical capability private and exposes only the bounded
+ * platform start operation.  The ADC ISR is the sole active-session caller. */
+static foc_lsi_executor_t g_foc_lsi_executor;
+static foc_lsi_preload_session_t g_foc_lsi_preload_session;
+static volatile uint32_t g_foc_lsi_session_running;
+static volatile foc_lsi_drive_request_t g_foc_lsi_active_drive_request;
+#endif
 #if defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD)
 /* 256 * 16 B = 4096 B；Production 不实例化这块采集 RAM。 */
 static foc_phase_voltage_capture_t g_foc_phase_voltage_capture;
@@ -553,7 +589,8 @@ static uint16_t foc_platform_current_trip_counts(void)
  * Called once at arm time to compare the configured voltage window against the
  * ADC reading.
  */
-#if !defined(FLUXRT_CALIBRATION_CAPTURE_ONLY_BUILD)
+#if !defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD) || \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
 static uint16_t foc_platform_bus_voltage_to_raw(float voltage_v)
 {
     float raw = (voltage_v * FOC_ADC_FULL_SCALE * FOC_BUS_PARTITIONING_FACTOR) /
@@ -593,7 +630,7 @@ static uint16_t foc_platform_bus_voltage_to_raw(float voltage_v)
  * 本函数可从 ISR 调用，因此只使用寄存器操作，不调用 HAL，不阻塞。
  * Callable from the ISR, so it uses register access only: no HAL, no blocking.
  */
-static void foc_platform_disable_power_fast(void)
+static void foc_platform_disable_output_registers_fast(void)
 {
     /* BSRR 高 16 位为复位位，写 1 即拉低；单次写完成三路关断。 */
     FOC_GATE_ENABLE_PORT->BSRR = ((uint32_t)FOC_GATE_ENABLE_PINS << 16U);
@@ -608,6 +645,15 @@ static void foc_platform_disable_power_fast(void)
     g_foc_control_armed = 0U;
     g_foc_diagnostics.flags &= ~(FOC_PLATFORM_DIAG_TRIAL_ARMED |
                                  FOC_PLATFORM_DIAG_REALTIME_ARMED);
+}
+
+static void foc_platform_disable_power_fast(void)
+{
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+    /* Fault/abort paths close the evidence window before touching outputs. */
+    foc_lsi_capture_service_stop();
+#endif
+    foc_platform_disable_output_registers_fast();
 }
 
 /*
@@ -641,6 +687,258 @@ static uint32_t foc_platform_driver_faulted(void)
     /* IHM16M1 driver-protection input is active low and has a pull-up. */
     return ((FOC_DRIVER_PROTECTION_PORT->IDR & FOC_DRIVER_PROTECTION_PIN) == 0U) ? 1U : 0U;
 }
+
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+/*
+ * The only physical TIM1 binding for the EXP-B3 preload sink.  S4.6 uses a
+ * one-shot validation write; S4.8 also exercises active mode's first write.
+ * Both startup paths keep CCER/MOE/gates off.  The internal sink itself has no
+ * power-enable operation; S4.9's ADC ISR may call it only with a private permit,
+ * while Shell can only request the separately gated platform session.
+ */
+static foc_lsi_preload_result_t foc_platform_lsi_apply_preload(
+    const foc_lsi_preload_permit_t *permit,
+    const foc_lsi_executor_output_t *output)
+{
+    foc_lsi_preload_registers_t registers = {
+        &TIM1->CCR1,
+        &TIM1->CCR2,
+        &TIM1->CCR3,
+        &TIM1->ARR,
+    };
+    foc_lsi_preload_safety_t safety = {0};
+    foc_lsi_preload_result_t result;
+    const uint32_t channel_mask = TIM_CCER_CC1E |
+                                  TIM_CCER_CC2E |
+                                  TIM_CCER_CC3E;
+    const uint32_t ccmr1_preload_mask = TIM_CCMR1_OC1PE |
+                                        TIM_CCMR1_OC2PE;
+
+    safety.timer_clock_enabled =
+        ((RCC->APB2ENR & RCC_APB2ENR_TIM1EN) != 0U) ? 1U : 0U;
+    safety.timer_configured =
+        ((g_foc_diagnostics.flags & FOC_PLATFORM_DIAG_TIM1_CONFIGURED) != 0U) ?
+            1U : 0U;
+    safety.compare_preload_enabled =
+        (((TIM1->CCMR1 & ccmr1_preload_mask) == ccmr1_preload_mask) &&
+         ((TIM1->CCMR2 & TIM_CCMR2_OC3PE) != 0U)) ? 1U : 0U;
+    safety.gate_enabled = (foc_platform_gate_is_low() == 0U) ? 1U : 0U;
+    safety.main_output_enabled =
+        ((TIM1->BDTR & TIM_BDTR_MOE) != 0U) ? 1U : 0U;
+    safety.channel_outputs_enabled =
+        ((TIM1->CCER & channel_mask) != 0U) ? 1U : 0U;
+    safety.hardware_fault =
+        ((foc_platform_driver_faulted() != 0U) ||
+         ((g_foc_diagnostics.flags & FOC_PLATFORM_DIAG_BREAK_LATCHED) != 0U)) ?
+            1U : 0U;
+    safety.software_trip =
+        ((g_foc_diagnostics.flags & FOC_PLATFORM_DIAG_CURRENT_TRIP) != 0U) ?
+            1U : 0U;
+
+    result = foc_lsi_preload_sink_apply(&g_foc_lsi_preload_session,
+                                        permit,
+                                        output,
+                                        &registers,
+                                        &safety);
+    __DSB();
+    if (result != FOC_LSI_PRELOAD_RESULT_OK)
+    {
+        foc_platform_disable_power_fast();
+    }
+    return result;
+}
+
+static void foc_platform_lsi_abort_session_isr(void)
+{
+    foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+    foc_lsi_management_shared_abort_isr();
+    g_foc_lsi_active_drive_request = FOC_LSI_DRIVE_OFF;
+    g_foc_lsi_session_running = 0U;
+    g_foc_diagnostics.flags &= ~FOC_PLATFORM_DIAG_LSI_SESSION_RUNNING;
+    foc_platform_disable_power_fast();
+}
+
+static void foc_platform_lsi_complete_session_isr(void)
+{
+    /* Keep the synchronous monitor alive, but close both power and capture. */
+    foc_platform_disable_output_registers_fast();
+    foc_lsi_capture_service_stop();
+    foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+    g_foc_lsi_active_drive_request = FOC_LSI_DRIVE_OFF;
+    g_foc_lsi_session_running = 0U;
+    g_foc_diagnostics.flags &= ~FOC_PLATFORM_DIAG_LSI_SESSION_RUNNING;
+}
+
+static uint32_t foc_platform_lsi_enable_first_output_isr(void)
+{
+    const uint32_t channel_mask = TIM_CCER_CC1E |
+                                  TIM_CCER_CC2E |
+                                  TIM_CCER_CC3E;
+    uint32_t master_mode = TIM1->CR2;
+
+    /* The first bounded preload was written with every output off. Transfer it
+     * before enabling the physical path so stale startup CCRs cannot escape.
+     * The baseline ADC trigger is OC4REF. Mask MMS defensively while generating
+     * UG so this software-only transfer cannot leak any master-trigger event
+     * into the injected ADC path if the trigger plan changes later. */
+    TIM1->CR2 = master_mode & ~TIM_CR2_MMS;
+    __DSB();
+    TIM1->EGR = TIM_EGR_UG;
+    __DSB();
+    TIM1->CR2 = master_mode;
+    TIM1->SR &= ~(TIM_SR_BIF | TIM_SR_B2IF);
+    TIM1->DIER |= TIM_DIER_BIE;
+    g_foc_control_armed = 1U;
+    TIM1->CCER |= channel_mask;
+    TIM1->BDTR |= TIM_BDTR_MOE;
+    FOC_GATE_ENABLE_PORT->BSRR = FOC_GATE_ENABLE_PINS;
+    __DSB();
+    if ((g_foc_control_armed == 0U) ||
+        ((TIM1->CCER & channel_mask) != channel_mask) ||
+        ((TIM1->BDTR & TIM_BDTR_MOE) == 0U) ||
+        (foc_platform_gate_is_low() != 0U) ||
+        (foc_platform_driver_faulted() != 0U))
+    {
+        foc_platform_lsi_abort_session_isr();
+        return 0U;
+    }
+    g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_OUTPUT_ACTIVE;
+    g_foc_diagnostics.flags &= ~FOC_PLATFORM_DIAG_GATE_SAFE;
+    return 1U;
+}
+
+static void foc_platform_lsi_process_isr(
+    const foc_lsi_raw_sample_t *raw,
+    uint16_t peak_current_counts,
+    foc_lsi_capture_record_result_t capture_result)
+{
+    foc_lsi_input_t input = {0};
+    foc_lsi_output_t request = {0};
+    foc_lsi_executor_command_t command = {0};
+    foc_lsi_executor_output_t execution = {0};
+    foc_lsi_preload_permit_t permit = {0};
+    foc_lsi_state_t state;
+    foc_status_t executor_status;
+
+    if ((raw == 0) || (g_foc_lsi_session_running == 0U))
+    {
+        return;
+    }
+    if ((capture_result == FOC_LSI_CAPTURE_RECORD_CONTRACT_ERROR) ||
+        (capture_result == FOC_LSI_CAPTURE_RECORD_STORAGE_ERROR) ||
+        (capture_result == FOC_LSI_CAPTURE_RECORD_COMPLETE))
+    {
+        g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_LSI_CAPTURE_ERROR;
+        foc_platform_lsi_abort_session_isr();
+        return;
+    }
+
+    input.struct_size = sizeof(input);
+    input.version = FOC_LSI_INPUT_VERSION;
+    input.identification_build_authorized = 1U;
+    input.power_stage_idle = ((g_foc_control_armed == 0U) &&
+                              (foc_platform_gate_is_low() != 0U) &&
+                              ((TIM1->BDTR & TIM_BDTR_MOE) == 0U) &&
+                              ((TIM1->CCER & (TIM_CCER_CC1E |
+                                             TIM_CCER_CC2E |
+                                             TIM_CCER_CC3E)) == 0U)) ? 1U : 0U;
+    /* Sensorless Ls(I) has no independent rotor-motion sensor. The exact LSI1
+     * operator confirmation plus outputs-off/current-zero preflight is the
+     * explicit stationary-rotor assumption recorded for this experiment. */
+    input.motor_stopped = 1U;
+    input.hardware_fault = ((raw->flags &
+        FOC_LSI_RAW_FLAG_HARDWARE_FAULT) != 0U) ? 1U : 0U;
+    input.software_trip = ((raw->flags &
+        FOC_LSI_RAW_FLAG_SOFTWARE_TRIP) != 0U) ? 1U : 0U;
+    input.offset_sample_valid = 1U;
+    input.bus_voltage_v = (float)raw->bus_voltage_raw *
+        g_foc_lsi_executor.platform.bus_volts_per_count;
+    input.abs_phase_current_a = (float)peak_current_counts /
+        FOC_CURRENT_COUNTS_PER_AMP;
+    state = foc_lsi_management_shared_step(&input, &request);
+    if ((state == FOC_LSI_STATE_ABORTED) ||
+        (request.abort_reason != FOC_LSI_ABORT_NONE))
+    {
+        foc_platform_lsi_abort_session_isr();
+        return;
+    }
+
+    if ((request.capture_raw_sample != 0U) &&
+        (foc_lsi_capture_service_is_armed() == 0U) &&
+        (foc_lsi_capture_service_arm() == 0U))
+    {
+        g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_LSI_CAPTURE_ERROR;
+        foc_platform_lsi_abort_session_isr();
+        return;
+    }
+
+    command.struct_size = sizeof(command);
+    command.version = FOC_LSI_EXECUTOR_COMMAND_VERSION;
+    command.drive_request =
+        (foc_lsi_drive_request_abi_t)request.drive_request;
+    command.force_safe_output = request.force_safe_output;
+    command.capture_ready = foc_lsi_capture_service_is_armed();
+    command.hardware_fault = input.hardware_fault;
+    command.software_trip = input.software_trip;
+    command.requested_bias_current_a = request.requested_bias_current_a;
+    command.requested_perturbation_voltage_v =
+        request.requested_perturbation_voltage_v;
+    executor_status = foc_lsi_executor_step(&g_foc_lsi_executor,
+                                            &command,
+                                            raw,
+                                            &execution);
+    if ((executor_status != FOC_STATUS_OK) ||
+        ((request.drive_request != FOC_LSI_DRIVE_OFF) &&
+         (execution.action != FOC_LSI_EXECUTOR_ACTION_WRITE_PRELOAD)) ||
+        ((request.drive_request == FOC_LSI_DRIVE_OFF) &&
+         (execution.action != FOC_LSI_EXECUTOR_ACTION_SAFE)))
+    {
+        g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_CONTROL_ERROR;
+        foc_platform_lsi_abort_session_isr();
+        return;
+    }
+
+    if (execution.action == FOC_LSI_EXECUTOR_ACTION_WRITE_PRELOAD)
+    {
+        uint32_t first_write =
+            (g_foc_lsi_preload_session.active_write_count == 0U) ? 1U : 0U;
+
+        if ((foc_lsi_preload_session_issue(&g_foc_lsi_preload_session,
+                                           &execution,
+                                           &permit) !=
+             FOC_LSI_PRELOAD_RESULT_OK) ||
+            (foc_platform_lsi_apply_preload(&permit, &execution) !=
+             FOC_LSI_PRELOAD_RESULT_OK))
+        {
+            g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_OUTPUT_REJECTED;
+            foc_platform_lsi_abort_session_isr();
+            return;
+        }
+        if ((first_write != 0U) &&
+            (foc_platform_lsi_enable_first_output_isr() == 0U))
+        {
+            return;
+        }
+        g_foc_lsi_active_drive_request = request.drive_request;
+    }
+    else
+    {
+        g_foc_lsi_active_drive_request = FOC_LSI_DRIVE_OFF;
+        if (g_foc_control_armed != 0U)
+        {
+            /* Expected active->cooldown transition: power off immediately but
+             * keep collecting the zero-current tail for 24 control ticks. */
+            foc_platform_disable_output_registers_fast();
+        }
+    }
+
+    if (state == FOC_LSI_STATE_COMPLETE)
+    {
+        foc_platform_lsi_complete_session_isr();
+    }
+}
+#endif
 
 /*
  * 多速率候选的采样分频器：TIM1_TRGO(OC4REF) -> TIM2_ITR0 -> TIM2_TRGO(Update)。
@@ -1003,6 +1301,10 @@ static uint32_t foc_platform_configure_injected_adc(void)
      * 只是 ADC1 JEOS/ISR 入口延后了三个转换。Production 保持原来单 rank。
      */
     injected.InjectedNbrOfConversion = 4U;
+#elif defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+    /* EXP-B3 只读监测门：rank1 仍为 U 相电流，rank2 增加同序列 Vbus。
+     * 这里不连接辨识状态机、不写 CCR，也不授予 start 能力。 */
+    injected.InjectedNbrOfConversion = 2U;
 #else
     injected.InjectedNbrOfConversion = 1U;
 #endif
@@ -1039,6 +1341,16 @@ static uint32_t foc_platform_configure_injected_adc(void)
     {
         return 0U;
     }
+#elif defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+    /* 与 ST MCSDK/IHM16M1 的 Vbus regular-channel 配置保持同一 47.5-cycle
+     * 采样时间；本工程把它放进注入 rank2 以获得同序列证据。 */
+    injected.InjectedSamplingTime = ADC_SAMPLETIME_47CYCLES_5;
+    injected.InjectedChannel = ADC_CHANNEL_1; /* PA0 = VBUS */
+    injected.InjectedRank = ADC_INJECTED_RANK_2;
+    if (HAL_ADCEx_InjectedConfigChannel(&g_foc_adc1, &injected) != HAL_OK)
+    {
+        return 0U;
+    }
 #endif
     injected.InjectedNbrOfConversion = 1U;
     injected.InjectedSamplingTime = ADC_SAMPLETIME_6CYCLES_5;
@@ -1058,7 +1370,12 @@ static uint32_t foc_platform_start_sync_monitor(void)
     g_foc_diagnostics.monitor_isr_last_cycles = 0U;
     g_foc_diagnostics.monitor_isr_min_cycles = 0U;
     g_foc_diagnostics.monitor_isr_max_cycles = 0U;
-#if defined(FOC_ISR_TIMING_PROBE)
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+    g_foc_diagnostics.lsi_sync_bus_voltage_raw = 0U;
+    g_foc_diagnostics.lsi_sync_bus_valid = 0U;
+    g_foc_diagnostics.lsi_sync_bus_sample_count = 0U;
+#endif
+#if defined(FOC_MONITOR_DWT_TIMING)
     g_foc_sync_previous_cycle = 0U;
     g_foc_sync_interval_valid = 0U;
 #endif
@@ -1141,7 +1458,319 @@ static uint32_t foc_platform_init_adc_monitor(void)
     }
 #if defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD)
     g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_PHASE_VOLTAGE_CONFIGURED;
+#elif defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+    g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_LSI_SYNC_BUS_CONFIGURED;
 #endif
+    return 1U;
+}
+#endif
+
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+/*
+ * 只验证 Rust 计划器和 C ABI 的静态契约，不写 CCR、不打开 CCER/MOE/栅极。
+ * 真实 PWM 适配器在后续独立门完成前仍不存在。
+ */
+static uint32_t foc_platform_validate_lsi_actuation_plan(void)
+{
+    foc_lsi_actuation_config_t config = {0};
+    foc_lsi_actuation_input_t input = {0};
+    foc_lsi_actuation_output_t output = {0};
+
+    if (foc_rust_lsi_default_actuation_config(&config) != FOC_STATUS_OK)
+    {
+        return 0U;
+    }
+    if ((config.sample_rate_hz != FOC_CONTROL_FREQUENCY_HZ) ||
+        ((config.actuation_delay_control_ticks *
+          FOC_PWM_TICKS_PER_CONTROL) != FOC_ACTUATION_DELAY_PWM_TICKS) ||
+        (config.current_trip_a > g_foc_platform_config.software_current_trip_a) ||
+        (config.minimum_bus_voltage_v <
+         g_foc_platform_config.minimum_bus_voltage_v) ||
+        (config.maximum_bus_voltage_v >
+         g_foc_platform_config.maximum_bus_voltage_v) ||
+        (config.minimum_duty < g_foc_platform_config.minimum_duty) ||
+        (config.maximum_duty > g_foc_platform_config.maximum_duty))
+    {
+        return 0U;
+    }
+
+    input.struct_size = sizeof(input);
+    input.version = FOC_LSI_ACTUATION_INPUT_VERSION;
+    input.drive_request = FOC_LSI_DRIVE_ABI_OFF;
+    input.force_safe_output = 1U;
+    if ((foc_rust_lsi_plan(&config, &input, &output) != FOC_STATUS_OK) ||
+        (output.safe_output_required == 0U) ||
+        (output.drive_active != 0U) ||
+        (output.duty_u != 0.0f) ||
+        (output.duty_v != 0.0f) ||
+        (output.duty_w != 0.0f))
+    {
+        return 0U;
+    }
+
+    input.drive_request = FOC_LSI_DRIVE_ABI_BIAS;
+    input.force_safe_output = 0U;
+    input.capture_ready = 1U;
+    input.control_tick = 0U;
+    input.requested_bias_current_a = config.maximum_bias_current_a;
+    input.bus_voltage_v = 12.3f;
+    if ((foc_rust_lsi_plan(&config, &input, &output) != FOC_STATUS_OK) ||
+        (output.safe_output_required != 0U) ||
+        (output.drive_active == 0U) ||
+        (output.source_control_tick != 0U) ||
+        (output.expected_active_control_tick != 1U) ||
+        (output.duty_u < g_foc_platform_config.minimum_duty) ||
+        (output.duty_u > g_foc_platform_config.maximum_duty) ||
+        (output.duty_v < g_foc_platform_config.minimum_duty) ||
+        (output.duty_v > g_foc_platform_config.maximum_duty) ||
+        (output.duty_w < g_foc_platform_config.minimum_duty) ||
+        (output.duty_w > g_foc_platform_config.maximum_duty))
+    {
+        return 0U;
+    }
+
+    g_foc_diagnostics.flags |=
+        FOC_PLATFORM_DIAG_LSI_ACTUATION_PLAN_CONFIGURED;
+    return 1U;
+}
+#endif
+
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+/*
+ * Compose the S4.5 C executor from real board calibration facts, then run the
+ * S4.6 validation one-shot and the S4.8 bounded-active first-write contract.
+ * Both startup probes physically write/read/clear CCR1/2/3 while CCER, MOE and
+ * all gates remain disabled.  This remains a startup self-test after the
+ * separately gated S4.9 ISR/start caller was added.
+ */
+static uint32_t foc_platform_validate_lsi_execution_adapter(void)
+{
+    foc_lsi_actuation_config_t actuation = {0};
+    foc_lsi_executor_config_t platform = {0};
+    foc_lsi_executor_command_t command = {0};
+    foc_lsi_executor_output_t output = {0};
+    foc_lsi_preload_permit_t permit = {0};
+    foc_lsi_raw_sample_t raw = {0};
+    uint16_t minimum_compare;
+    uint16_t maximum_compare;
+
+    if (foc_rust_lsi_default_actuation_config(&actuation) != FOC_STATUS_OK)
+    {
+        return 0U;
+    }
+    platform.struct_size = sizeof(platform);
+    platform.version = FOC_LSI_EXECUTOR_CONFIG_VERSION;
+    platform.sample_rate_hz = FOC_CONTROL_FREQUENCY_HZ;
+    platform.pwm_period_ticks = FOC_PWM_PERIOD_TICKS;
+    platform.adc_max_code = (uint32_t)FOC_ADC_FULL_SCALE;
+    platform.actuation_delay_control_ticks = 1U;
+    platform.current_u_offset_raw = g_foc_diagnostics.phase_u_offset;
+    platform.current_v_offset_raw = g_foc_diagnostics.phase_v_offset;
+    platform.current_counts_per_amp = FOC_CURRENT_COUNTS_PER_AMP;
+    platform.bus_volts_per_count =
+        FOC_ADC_REFERENCE_VOLTAGE /
+        (FOC_ADC_FULL_SCALE * FOC_BUS_PARTITIONING_FACTOR);
+    platform.minimum_duty = g_foc_platform_config.minimum_duty;
+    platform.maximum_duty = g_foc_platform_config.maximum_duty;
+    if (foc_lsi_executor_init(&g_foc_lsi_executor,
+                              &platform,
+                              &actuation) != FOC_STATUS_OK)
+    {
+        return 0U;
+    }
+    minimum_compare = (uint16_t)((platform.minimum_duty *
+                                  (float)platform.pwm_period_ticks) + 0.5f);
+    maximum_compare = (uint16_t)((platform.maximum_duty *
+                                  (float)platform.pwm_period_ticks) + 0.5f);
+    foc_lsi_preload_session_init(&g_foc_lsi_preload_session,
+                                 platform.pwm_period_ticks,
+                                 platform.actuation_delay_control_ticks,
+                                 minimum_compare,
+                                 maximum_compare);
+    if (foc_lsi_preload_session_open_validation(
+            &g_foc_lsi_preload_session,
+            FOC_LSI_PRELOAD_CONFIRMATION) != FOC_LSI_PRELOAD_RESULT_OK)
+    {
+        return 0U;
+    }
+
+    raw.control_tick = 0U;
+    raw.current_u_raw = platform.current_u_offset_raw;
+    raw.current_v_raw = platform.current_v_offset_raw;
+    raw.bus_voltage_raw = foc_platform_bus_voltage_to_raw(12.3f);
+    raw.pwm_period_ticks = (uint16_t)FOC_PWM_PERIOD_TICKS;
+    raw.flags = FOC_LSI_RAW_FLAG_ADC_VALID;
+    command.struct_size = sizeof(command);
+    command.version = FOC_LSI_EXECUTOR_COMMAND_VERSION;
+    command.drive_request = FOC_LSI_DRIVE_ABI_BIAS;
+    command.capture_ready = 1U;
+    command.requested_bias_current_a = actuation.maximum_bias_current_a;
+    if ((foc_lsi_executor_step(&g_foc_lsi_executor,
+                               &command,
+                               &raw,
+                               &output) != FOC_STATUS_OK) ||
+        (output.action != FOC_LSI_EXECUTOR_ACTION_WRITE_PRELOAD) ||
+        (output.expected_active_control_tick != 1U))
+    {
+        foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+        foc_platform_disable_power_fast();
+        return 0U;
+    }
+    if ((foc_lsi_preload_session_issue(&g_foc_lsi_preload_session,
+                                       &output,
+                                       &permit) !=
+         FOC_LSI_PRELOAD_RESULT_OK) ||
+        (foc_platform_lsi_apply_preload(&permit, &output) !=
+         FOC_LSI_PRELOAD_RESULT_OK) ||
+        (TIM1->CCR1 != output.compare_u) ||
+        (TIM1->CCR2 != output.compare_v) ||
+        (TIM1->CCR3 != output.compare_w))
+    {
+        foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+        foc_platform_disable_power_fast();
+        return 0U;
+    }
+
+    raw.control_tick = 1U;
+    raw.compare_u = (uint16_t)TIM1->CCR1;
+    raw.compare_v = (uint16_t)TIM1->CCR2;
+    raw.compare_w = (uint16_t)TIM1->CCR3;
+    /* Synthetic active flag is only for the executor ledger. Hardware stayed off. */
+    raw.flags = FOC_LSI_RAW_FLAG_ADC_VALID |
+                FOC_LSI_RAW_FLAG_DRIVE_ACTIVE;
+    command.drive_request = FOC_LSI_DRIVE_ABI_OFF;
+    command.force_safe_output = 1U;
+    command.capture_ready = 0U;
+    command.requested_bias_current_a = 0.0f;
+    if ((foc_lsi_executor_step(&g_foc_lsi_executor,
+                               &command,
+                               &raw,
+                               &output) != FOC_STATUS_OK) ||
+        (output.action != FOC_LSI_EXECUTOR_ACTION_SAFE) ||
+        (output.result != FOC_LSI_EXECUTOR_RESULT_SAFE_REQUESTED) ||
+        (output.ledger_checked == 0U) ||
+        (output.ledger_matched == 0U))
+    {
+        foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+        foc_platform_disable_power_fast();
+        return 0U;
+    }
+
+    /* The validation capability is one-shot; leave no compare or open permit. */
+    foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+    foc_platform_disable_power_fast();
+    if ((TIM1->CCR1 != 0U) || (TIM1->CCR2 != 0U) || (TIM1->CCR3 != 0U) ||
+        (g_foc_lsi_preload_session.validation_open != 0U))
+    {
+        return 0U;
+    }
+
+    /* S4.8: exercise only the first, outputs-off write of a bounded active
+     * session.  The second-write path requires physical outputs on and is Host
+     * tested only until the separate ISR/start gate exists. */
+    if (foc_lsi_executor_init(&g_foc_lsi_executor,
+                              &platform,
+                              &actuation) != FOC_STATUS_OK)
+    {
+        return 0U;
+    }
+    foc_lsi_preload_session_init(&g_foc_lsi_preload_session,
+                                 platform.pwm_period_ticks,
+                                 platform.actuation_delay_control_ticks,
+                                 minimum_compare,
+                                 maximum_compare);
+    if (foc_lsi_preload_session_open_active(
+            &g_foc_lsi_preload_session,
+            FOC_LSI_ACTIVE_CONFIRMATION,
+            2U,
+            4U,
+            2U) != FOC_LSI_PRELOAD_RESULT_OK)
+    {
+        return 0U;
+    }
+    memset(&command, 0, sizeof(command));
+    memset(&output, 0, sizeof(output));
+    memset(&permit, 0, sizeof(permit));
+    memset(&raw, 0, sizeof(raw));
+    raw.control_tick = 2U;
+    raw.current_u_raw = platform.current_u_offset_raw;
+    raw.current_v_raw = platform.current_v_offset_raw;
+    raw.bus_voltage_raw = foc_platform_bus_voltage_to_raw(12.3f);
+    raw.pwm_period_ticks = (uint16_t)FOC_PWM_PERIOD_TICKS;
+    raw.flags = FOC_LSI_RAW_FLAG_ADC_VALID;
+    command.struct_size = sizeof(command);
+    command.version = FOC_LSI_EXECUTOR_COMMAND_VERSION;
+    command.drive_request = FOC_LSI_DRIVE_ABI_BIAS;
+    command.capture_ready = 1U;
+    command.requested_bias_current_a = actuation.maximum_bias_current_a;
+    if ((foc_lsi_executor_step(&g_foc_lsi_executor,
+                               &command,
+                               &raw,
+                               &output) != FOC_STATUS_OK) ||
+        (foc_lsi_preload_session_issue(&g_foc_lsi_preload_session,
+                                       &output,
+                                       &permit) !=
+         FOC_LSI_PRELOAD_RESULT_OK) ||
+        (permit.session_mode != FOC_LSI_PRELOAD_MODE_ACTIVE) ||
+        (permit.permit_sequence != 1U) ||
+        (foc_platform_lsi_apply_preload(&permit, &output) !=
+         FOC_LSI_PRELOAD_RESULT_OK))
+    {
+        foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+        foc_platform_disable_power_fast();
+        return 0U;
+    }
+    raw.control_tick = 3U;
+    raw.compare_u = (uint16_t)TIM1->CCR1;
+    raw.compare_v = (uint16_t)TIM1->CCR2;
+    raw.compare_w = (uint16_t)TIM1->CCR3;
+    raw.flags = FOC_LSI_RAW_FLAG_ADC_VALID |
+                FOC_LSI_RAW_FLAG_DRIVE_ACTIVE;
+    command.drive_request = FOC_LSI_DRIVE_ABI_OFF;
+    command.force_safe_output = 1U;
+    command.capture_ready = 0U;
+    command.requested_bias_current_a = 0.0f;
+    if ((foc_lsi_executor_step(&g_foc_lsi_executor,
+                               &command,
+                               &raw,
+                               &output) != FOC_STATUS_OK) ||
+        (output.action != FOC_LSI_EXECUTOR_ACTION_SAFE) ||
+        (output.ledger_checked == 0U) ||
+        (output.ledger_matched == 0U) ||
+        (g_foc_lsi_preload_session.active_write_count != 1U))
+    {
+        foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+        foc_platform_disable_power_fast();
+        return 0U;
+    }
+    foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+    foc_platform_disable_power_fast();
+    if ((TIM1->CCR1 != 0U) || (TIM1->CCR2 != 0U) ||
+        (TIM1->CCR3 != 0U) ||
+        (g_foc_lsi_preload_session.validation_open != 0U) ||
+        (g_foc_lsi_preload_session.active_open != 0U))
+    {
+        return 0U;
+    }
+
+    /* Leave both persistent objects clean; self-test history is not a session. */
+    if (foc_lsi_executor_init(&g_foc_lsi_executor,
+                              &platform,
+                              &actuation) != FOC_STATUS_OK)
+    {
+        return 0U;
+    }
+    foc_lsi_preload_session_init(&g_foc_lsi_preload_session,
+                                 platform.pwm_period_ticks,
+                                 platform.actuation_delay_control_ticks,
+                                 minimum_compare,
+                                 maximum_compare);
+    g_foc_diagnostics.flags |=
+        FOC_PLATFORM_DIAG_LSI_EXECUTOR_CONFIGURED |
+        FOC_PLATFORM_DIAG_LSI_PRELOAD_SINK_CONFIGURED |
+        FOC_PLATFORM_DIAG_LSI_ACTIVE_SESSION_CONFIGURED;
     return 1U;
 }
 #endif
@@ -1151,15 +1780,34 @@ foc_status_t foc_platform_init(void)
     foc_platform_emergency_stop();
     foc_realtime_timing_reset(&g_foc_timing_stats);
     (void)foc_math_accel_init();
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+    foc_lsi_capture_service_init(FOC_CONTROL_FREQUENCY_HZ,
+                                 (uint32_t)FOC_ADC_FULL_SCALE,
+                                 FOC_PWM_PERIOD_TICKS);
+    if (foc_lsi_management_shared_init() == 0U)
+    {
+        return FOC_STATUS_HARDWARE_FAULT;
+    }
+    g_foc_lsi_session_running = 0U;
+    g_foc_lsi_active_drive_request = FOC_LSI_DRIVE_OFF;
+#endif
 #if defined(FOC_TARGET_STM32G431) && defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD)
     foc_phase_voltage_capture_init(&g_foc_phase_voltage_capture,
                                    FOC_CONTROL_FREQUENCY_HZ);
 #endif
 #if defined(FOC_TARGET_STM32G431)
     /* 先验证纯数据时序契约，再触碰 TIM1/ADC。宏组合错误时保持功率级关闭。 */
-    if ((foc_pwm_timing_plan_is_valid(&g_foc_pwm_timing_plan) == 0U) ||
-        (foc_platform_init_timer_disabled() == 0U) ||
-        (foc_platform_init_adc_monitor() == 0U))
+    if ((foc_pwm_timing_plan_is_valid(&g_foc_pwm_timing_plan) == 0U)
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+        || (foc_platform_validate_lsi_actuation_plan() == 0U)
+#endif
+        || (foc_platform_init_timer_disabled() == 0U) ||
+        (foc_platform_init_adc_monitor() == 0U)
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+        || (foc_platform_validate_lsi_execution_adapter() == 0U)
+#endif
+       )
     {
         foc_platform_emergency_stop();
         return FOC_STATUS_HARDWARE_FAULT;
@@ -1296,6 +1944,17 @@ void foc_platform_emergency_stop(void)
 #if defined(FOC_TARGET_STM32G431)
     GPIO_InitTypeDef gpio = {0};
 
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+    if (g_foc_lsi_session_running != 0U)
+    {
+        foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+        foc_lsi_management_shared_abort_isr();
+        g_foc_lsi_active_drive_request = FOC_LSI_DRIVE_OFF;
+        g_foc_lsi_session_running = 0U;
+        g_foc_diagnostics.flags &= ~FOC_PLATFORM_DIAG_LSI_SESSION_RUNNING;
+    }
+#endif
+
     __HAL_RCC_GPIOB_CLK_ENABLE();
     HAL_GPIO_WritePin(FOC_GATE_ENABLE_PORT, FOC_GATE_ENABLE_PINS, GPIO_PIN_RESET);
     gpio.Pin = FOC_GATE_ENABLE_PINS;
@@ -1353,12 +2012,14 @@ void foc_platform_emergency_stop(void)
  *   ticks and added them, which overstated the budget.
  *
  * 实时约束 / Real-time constraints:
- *   无动态分配、无阻塞、无日志。实测最坏约 8,200 cycles（约 59% 的 12 kHz
- *   周期），其中 Rust 控制步约占 74%。超出软件截止即计入 deadline miss
- *   并立即关断，不尝试补救。
- *   No allocation, blocking or logging. The measured worst case is about 8,200
- *   cycles (about 59% of the 12 kHz period), of which the Rust control step is
- *   about 74%. Exceeding the software deadline counts as a miss and shuts down
+ *   无动态分配、无阻塞、无日志。A21.3 在 Diagnostic + Rust `s` + V19、
+ *   12 kHz 下实测：trace 关闭时完整 ISR 最坏 9,627 cycles，其中 Rust
+ *   control 段 8,524 cycles；trace 开启时完整 ISR 最坏 10,047 cycles。
+ *   超出软件截止即计入 deadline miss 并立即关断，不尝试补救。
+ *   No allocation, blocking or logging. A21.3 measured 9,627 cycles for the
+ *   complete ISR with trace disabled (8,524 cycles in the Rust control span),
+ *   or 10,047 cycles with trace enabled, using Diagnostic + Rust `s` + V19 at
+ *   12 kHz. Exceeding the software deadline counts as a miss and shuts down
  *   immediately rather than attempting recovery.
  */
 #if defined(FOC_TARGET_STM32G431)
@@ -1388,11 +2049,16 @@ void ADC1_2_IRQHandler(void)
     uint16_t delta_w;
     uint16_t peak;
     uint16_t trip_counts;
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+    foc_lsi_raw_sample_t lsi_raw_sample = {0};
+    foc_lsi_capture_record_result_t lsi_capture_result =
+        FOC_LSI_CAPTURE_RECORD_IGNORED;
+#endif
 
     FOC_TIMING_PROBE_HIGH();
     if ((ADC1->ISR & ADC_ISR_JEOS) != 0U)
     {
-#if defined(FOC_ISR_TIMING_PROBE)
+#if defined(FOC_MONITOR_DWT_TIMING)
         if (g_foc_sync_interval_valid != 0U)
         {
             uint32_t interval_cycles = cycle_start - g_foc_sync_previous_cycle;
@@ -1420,6 +2086,44 @@ void ADC1_2_IRQHandler(void)
          * co-timed. */
         g_foc_diagnostics.phase_u_raw = (uint16_t)ADC1->JDR1;
         g_foc_diagnostics.phase_v_raw = (uint16_t)ADC2->JDR1;
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+        /* JEOS 在 rank2 完成后到达，因此 JDR1 电流与 JDR2 Vbus 属于同一
+         * ADC1 注入序列。先抓取本拍寄存器事实，状态机和任何 CCR 写入都在
+         * 三相电流重构之后执行。 */
+        g_foc_diagnostics.lsi_sync_bus_voltage_raw = (uint16_t)ADC1->JDR2;
+        g_foc_diagnostics.lsi_sync_bus_valid = 1U;
+        ++g_foc_diagnostics.lsi_sync_bus_sample_count;
+        lsi_raw_sample.control_tick = g_foc_diagnostics.sync_sample_count;
+        lsi_raw_sample.current_u_raw = g_foc_diagnostics.phase_u_raw;
+        lsi_raw_sample.current_v_raw = g_foc_diagnostics.phase_v_raw;
+        lsi_raw_sample.bus_voltage_raw =
+            g_foc_diagnostics.lsi_sync_bus_voltage_raw;
+        lsi_raw_sample.compare_u = (uint16_t)TIM1->CCR1;
+        lsi_raw_sample.compare_v = (uint16_t)TIM1->CCR2;
+        lsi_raw_sample.compare_w = (uint16_t)TIM1->CCR3;
+        lsi_raw_sample.pwm_period_ticks = (uint16_t)TIM1->ARR;
+        lsi_raw_sample.flags = FOC_LSI_RAW_FLAG_ADC_VALID;
+        if (g_foc_control_armed != 0U)
+        {
+            lsi_raw_sample.flags |= FOC_LSI_RAW_FLAG_DRIVE_ACTIVE;
+            if (g_foc_lsi_active_drive_request ==
+                FOC_LSI_DRIVE_PULSE_POSITIVE)
+            {
+                lsi_raw_sample.flags |= FOC_LSI_RAW_FLAG_PULSE_POSITIVE;
+            }
+            else if (g_foc_lsi_active_drive_request ==
+                     FOC_LSI_DRIVE_PULSE_NEGATIVE)
+            {
+                lsi_raw_sample.flags |= FOC_LSI_RAW_FLAG_PULSE_NEGATIVE;
+            }
+        }
+        if ((foc_platform_driver_faulted() != 0U) ||
+            ((g_foc_diagnostics.flags &
+              FOC_PLATFORM_DIAG_BREAK_LATCHED) != 0U))
+        {
+            lsi_raw_sample.flags |= FOC_LSI_RAW_FLAG_HARDWARE_FAULT;
+        }
+#endif
 #if defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD)
         if (g_foc_phase_voltage_capture.state == FOC_PHASE_VOLTAGE_CAPTURE_ARMED)
         {
@@ -1477,23 +2181,72 @@ void ADC1_2_IRQHandler(void)
         g_foc_diagnostics.phase_w_raw = (uint16_t)phase_w_raw;
         ++g_foc_diagnostics.sync_sample_count;
         g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_SYNC_SAMPLES_VALID;
+        delta_u = (uint16_t)((current_u_counts < 0) ?
+            -current_u_counts : current_u_counts);
+        delta_v = (uint16_t)((current_v_counts < 0) ?
+            -current_v_counts : current_v_counts);
+        delta_w = (uint16_t)((current_w_counts < 0) ?
+            -current_w_counts : current_w_counts);
+        peak = (delta_u > delta_v) ? delta_u : delta_v;
+        peak = (peak > delta_w) ? peak : delta_w;
+        trip_counts = foc_platform_current_trip_counts();
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+        if (peak > trip_counts)
+        {
+            g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_CURRENT_TRIP;
+            lsi_raw_sample.flags |= FOC_LSI_RAW_FLAG_SOFTWARE_TRIP;
+        }
+        if (foc_lsi_capture_service_is_armed() != 0U)
+        {
+            lsi_capture_result =
+                foc_lsi_capture_service_record_isr(&lsi_raw_sample);
+            if (((lsi_capture_result ==
+                  FOC_LSI_CAPTURE_RECORD_CONTRACT_ERROR) ||
+                 (lsi_capture_result ==
+                  FOC_LSI_CAPTURE_RECORD_STORAGE_ERROR)) &&
+                (g_foc_lsi_session_running == 0U))
+            {
+                g_foc_diagnostics.flags |=
+                    FOC_PLATFORM_DIAG_LSI_CAPTURE_ERROR;
+                foc_platform_disable_power_fast();
+            }
+            else if ((lsi_capture_result ==
+                      FOC_LSI_CAPTURE_RECORD_COMPLETE) &&
+                     (g_foc_lsi_session_running == 0U))
+            {
+                foc_platform_disable_power_fast();
+            }
+        }
+        if (g_foc_lsi_session_running != 0U)
+        {
+            timing_active = 1U;
+            control_executed = 1U;
+            control_cycle_start = DWT->CYCCNT;
+            foc_platform_lsi_process_isr(&lsi_raw_sample,
+                                         peak,
+                                         lsi_capture_result);
+            control_cycle_end = DWT->CYCCNT;
+        }
+        if ((g_foc_lsi_session_running == 0U) &&
+            (g_foc_control_armed != 0U))
+#else
         if (g_foc_control_armed != 0U)
+#endif
         {
             foc_status_t control_status;
             foc_feedback_t feedback;
+            foc_realtime_input_t input;
             foc_output_t output;
+#if defined(FLUXRT_TRACE_BUILD)
             foc_telemetry_t telemetry;
+#endif
+            foc_telemetry_t *telemetry_output = 0;
 
             timing_active = 1U;
             /* 取三相电流绝对偏移的最大值作为跳闸判据。用最大值而不是
              * 某一相，是为了在任意相序或任意单相故障下都能触发。
              * The trip uses the largest absolute offset of the three phases, so
              * it fires regardless of phase order or which single phase faults. */
-            delta_u = (uint16_t)((current_u_counts < 0) ? -current_u_counts : current_u_counts);
-            delta_v = (uint16_t)((current_v_counts < 0) ? -current_v_counts : current_v_counts);
-            delta_w = (uint16_t)((current_w_counts < 0) ? -current_w_counts : current_w_counts);
-            peak = (delta_u > delta_v) ? delta_u : delta_v;
-            peak = (peak > delta_w) ? peak : delta_w;
             if (peak > g_foc_diagnostics.peak_current_delta_counts)
             {
                 g_foc_diagnostics.peak_current_delta_counts = peak;
@@ -1503,7 +2256,6 @@ void ADC1_2_IRQHandler(void)
              * Three independent checks: software over-current, the driver fault
              * pin, and an unbound controller. Any of them shuts the power stage
              * down immediately without calling into Rust. */
-            trip_counts = foc_platform_current_trip_counts();
             if ((peak > trip_counts) ||
                 (foc_platform_driver_faulted() != 0U) ||
                 (g_foc_controller == 0))
@@ -1533,12 +2285,36 @@ void ADC1_2_IRQHandler(void)
                     ((float)g_foc_diagnostics.bus_voltage_raw * FOC_ADC_REFERENCE_VOLTAGE) /
                     (FOC_ADC_FULL_SCALE * FOC_BUS_PARTITIONING_FACTOR);
                 feedback.electrical_angle_rad = 0.0f;
+                /* A23 V19 只迁移完整物理量快照，不开放实测相电压源。平台把
+                 * 旧反馈确定性包装成 CommandModel；逐板标定门完成前相电压
+                 * 始终没有 valid 位，也不会进入 Rust 观察器。
+                 * A23 V19 only migrates the complete physical snapshot. The
+                 * platform deterministically wraps legacy feedback as
+                 * CommandModel; measured phase voltage remains unavailable. */
+                foc_realtime_input_from_legacy(
+                    &feedback,
+                    g_foc_diagnostics.realtime_step_count,
+                    1.0f / (float)FOC_CONTROL_FREQUENCY_HZ,
+                    &input);
+#if defined(FLUXRT_TRACE_BUILD)
+                /* Rust 始终在控制器内部更新最近遥测；只有下一拍确实要写 trace 时，
+                 * 才额外把 100 B 快照复制到 ISR 栈。管理线程通过
+                 * foc_rust_get_telemetry() 直接读取内部快照，不再要求每拍复制两次。
+                 * Rust always updates its internal snapshot. Copy the 100-byte
+                 * value to the ISR stack only when the next trace tick is due;
+                 * management reads the internal snapshot directly. */
+                if ((g_foc_trace_enabled != 0U) &&
+                    ((g_foc_trace_counter + 1U) >= g_foc_trace_divider))
+                {
+                    telemetry_output = &telemetry;
+                }
+#endif
                 control_cycle_start = DWT->CYCCNT;
                 control_executed = 1U;
                 control_status = foc_rust_realtime_step(g_foc_controller,
-                                                        &feedback,
+                                                        &input,
                                                         &output,
-                                                        &telemetry);
+                                                        telemetry_output);
                 control_cycle_end = DWT->CYCCNT;
                 g_foc_diagnostics.last_control_status = control_status;
                 if (control_status != FOC_STATUS_OK)
@@ -1582,20 +2358,6 @@ void ADC1_2_IRQHandler(void)
                     ++g_foc_diagnostics.realtime_step_count;
 #if defined(FLUXRT_TRACE_BUILD)
                     trace_sampled = foc_platform_trace_capture(&feedback, &output, &telemetry);
-                    /* trace 采样拍已经把同一份 telemetry 写入诊断环形缓冲；该拍不再
-                     * 立刻复制整个全局快照，下一控制拍会更新它（最多滞后 1/12 kHz）。
-                     * 这消除诊断拍上的重复结构体搬运，而不降低控制或保护采样率。
-                     * A sampled trace tick already serialises the same telemetry into
-                     * the diagnostic ring. Skip the duplicate global-structure copy on
-                     * that tick; the next 12 kHz tick refreshes it, so shell telemetry
-                     * is at most one control period stale while control/safety remain
-                     * full-rate. */
-                    if (trace_sampled == 0U)
-                    {
-                        g_foc_telemetry = telemetry;
-                    }
-#else
-                    g_foc_telemetry = telemetry;
 #endif
                 }
             }
@@ -1608,7 +2370,7 @@ void ADC1_2_IRQHandler(void)
         ADC1->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
         ADC2->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
         FOC_TIMING_PROBE_LOW();
-#if defined(FOC_ISR_TIMING_PROBE)
+#if defined(FOC_MONITOR_DWT_TIMING)
         if (timing_active == 0U)
         {
             uint32_t monitor_cycles = DWT->CYCCNT - cycle_start;
@@ -1652,7 +2414,16 @@ void ADC1_2_IRQHandler(void)
             {
                 ++g_foc_diagnostics.deadline_miss_count;
                 g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_DEADLINE_MISSED;
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+                if (g_foc_lsi_session_running != 0U)
+                {
+                    foc_platform_lsi_abort_session_isr();
+                }
+                else
+#endif
+                {
                 foc_platform_disable_power_fast();
+                }
             }
         }
     }
@@ -1689,7 +2460,16 @@ void TIM1_BRK_TIM15_IRQHandler(void)
         TIM1->SR &= ~(TIM_SR_BIF | TIM_SR_B2IF);
         ++g_foc_diagnostics.break_fault_count;
         g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_BREAK_LATCHED;
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+        if (g_foc_lsi_session_running != 0U)
+        {
+            foc_platform_lsi_abort_session_isr();
+        }
+        else
+#endif
+        {
         foc_platform_disable_power_fast();
+        }
         /* 同步采样时基也停掉：栅极已断，继续采样只会产生误导性的数据。
          * Also stop the sampling time base: with the gates cut, continued
          * sampling would only produce misleading data. */
@@ -1890,9 +2670,9 @@ foc_status_t foc_platform_apply_output(const foc_output_t *output)
  */
 foc_status_t foc_platform_control_start(float target_speed_rpm)
 {
-#if defined(FLUXRT_CALIBRATION_CAPTURE_ONLY_BUILD)
-    /* Calibration 是编译期只采集档。即使应用层或未来脚本误调用 start，平台层
-     * 仍先执行硬关断再拒绝，保证不存在绕过 Shell 的 arm 路径。 */
+#if defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD)
+    /* Calibration/Identification 都在编译期禁用普通 arm。即使应用层或未来脚本
+     * 误调用 start，平台层仍先执行硬关断再拒绝，保证不存在绕过 Shell 的路径。 */
     (void)target_speed_rpm;
     foc_platform_emergency_stop();
     return FOC_STATUS_DISABLED;
@@ -1986,6 +2766,16 @@ void foc_platform_control_stop(void)
 #if defined(FOC_TARGET_STM32G431)
     uint32_t primask = __get_PRIMASK();
     __disable_irq();
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+    if (g_foc_lsi_session_running != 0U)
+    {
+        foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+        foc_lsi_management_shared_abort_isr();
+        g_foc_lsi_active_drive_request = FOC_LSI_DRIVE_OFF;
+        g_foc_lsi_session_running = 0U;
+        g_foc_diagnostics.flags &= ~FOC_PLATFORM_DIAG_LSI_SESSION_RUNNING;
+    }
+#endif
     foc_platform_disable_power_fast();
     if (g_foc_controller != 0)
     {
@@ -1996,6 +2786,127 @@ void foc_platform_control_stop(void)
         __enable_irq();
     }
     foc_platform_refresh_safety_flags();
+#endif
+}
+
+foc_status_t foc_platform_lsi_start(uint32_t confirmation)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+    const uint32_t channel_mask = TIM_CCER_CC1E |
+                                  TIM_CCER_CC2E |
+                                  TIM_CCER_CC3E;
+    foc_lsi_management_status_t management_status;
+    foc_lsi_config_t config;
+    foc_lsi_management_result_t management_result;
+    uint16_t bus_min_raw;
+    uint16_t bus_max_raw;
+    uint16_t current_limit_counts;
+    int32_t current_u_counts;
+    int32_t current_v_counts;
+    int32_t current_w_counts;
+    uint32_t peak_counts;
+    uint32_t primask;
+    foc_status_t result = FOC_STATUS_NOT_CONFIGURED;
+
+    if (confirmation != FOC_LSI_START_CONFIRMATION)
+    {
+        return FOC_STATUS_INVALID_ARGUMENT;
+    }
+    primask = __get_PRIMASK();
+    __disable_irq();
+    foc_platform_refresh_safety_flags();
+    bus_min_raw = foc_platform_bus_voltage_to_raw(
+        g_foc_platform_config.minimum_bus_voltage_v);
+    bus_max_raw = foc_platform_bus_voltage_to_raw(
+        g_foc_platform_config.maximum_bus_voltage_v);
+    current_limit_counts = (uint16_t)(FOC_LSI_START_MAX_CURRENT_A *
+                                      FOC_CURRENT_COUNTS_PER_AMP + 0.5f);
+    current_u_counts = (int32_t)g_foc_diagnostics.phase_u_offset -
+                       (int32_t)g_foc_diagnostics.phase_u_raw;
+    current_v_counts = (int32_t)g_foc_diagnostics.phase_v_offset -
+                       (int32_t)g_foc_diagnostics.phase_v_raw;
+    current_w_counts = -current_u_counts - current_v_counts;
+    peak_counts = (uint32_t)((current_u_counts < 0) ?
+        -current_u_counts : current_u_counts);
+    if ((uint32_t)((current_v_counts < 0) ?
+                   -current_v_counts : current_v_counts) > peak_counts)
+    {
+        peak_counts = (uint32_t)((current_v_counts < 0) ?
+            -current_v_counts : current_v_counts);
+    }
+    if ((uint32_t)((current_w_counts < 0) ?
+                   -current_w_counts : current_w_counts) > peak_counts)
+    {
+        peak_counts = (uint32_t)((current_w_counts < 0) ?
+            -current_w_counts : current_w_counts);
+    }
+
+    if ((foc_lsi_management_shared_get_status(&management_status) == 0U) ||
+        (foc_lsi_management_shared_get_config(&config) == 0U))
+    {
+        result = FOC_STATUS_NOT_CONFIGURED;
+    }
+    else if ((management_status.output.state != FOC_LSI_STATE_IDLE) ||
+             (management_status.start_consumed != 0U) ||
+             (g_foc_lsi_session_running != 0U))
+    {
+        result = FOC_STATUS_DISABLED;
+    }
+    else if (((g_foc_diagnostics.flags & FOC_LSI_REQUIRED_FLAGS) !=
+              FOC_LSI_REQUIRED_FLAGS) ||
+             ((g_foc_diagnostics.flags & FOC_LSI_FORBIDDEN_FLAGS) != 0U) ||
+             (g_foc_diagnostics.lsi_sync_bus_valid == 0U) ||
+             (g_foc_diagnostics.lsi_sync_bus_voltage_raw < bus_min_raw) ||
+             (g_foc_diagnostics.lsi_sync_bus_voltage_raw > bus_max_raw) ||
+             (peak_counts > current_limit_counts) ||
+             (foc_lsi_capture_service_is_armed() != 0U) ||
+             (foc_platform_gate_is_low() == 0U) ||
+             ((TIM1->BDTR & TIM_BDTR_MOE) != 0U) ||
+             ((TIM1->CCER & channel_mask) != 0U))
+    {
+        result = FOC_STATUS_NOT_CONFIGURED;
+    }
+    else if (foc_lsi_preload_session_open_active(
+                 &g_foc_lsi_preload_session,
+                 FOC_LSI_ACTIVE_CONFIRMATION,
+                 config.max_active_ticks,
+                 config.total_timeout_ticks,
+                 g_foc_diagnostics.sync_sample_count) !=
+             FOC_LSI_PRELOAD_RESULT_OK)
+    {
+        result = FOC_STATUS_HARDWARE_FAULT;
+    }
+    else
+    {
+        management_result = foc_lsi_management_shared_request_start(
+            confirmation,
+            &management_status);
+        if (management_result != FOC_LSI_MANAGEMENT_OK)
+        {
+            foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+            result = FOC_STATUS_DISABLED;
+        }
+        else
+        {
+            g_foc_lsi_active_drive_request = FOC_LSI_DRIVE_OFF;
+            g_foc_lsi_session_running = 1U;
+            g_foc_diagnostics.flags |=
+                FOC_PLATFORM_DIAG_LSI_SESSION_RUNNING;
+            result = FOC_STATUS_OK;
+        }
+    }
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+    return result;
+#elif defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+    (void)confirmation;
+    return FOC_STATUS_NOT_CONFIGURED;
+#else
+    (void)confirmation;
+    return FOC_STATUS_DISABLED;
 #endif
 }
 
@@ -2020,12 +2931,22 @@ foc_status_t foc_platform_get_telemetry(foc_telemetry_t *telemetry)
 #if defined(FOC_TARGET_STM32G431)
     {
         uint32_t primask = __get_PRIMASK();
+        foc_status_t status;
         __disable_irq();
-        *telemetry = g_foc_telemetry;
+        if (g_foc_controller != 0)
+        {
+            status = foc_rust_get_telemetry(g_foc_controller, telemetry);
+        }
+        else
+        {
+            *telemetry = (foc_telemetry_t){0};
+            status = FOC_STATUS_NOT_CONFIGURED;
+        }
         if (primask == 0U)
         {
             __enable_irq();
         }
+        return status;
     }
 #else
     {

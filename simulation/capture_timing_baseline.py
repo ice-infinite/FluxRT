@@ -42,9 +42,6 @@ import subprocess
 import sys
 import time
 
-import serial
-
-
 # 命令行契约 / CLI contract:
 #   --port / --baud     串口与波特率，默认 COM6 / 115200
 #   --duration          每组场景的电机运行时长 [s]，默认 5.0，必须 > 0
@@ -74,7 +71,7 @@ def parse_args() -> argparse.Namespace:
 
 # 与 capture_hardware_trace.py 相同：命令必须以 CRLF 结尾并立即 flush。
 # Same contract as capture_hardware_trace.py: CRLF-terminated, flushed immediately.
-def send(port: serial.Serial, command: str) -> None:
+def send(port: object, command: str) -> None:
     port.write((command + "\r\n").encode("ascii"))
     port.flush()
 
@@ -83,7 +80,7 @@ def send(port: serial.Serial, command: str) -> None:
 # 出问题时必须能从日志还原"哪一组、什么时候、固件回了什么"。
 # Unlike the FTR capture, every raw line is prefixed with the scenario label: the JSON
 # keeps only verdicts, so the log must be able to replay which run said what.
-def read_available(port: serial.Serial, raw: list[str], prefix: str) -> list[str]:
+def read_available(port: object, raw: list[str], prefix: str) -> list[str]:
     lines: list[str] = []
     while port.in_waiting:
         line = port.readline().decode("utf-8", errors="replace").strip()
@@ -96,7 +93,7 @@ def read_available(port: serial.Serial, raw: list[str], prefix: str) -> list[str
 # 在规定时长内持续轮询收集串口输出；最后再排空一次，避免丢掉刚好落在边界上的 FTIMING 行。
 # Polls the port for `seconds`, then drains once more so an FTIMING line that lands right
 # on the deadline is not lost.
-def collect_for(port: serial.Serial, seconds: float, raw: list[str], prefix: str) -> list[str]:
+def collect_for(port: object, seconds: float, raw: list[str], prefix: str) -> list[str]:
     deadline = time.monotonic() + seconds
     lines: list[str] = []
     while time.monotonic() < deadline:
@@ -167,6 +164,26 @@ def parse_timing(line: str) -> dict[str, int] | None:
     return dict(zip(TIMING_FIELDS, values)) if len(values) == len(TIMING_FIELDS) else None
 
 
+# 启动应答在早期固件中是人读文本 `FOC ARMED` / `FOC start REFUSED`，当前机器协议
+# 使用 `FSTART,armed,...` / `FSTART,refused,...`。采集脚本必须同时识别两代协议，
+# 否则控制器已经 arm 时会被误判成“没有启动”；拒绝优先，避免混合/残留日志放宽安全门。
+# Early firmware used human-readable start replies while the current machine protocol
+# uses FSTART records. Accept both generations, with refusal taking precedence so a
+# mixed or stale response can never relax the safety gate.
+def classify_start_reply(lines: list[str]) -> str:
+    if any(
+        ("FSTART,refused," in line) or ("FOC start REFUSED" in line)
+        for line in lines
+    ):
+        return "refused"
+    if any(
+        ("FSTART,armed," in line) or ("FOC ARMED" in line)
+        for line in lines
+    ):
+        return "armed"
+    return "missing"
+
+
 # 记录采集时的固件提交，便于把 WCET 数字回溯到确切的二进制来源。
 # Records the firmware commit so a WCET number can be traced back to a binary.
 #
@@ -202,7 +219,7 @@ def git_commit(project: pathlib.Path) -> str:
 # 失败语义 / Failure: 固件拒绝启动或没有 ARMED 确认时直接抛 RuntimeError，
 # 由 main() 的 finally 负责停机；本函数自身不做收尾。
 def run_scenario(
-    port: serial.Serial,
+    port: object,
     rate_hz: int,
     duration: float,
     target_rpm: float,
@@ -230,10 +247,11 @@ def run_scenario(
     # bus voltage blocked arming, and a missing ARMED means the command was not handled;
     # both must abort instead of waiting for data that will never come.
     start_lines = collect_for(port, 0.5, raw, label)
-    if any("FOC start REFUSED" in line for line in start_lines):
+    start_reply = classify_start_reply(start_lines)
+    if start_reply == "refused":
         raise RuntimeError(f"{label}: controller refused to start")
-    if not any("FOC ARMED" in line for line in start_lines):
-        raise RuntimeError(f"{label}: no FOC ARMED acknowledgement")
+    if start_reply != "armed":
+        raise RuntimeError(f"{label}: no armed acknowledgement")
 
     collect_for(port, duration, raw, label)
     # 先停机再取 FTIMING/状态：WCET 数字必须在功率级关闭后读取，
@@ -329,6 +347,15 @@ def main() -> int:
     if args.profile == "production" and any(rate != 0 for rate in rates):
         raise SystemExit("production profile compiles trace out; only --rates 0 is valid")
 
+    # pyserial 只在真正访问硬件时加载；离线解析/协议单测不应因为测试 Python 环境
+    # 没安装串口包而在模块导入阶段失败。
+    # Load pyserial only for a real hardware run. Offline parser/protocol tests must be
+    # able to import this module without carrying the hardware-only dependency.
+    try:
+        import serial
+    except ModuleNotFoundError as error:
+        raise RuntimeError("pyserial is required for a hardware timing capture") from error
+
     # 用脚本自身位置定位工程根目录（simulation/ 的上一级），
     # 保证从任何工作目录调用都能把 git 提交号写进 JSON。
     # Locates the project root from this file's own path, so the git commit is recorded
@@ -338,43 +365,45 @@ def main() -> int:
     raw: list[str] = []
     scenarios: list[dict[str, object]] = []
 
-    with serial.Serial(args.port, args.baud, timeout=0.05, write_timeout=1.0) as port:
-        # 建立确定的初始状态：清缓冲、停机、关 trace，再（可选）临时打开闭环。
-        # foc_cfg 只有在停机状态下才会被固件接受，所以这个顺序不能调换。
-        # Establishes a known initial state: flush, stop, trace off, then optionally
-        # enable closed loop. Firmware only accepts foc_cfg while stopped.
-        time.sleep(0.25)
-        port.reset_input_buffer()
-        send(port, "foc_stop")
-        if args.profile == "diagnostic":
-            send(port, "foc_trace stop")
-        if args.closed_loop:
-            send(port, "foc_cfg closedloop 1")
-        collect_for(port, 0.25, raw, "setup")
-        try:
-            for rate_hz in rates:
-                scenarios.append(
-                    run_scenario(
-                        port,
-                        rate_hz,
-                        args.duration,
-                        args.target_rpm,
-                        args.profile == "diagnostic",
-                        raw,
-                    )
-                )
-        finally:
-            # 安全 + 现场恢复：无论哪一组抛异常，都先停机，然后关 trace、
-            # 把闭环开关恢复为 0（脚本只做临时接管，绝不改变上电默认配置）。
-            # Safety and site restoration: on any failure, stop the motor first, then
-            # disable trace and restore closed loop to 0 — the script borrows the
-            # closed-loop switch and must never leave it changed.
+    try:
+        with serial.Serial(args.port, args.baud, timeout=0.05, write_timeout=1.0) as port:
+            # 建立确定的初始状态：清缓冲、停机、关 trace，再（可选）临时打开闭环。
+            # foc_cfg 只有在停机状态下才会被固件接受，所以这个顺序不能调换。
+            # Establishes a known initial state: flush, stop, trace off, then optionally
+            # enable closed loop. Firmware only accepts foc_cfg while stopped.
+            time.sleep(0.25)
+            port.reset_input_buffer()
             send(port, "foc_stop")
             if args.profile == "diagnostic":
                 send(port, "foc_trace stop")
             if args.closed_loop:
-                send(port, "foc_cfg closedloop 0")
-            collect_for(port, 0.25, raw, "cleanup")
+                send(port, "foc_cfg closedloop 1")
+            collect_for(port, 0.25, raw, "setup")
+            try:
+                for rate_hz in rates:
+                    scenarios.append(
+                        run_scenario(
+                            port,
+                            rate_hz,
+                            args.duration,
+                            args.target_rpm,
+                            args.profile == "diagnostic",
+                            raw,
+                        )
+                    )
+            finally:
+                # 安全 + 现场恢复：无论哪一组抛异常，都先停机，然后关 trace、
+                # 把闭环开关恢复为 0（脚本只做临时接管，绝不改变上电默认配置）。
+                # Safety and site restoration: on any failure, stop the motor first,
+                # then disable trace and restore closed loop to 0.
+                send(port, "foc_stop")
+                if args.profile == "diagnostic":
+                    send(port, "foc_trace stop")
+                if args.closed_loop:
+                    send(port, "foc_cfg closedloop 0")
+                collect_for(port, 0.25, raw, "cleanup")
+    except serial.SerialException as error:
+        raise RuntimeError(str(error)) from error
 
     # JSON 就是本脚本的交付物：schema_version 供下游做兼容判断，
     # generated_at 用 UTC，closed_loop_requested 记录"请求值"而非实测状态。
@@ -422,5 +451,5 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (RuntimeError, serial.SerialException) as error:
+    except RuntimeError as error:
         raise SystemExit(str(error)) from error

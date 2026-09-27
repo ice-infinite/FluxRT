@@ -44,9 +44,11 @@ find_program(CARGO_EXECUTABLE cargo REQUIRED)
 # leave a trace in CMakeCache.txt; build.ps1 -BuildOnly reads them back to prevent one
 # configuration being mistaken for another.
 set(FLUXRT_BUILD_PROFILE "diagnostic" CACHE STRING
-    "FluxRT firmware profile: diagnostic, calibration, or production")
-set_property(CACHE FLUXRT_BUILD_PROFILE PROPERTY STRINGS diagnostic calibration production)
-set(FLUXRT_RUST_OPT_LEVEL "s" CACHE STRING
+    "FluxRT firmware profile: diagnostic, calibration, identification, or production")
+set_property(CACHE FLUXRT_BUILD_PROFILE PROPERTY STRINGS
+    diagnostic calibration identification production)
+set(FLUXRT_DEFAULT_RUST_OPT_LEVEL "s")
+set(FLUXRT_RUST_OPT_LEVEL "${FLUXRT_DEFAULT_RUST_OPT_LEVEL}" CACHE STRING
     "Rust release optimization level: 3, s, or z")
 set_property(CACHE FLUXRT_RUST_OPT_LEVEL PROPERTY STRINGS 3 s z)
 
@@ -55,8 +57,9 @@ set_property(CACHE FLUXRT_RUST_OPT_LEVEL PROPERTY STRINGS 3 s z)
 # The values are validated again here because a cache entry can be set with -D, bypassing
 # the ValidateSet in build.ps1; an invalid profile must fail hard rather than silently
 # produce an image that belongs to no defined profile.
-if(NOT FLUXRT_BUILD_PROFILE MATCHES "^(diagnostic|calibration|production)$")
-    message(FATAL_ERROR "FLUXRT_BUILD_PROFILE must be diagnostic, calibration, or production")
+if(NOT FLUXRT_BUILD_PROFILE MATCHES "^(diagnostic|calibration|identification|production)$")
+    message(FATAL_ERROR
+        "FLUXRT_BUILD_PROFILE must be diagnostic, calibration, identification, or production")
 endif()
 if(NOT FLUXRT_RUST_OPT_LEVEL MATCHES "^(3|s|z)$")
     message(FATAL_ERROR "FLUXRT_RUST_OPT_LEVEL must be 3, s, or z")
@@ -212,6 +215,8 @@ if(FLUXRT_BUILD_PROFILE STREQUAL "diagnostic")
     set(FLUXRT_PRIMARY_PROFILE_DEFINE FLUXRT_DIAGNOSTIC_BUILD=1)
 elseif(FLUXRT_BUILD_PROFILE STREQUAL "calibration")
     set(FLUXRT_PRIMARY_PROFILE_DEFINE FLUXRT_CALIBRATION_BUILD=1)
+elseif(FLUXRT_BUILD_PROFILE STREQUAL "identification")
+    set(FLUXRT_PRIMARY_PROFILE_DEFINE FLUXRT_IDENTIFICATION_BUILD=1)
 else()
     set(FLUXRT_PRIMARY_PROFILE_DEFINE FLUXRT_PRODUCTION_BUILD=1)
 endif()

@@ -1,0 +1,184 @@
+{
+  "format_version": 1,
+  "analysis_kind": "lsi-powered-one-shot-screen",
+  "source_metadata": {
+    "captured_at_local": "2026-09-27T20:34:00+08:00",
+    "board": "NUCLEO-G431RB + X-NUCLEO-IHM16M1",
+    "motor": "GBM2804H-100T, unloaded, freely rotating",
+    "supply": "12.3 V nominal, 2 A current limit",
+    "firmware_profile": "Identification S4.9",
+    "command": "foc_lsi_start LSI1",
+    "command_count": "1; automatic_retry=false",
+    "current_offsets_u_v_w": "1951,1933,1953",
+    "current_counts_per_amp_nominal": "626.535",
+    "bus_volts_per_count_nominal": "0.0128937729",
+    "hex_sha256": "71658365FFC5F7033B4A4AC94983D4CF4059F1759EB7738950212D0D97332EB2"
+  },
+  "nominal_conversion": {
+    "current_counts_per_amp": 626.5350000000001,
+    "bus_volts_per_count": 0.012893772893772894,
+    "sample_rate_hz": 12000.0,
+    "dead_time_s": 5.5e-07,
+    "current_zero_band_a": 0.005,
+    "stator_resistance_ohm": 4.9666667
+  },
+  "raw_contract": {
+    "sample_count": 192,
+    "sequence_contiguous": true,
+    "tick_contiguous": true,
+    "first_tick": 11794995,
+    "last_tick": 11795186,
+    "pwm_period_ticks": [
+      7083
+    ],
+    "adc_valid_all": true,
+    "fault_free_all": true,
+    "bias_samples": 120,
+    "positive_pulse_samples": 24,
+    "negative_pulse_samples": 24,
+    "output_off_samples": 24,
+    "contract_ok": true
+  },
+  "safety": {
+    "bounded_run_pass": true,
+    "final_state": 7,
+    "abort_reason": 0,
+    "force_safe_output": 1,
+    "final_drive_request": 0,
+    "start_count": 1,
+    "start_consumed": 1,
+    "capture_state": 2,
+    "capture_samples": 192,
+    "capture_overflow_count": 0,
+    "contract_error_count": 0,
+    "storage_error_count": 0,
+    "deadline_miss_count": 0,
+    "session_control_ticks": 449,
+    "session_control_duration_ms": 37.416666666666664,
+    "maximum_isr_cycles": 11078,
+    "isr_budget_cycles": 12750,
+    "isr_budget_utilization_pct": 86.88627450980391,
+    "isr_budget_margin_pct": 13.11372549019608,
+    "maximum_reconstructed_phase_current_a": 0.2154708037060978,
+    "minimum_synchronous_bus_voltage_v": 12.21040293040293,
+    "maximum_synchronous_bus_voltage_v": 12.326446886446886
+  },
+  "fit": {
+    "alignment_definition": "voltage at row k predicts current at row k+1",
+    "applied_voltage_fixed_rs": {
+      "transition_count": 47,
+      "inductance_h": 0.00174,
+      "rmse_a": 0.007110521658862879,
+      "maximum_absolute_residual_a": 0.01577670916600965
+    },
+    "command_voltage_fixed_rs": {
+      "transition_count": 47,
+      "inductance_h": 0.002065,
+      "rmse_a": 0.0104485170616841,
+      "maximum_absolute_residual_a": 0.02088057740908625
+    },
+    "alignment_sensitivity": {
+      "-1": {
+        "transition_count": 46,
+        "inductance_h": 0.001671,
+        "rmse_a": 0.013237004312739442,
+        "maximum_absolute_residual_a": 0.03030721151438376
+      },
+      "0": {
+        "transition_count": 47,
+        "inductance_h": 0.00174,
+        "rmse_a": 0.007110521658862879,
+        "maximum_absolute_residual_a": 0.01577670916600965
+      },
+      "1": {
+        "transition_count": 47,
+        "inductance_h": 0.003,
+        "rmse_a": 0.015984076994927522,
+        "maximum_absolute_residual_a": 0.031623842690847837
+      }
+    },
+    "pulse_pair_fixed_rs": [
+      {
+        "transition_count": 7,
+        "inductance_h": 0.0018189999999999999,
+        "rmse_a": 0.007564296522362788,
+        "maximum_absolute_residual_a": 0.011909539050619089
+      },
+      {
+        "transition_count": 7,
+        "inductance_h": 0.001727,
+        "rmse_a": 0.008000827797631116,
+        "maximum_absolute_residual_a": 0.012978504579300498
+      },
+      {
+        "transition_count": 7,
+        "inductance_h": 0.00182,
+        "rmse_a": 0.009090048049572998,
+        "maximum_absolute_residual_a": 0.014909337266261369
+      },
+      {
+        "transition_count": 7,
+        "inductance_h": 0.001588,
+        "rmse_a": 0.005479921923642871,
+        "maximum_absolute_residual_a": 0.008305628905498408
+      },
+      {
+        "transition_count": 7,
+        "inductance_h": 0.001861,
+        "rmse_a": 0.007034027523727047,
+        "maximum_absolute_residual_a": 0.012535481950117167
+      },
+      {
+        "transition_count": 7,
+        "inductance_h": 0.0016339999999999998,
+        "rmse_a": 0.006508017802345885,
+        "maximum_absolute_residual_a": 0.010815157258610875
+      }
+    ],
+    "pulse_pair_mean_h": 0.0017415,
+    "pulse_pair_range_over_mean_pct": 15.676141257536608,
+    "candidate_residuals": [
+      {
+        "inductance_h": 0.000893,
+        "rmse_a": 0.01607665512274435,
+        "maximum_absolute_residual_a": 0.03417863263438642
+      },
+      {
+        "inductance_h": 0.001058,
+        "rmse_a": 0.01239165080424507,
+        "maximum_absolute_residual_a": 0.027601244837800798
+      },
+      {
+        "inductance_h": 0.0011133333,
+        "rmse_a": 0.011427853936732924,
+        "maximum_absolute_residual_a": 0.02611803937920293
+      },
+      {
+        "inductance_h": 0.00174,
+        "rmse_a": 0.007110521658862879,
+        "maximum_absolute_residual_a": 0.01577670916600965
+      }
+    ],
+    "lcr_phase_inductance_h": 0.0011133333,
+    "dynamic_vs_lcr_difference_pct": 56.28742982896495
+  },
+  "decision": {
+    "hardware_execution": "pass",
+    "parameter_screen": "reject-update",
+    "parameter_approval": "not-granted",
+    "reasons": [
+      "only one separately authorised powered session exists; the experiment requires at least three",
+      "six within-run pulse-pair fits exceed the 10 percent range-over-mean screen",
+      "the dynamic estimate differs materially from the LCR-derived phase inductance",
+      "current and inverter voltage scales are nominal rather than independently calibrated"
+    ],
+    "next_gate": "review scaling and fit assumptions before requesting any separately authorised repeat; do not update production parameters"
+  },
+  "limitations": [
+    "single powered run at one 0.2 A bias point",
+    "nominal 626.535 counts/A and nominal bus-divider conversion",
+    "550 ns dead-time model with zero device-drop term",
+    "fixed measured Rs; no joint temperature-aware Rs/L fit",
+    "no independent current probe, oscilloscope, encoder or torque truth"
+  ]
+}

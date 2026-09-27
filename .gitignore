@@ -18,6 +18,8 @@
 __pycache__/
 *.pyc
 /simulation/results/
+# 临时取证探针写死本机路径，不属于可复现分析入口。
+/simulation/_probe_*.py
 /simulink/slprj/
 /simulink/results/
 /simulink/*.slxc

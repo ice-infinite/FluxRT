@@ -14,17 +14,17 @@
 #
 # Flash 预算 / Flash budget（本脚本存在的核心理由 / the main reason this script exists）:
 #   STM32G431RBT6 只有 128 KiB Flash，是本工程最紧张的资源（SRAM 32 KiB 反而宽松）。
-#   A17 混合 CORDIC/FPU Diagnostic + Rust `s` 的 BIN 为 128,600 B，剩余 2,472 B；
-#   其中包含 4 KiB 的相电压诊断固定窗，因此 Rust 优化
-#   等级与构建档是**实测选择**而不是猜的：`s` 相对 `3` 回收约 5 KB Flash，完整 ISR
-#   WCET 只增加约 2%；`z` 再省 800 B 却让 WCET 增加约 7%。
+#   A23 V19 后 Diagnostic + Rust `s` 曾为 131,416 B，超出 128 KiB Flash 344 B；
+#   当时临时改用 `z`。A21.1 移除 libc 浮点文本解析链后，Diagnostic + `z` 已降到
+#   106,416 B；A21.2 的板端同口径测量又确认 `z` 的完整 ISR 最坏只剩 4.77% 软件
+#   deadline 余量。因此四档省略参数时统一默认 `s`，`z` 只保留为显式容量比较选项。
 #   The STM32G431RBT6 has only 128 KiB of Flash, the tightest resource in this
 #   project (32 KiB of SRAM is roomier). A17 hybrid CORDIC/FPU Diagnostic plus Rust
-#   `s` produces a 128,600-byte BIN, leaving 2,472 bytes; this includes the 4 KiB
-#   diagnostic phase-voltage window. The Rust opt-level and the profile are
-#   therefore measured choices, not guesses: `s` recovers about 5 KB of Flash over
-#   `3` while raising the full ISR WCET by about 2%, and `z` saves another 800 B at
-#   the cost of about 7% more WCET.
+#   `s` no longer fitted after the A23 V19 snapshot (131,416 bytes, 344 bytes over),
+#   so Diagnostic temporarily used `z`. A21.1 removed the libc float parsing chain
+#   and reduced Diagnostic + `z` to 106,416 bytes. A21.2 then measured only 4.77%
+#   software-deadline margin with `z`. All profiles therefore default to `s`; `z`
+#   remains available only as an explicit capacity-comparison option.
 #
 # 切换档位的前提 / Precondition for switching:
 #   改动 Profile 或 RustOptLevel 后必须重新记录 fluxrt.bin 的 SHA-256、text/data/bss
@@ -51,17 +51,17 @@ param(
     # 删除本档位的构建目录与该优化等级的 Rust 产物，其它档位不受影响。
     # Remove this profile's build directory and this opt-level's Rust artefacts only.
     [switch]$Clean,
-    # Diagnostic 保留调试能力；Calibration 只保留停机相电压采集且禁止 arm；
-    # Production 裁掉两类能力。三档分别定义唯一的主档位宏。
-    # Diagnostic keeps diagnostics; Calibration keeps stopped-state phase capture
-    # and refuses arming; Production removes both. Each profile defines exactly one
-    # primary build-profile macro.
-    [ValidateSet('Diagnostic', 'Calibration', 'Production')]
+    # Diagnostic 保留调试能力；Calibration 只保留停机相电压采集；Identification
+    # 只授权 Ls(I) 状态机；Production 裁掉实验能力。四档分别定义唯一主档位宏。
+    # Diagnostic keeps diagnostics; Calibration keeps stopped-state phase capture;
+    # Identification authorizes only the Ls(I) sequencer; Production removes
+    # experimental capabilities. Each profile defines exactly one primary macro.
+    [ValidateSet('Diagnostic', 'Calibration', 'Identification', 'Production')]
     [string]$Profile = 'Diagnostic',
-    # Rust release 优化等级，直接映射到 CARGO_PROFILE_RELEASE_OPT_LEVEL。
-    # Rust release opt-level, passed straight through as CARGO_PROFILE_RELEASE_OPT_LEVEL.
+    # Rust release 优化等级；省略时四档统一选择 s。
+    # Rust release opt-level. Omission selects s for every profile.
     [ValidateSet('3', 's', 'z')]
-    [string]$RustOptLevel = 's'
+    [string]$RustOptLevel
 )
 
 Set-StrictMode -Version Latest
@@ -73,15 +73,20 @@ $projectDir = $PSScriptRoot
 $workspaceDir = Split-Path -Parent (Split-Path -Parent $projectDir)
 $rttRoot = Join-Path $workspaceDir 'rt-thread'
 $profileName = $Profile.ToLowerInvariant()
-# 三个构建档必须用**不同的输出目录**：否则 CMake cache 会跨档复用，把上一次档位的
+if ([string]::IsNullOrWhiteSpace($RustOptLevel))
+{
+    $RustOptLevel = 's'
+}
+# 四个构建档必须用**不同的输出目录**：否则 CMake cache 会跨档复用，把上一次档位的
 # 目标文件和新档位的 Rust 静态库混在一个镜像里。
-# The three profiles must use different output directories; sharing one would let CMake
+# The four profiles must use different output directories; sharing one would let CMake
 # reuse a stale cache and mix the previous profile's objects with the new Rust archive
 # in a single image.
 $buildDirectoryName = switch ($Profile)
 {
     'Diagnostic'  { 'cmake-build' }
     'Calibration' { 'cmake-build-calibration' }
+    'Identification' { 'cmake-build-identification' }
     'Production'  { 'cmake-build-production' }
 }
 $buildDir = Join-Path $projectDir $buildDirectoryName

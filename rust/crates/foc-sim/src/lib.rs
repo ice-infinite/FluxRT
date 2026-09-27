@@ -16,11 +16,15 @@
 //! 建模边界 / Modelling boundary（避免过度解读对标结果）:
 //!   本 crate 只建模"控制器 + 平均值逆变器 + PMSM 被控对象"。两条入口的反馈都是
 //!   **理想值**：三相电流由被控对象 dq 状态经逆 Park/逆 Clarke 反算，没有电流
-//!   传感器模型，也没有 ADC 量化、零偏、增益误差；母线电压取常量，没有纹波；
+//!   传感器模型；母线电压取常量，没有纹波；
 //!   转子角与转速用的是对象真值。现在只建模 PWM 边界、整数控制分频、占空保持与
 //!   可配置整拍生效延迟；仍不建模开关器件/纹波、ADC 量化与相间采样偏斜。因此
 //!   对标的是控制律、启动时序与观测器行为，**不是**完整电流采样
 //!   链路或 ADC/PWM 时序的验证。
+//!   `phase_voltage_sensor` 提供相电压偏置、增益、量化、延迟与故障注入模型；
+//!   `phase_voltage_path` 把它接入 PC-only plant→质量/来源解析→V19 目标门与 shadow
+//!   SMO/PLL 链。目标 bridge 对 Measured 仍明确返回 `NotConfigured`，所以这里不能
+//!   据此宣称目标固件或实机闭环已使用实测相电压。
 //!   Only the controller, the average-value inverter and the plant are modelled:
 //!   feedback is ideal (no current-sensor model, no ADC quantisation/offset, no
 //!   sampling delay), so this is not a validation of the ADC/PWM chain.
@@ -63,6 +67,8 @@ use foc_control::{
     MotorParameters, PhaseCurrents, PwmCommand, PwmPort, RotorFeedback, SafetyPort,
 };
 
+pub mod phase_voltage_path;
+pub mod phase_voltage_sensor;
 pub mod scheduler;
 pub use scheduler::{MultiRateScheduler, MultiRateTimingConfig, TimingConfigError};
 
@@ -1090,9 +1096,9 @@ pub fn run_reference_simulation(
 ///   `dead_time_feedforward_enabled`、`observer_dead_time_compensation_enabled`
 ///   三个开关。
 ///
-/// ABI 边界 / ABI boundary: 参数进入 V9 运行配置；Host 与目标固件
+/// ABI 边界 / ABI boundary: 参数进入 V11 运行配置；Host 与目标固件
 ///   因而执行同一个版本化安装路径。默认总门与两个出口仍全部关闭。
-///   The switches and parameters use the V9 runtime configuration on both host
+///   The switches and parameters use the V11 runtime configuration on both host
 ///   and target; every gate remains disabled by default.
 ///
 /// 取值范围 / Validation ranges: 由 `run_bringup_simulation` 校验，见该函数的说明。
@@ -1136,6 +1142,29 @@ pub struct BringupSimulationConfig {
     /// 恒定负载转矩 `[N*m]`（本入口不做阶跃）；必须有限。
     /// Constant load torque in `[N*m]`; finite.
     pub load_torque_nm: f32,
+    /// PC 被控对象的定子电阻真值 `[ohm]`。它与控制器内部模型分开，便于固定
+    /// 同一物理对象比较两套候选。
+    /// Plant stator resistance truth `[ohm]`, independent of the controller model.
+    pub plant_stator_resistance_ohm: f32,
+    /// PC 被控对象的 d/q 轴电感真值 `[H]`（本模型仍假设 `Ld=Lq`）。
+    /// Plant d/q inductance truth `[H]`, with `Ld=Lq`.
+    pub plant_stator_inductance_h: f32,
+    /// PC 被控对象的永磁磁链真值 `[Wb]`（每电弧度 SI 口径）。
+    /// Plant PM flux truth `[Wb]`, SI per electrical radian.
+    pub plant_flux_linkage_wb: f32,
+    /// 控制器/观测器内部模型使用的定子电阻 `[ohm]`。
+    /// Stator resistance used by the controller/observer model `[ohm]`.
+    pub model_stator_resistance_ohm: f32,
+    /// 控制器/观测器内部模型使用的 `Ld=Lq` `[H]`。
+    /// Controller/observer model inductance `[H]`.
+    pub model_stator_inductance_h: f32,
+    /// 控制器/观测器内部模型使用的 SI 磁链 `[Wb]`。
+    /// Controller/observer model flux linkage `[Wb]`.
+    pub model_flux_linkage_wb: f32,
+    /// d/q 电流环共用的连续时间 PI 增益。
+    /// Shared d/q current-loop continuous-time PI gains.
+    pub current_pi_kp: f32,
+    pub current_pi_ki: f32,
     /// trace 抽点间隔（控制拍数）；必须非零。
     /// Trace decimation in control ticks; must be non-zero.
     pub trace_decimation: u32,
@@ -1244,6 +1273,14 @@ impl Default for BringupSimulationConfig {
             startup_current_a: 0.8,
             dc_bus_voltage_v: 12.3,
             load_torque_nm: 0.0,
+            plant_stator_resistance_ohm: 5.29,
+            plant_stator_inductance_h: 0.001_058,
+            plant_flux_linkage_wb: 0.005_529_026,
+            model_stator_resistance_ohm: 5.29,
+            model_stator_inductance_h: 0.001_058,
+            model_flux_linkage_wb: 0.005_529_026,
+            current_pi_kp: 7.197_815_4,
+            current_pi_ki: 35_989.074,
             trace_decimation: 320,
             timing: MultiRateTimingConfig::default(),
             park_prediction_ticks: 0.0,
@@ -1549,7 +1586,7 @@ impl BringupSimulationRun {
 /// 相关性为什么成立（本入口存在的理由）/ Why correlation is meaningful:
 ///   本函数逐步调用与 STM32G431 ADC 中断**完全相同**的 C ABI 入口：
 ///   `foc_rust_init`、`foc_rust_configure`、`foc_rust_start_realtime`、
-///   `foc_rust_realtime_step`；逆变器模型也通过与目标固件相同的 V7 配置安装。
+///   `foc_rust_realtime_step`；逆变器模型也通过与目标固件相同的 V11 配置安装。
 ///   它不是"再写一遍近似控制器"，
 ///   所以状态机、Rev-Up 时序、SMO/PLL、可靠性门与电流环在 PC 与实机上来自同一份
 ///   代码；正因如此，仿真与实机的对比才有意义。
@@ -1600,8 +1637,8 @@ pub fn run_bringup_simulation(
 ) -> Result<BringupSimulationRun, BringupSimulationError> {
     use foc_rt_bridge::{
         foc_rust_configure, foc_rust_default_st_config, foc_rust_init, foc_rust_realtime_step,
-        foc_rust_start_realtime, FocFeedback, FocOutput, FocRuntimeConfig, FocRustContextStorage,
-        FocStatus, FocTelemetry, FOC_RUST_CONTEXT_CAPACITY,
+        foc_rust_start_realtime, FocFeedback, FocOutput, FocRealtimeInput, FocRuntimeConfig,
+        FocRustContextStorage, FocStatus, FocTelemetry, FOC_RUST_CONTEXT_CAPACITY,
     };
 
     // 参数校验在构造任何状态之前完成，所以非法配置不会留下半个运行时。
@@ -1630,6 +1667,22 @@ pub fn run_bringup_simulation(
         || !config.dc_bus_voltage_v.is_finite()
         || config.dc_bus_voltage_v <= 0.0
         || !config.load_torque_nm.is_finite()
+        || !config.plant_stator_resistance_ohm.is_finite()
+        || config.plant_stator_resistance_ohm <= 0.0
+        || !config.plant_stator_inductance_h.is_finite()
+        || config.plant_stator_inductance_h <= 0.0
+        || !config.plant_flux_linkage_wb.is_finite()
+        || config.plant_flux_linkage_wb <= 0.0
+        || !config.model_stator_resistance_ohm.is_finite()
+        || config.model_stator_resistance_ohm <= 0.0
+        || !config.model_stator_inductance_h.is_finite()
+        || config.model_stator_inductance_h <= 0.0
+        || !config.model_flux_linkage_wb.is_finite()
+        || config.model_flux_linkage_wb <= 0.0
+        || !config.current_pi_kp.is_finite()
+        || config.current_pi_kp < 0.0
+        || !config.current_pi_ki.is_finite()
+        || config.current_pi_ki < 0.0
         || config.trace_decimation == 0
         || !config.park_prediction_ticks.is_finite()
         || !(-2.0..=2.0).contains(&config.park_prediction_ticks)
@@ -1716,7 +1769,12 @@ pub fn run_bringup_simulation(
     };
     let total_pwm_steps = (config.duration_s / pwm_dt).round() as u32;
     let total_control_steps = total_pwm_steps.div_ceil(pwm_ticks_per_control);
-    let mut plant = PmsmPlant::new(params.motor);
+    let mut plant_parameters = params.motor;
+    plant_parameters.stator_resistance_ohm = config.plant_stator_resistance_ohm;
+    plant_parameters.ld_h = config.plant_stator_inductance_h;
+    plant_parameters.lq_h = config.plant_stator_inductance_h;
+    plant_parameters.flux_linkage_wb = config.plant_flux_linkage_wb;
+    let mut plant = PmsmPlant::new(plant_parameters);
     plant.set_initial_mechanical_state(
         config.initial_speed_rpm,
         config.initial_electrical_angle_rad,
@@ -1758,6 +1816,13 @@ pub fn run_bringup_simulation(
         runtime_config.startup_current_a = config.startup_current_a;
         runtime_config.observer_update_divider = 1;
         runtime_config.voltage_utilization = 0.90;
+        runtime_config.stator_resistance_ohm = config.model_stator_resistance_ohm;
+        runtime_config.stator_inductance_h = config.model_stator_inductance_h;
+        runtime_config.flux_linkage_wb = config.model_flux_linkage_wb;
+        runtime_config.id_pi.kp = config.current_pi_kp;
+        runtime_config.id_pi.ki = config.current_pi_ki;
+        runtime_config.iq_pi.kp = config.current_pi_kp;
+        runtime_config.iq_pi.ki = config.current_pi_ki;
         runtime_config.observer_smo_k_slide_v = config.observer_smo_k_slide_v;
         runtime_config.observer_smo_boundary_a = config.observer_smo_boundary_a;
         runtime_config.observer_emf_filter_alpha = config.observer_emf_filter_alpha;
@@ -1832,11 +1897,16 @@ pub fn run_bringup_simulation(
                 dc_bus_voltage: config.dc_bus_voltage_v,
                 electrical_angle_rad: 0.0,
             };
+            let input = FocRealtimeInput::command_model_from_legacy(
+                feedback,
+                control_tick,
+                config.timing.control_period_s(),
+            );
             let mut output = FocOutput::default();
             let mut telemetry = FocTelemetry::default();
             // SAFETY: context initialized; all pointers are valid and disjoint.
             let status = unsafe {
-                foc_rust_realtime_step(&mut context, &feedback, &mut output, &mut telemetry)
+                foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry)
             };
             require_ok(status)?;
             final_telemetry = telemetry;

@@ -1,0 +1,75 @@
+[EXP-B3 S4 no-power board transcript]
+date=2026-09-27
+board=NUCLEO-G431RB
+power_stage=X-NUCLEO-IHM16M1
+stlink_sn=00400027544B500120343637
+serial=COM6,115200,8N1
+main_power=off
+target_voltage_v=3.30
+
+[preflash]
+foc_stop
+FSTOP
+FSTAT,uninitialized,rust-smo-pll,0,0,0,0
+FOC f=0004231f s=0 e=0 ISR=0/12750 miss=0 pk=0(0mA)
+FOC st=0 rf=00000000 duty=0/0/0
+FADC,1951/1933/1955,1952/1934/1953,68,877,2050
+
+[image]
+hex_sha256=980F2F072397D6FF01528853C3A4B858EF5DAC5B0030B64C7FAA0DDCBB0B7DE8
+bin_sha256=AED75B3A447D5C44B03E0884718E815F0ADE2F9A65F4AB64ECDF0EE86875F7C3
+download=complete
+verify=success
+reset=success
+
+[first identification boot]
+FBOOT,p=identification,o=s
+FBOOT,a=00110000,c=1628/2048,r=0,p=0/0/0
+FPROF,0,6,43116001,28041007,00,edf4f6ca,888e4e91
+FMON,0,0000231f,12000,12000,1,1191,554,off
+FBOOT,m=STM32G4-CORDIC+FPU,o=rust-smo-pll,c=0
+
+[management commands]
+foc_lsi_status
+FLSI_STATUS,1,0,1,0,0,1,0,0,0,0,0,0
+foc_lsi_dump
+FLSI_CONFIG,1,12000,256,120,4,6,24,600,6000,200,400,1150,50,7000,18000
+foc_lsi_abort
+FLSI_ABORT,1,1,1,0,0,1,0,0,0,0,1,0
+foc_lsi_status
+FLSI_STATUS,1,0,1,0,0,1,0,0,0,0,1,0
+foc_lsi_reset
+FLSI_RESET,1,1,1,0,0,1,0,0,0,0,1,1
+foc_lsi_status
+FLSI_STATUS,1,0,1,0,0,1,0,0,0,0,1,1
+
+[normal arm refusal]
+foc_start 582
+FOC start REFUSED: this profile compiles out normal motor arm.
+foc_start: command failed -1.
+FOC f=0000221f s=0 e=0 ISR=0/12750 miss=0 pk=0(0mA)
+FOC st=0 rf=00000000 duty=0/0/0
+FADC,1951/1933/1954,1951/1934/1953,28,361,2050
+
+[software reset recovery]
+FBOOT,p=identification,o=s
+FLSI_STATUS,1,0,1,0,0,1,0,0,0,0,0,0
+FOC f=0000231f s=0 e=0 ISR=0/12750 miss=0 pk=0(0mA)
+FOC st=0 rf=00000000 duty=0/0/0
+FADC,1950/1932/1955,1951/1933/1953,20,258,2051
+
+[hardware reset recovery]
+cubeprogrammer=Hard reset is performed
+FBOOT,p=identification,o=s
+FLSI_STATUS,1,0,1,0,0,1,0,0,0,0,0,0
+FOC f=0000231f s=0 e=0 ISR=0/12750 miss=0 pk=0(0mA)
+FOC st=0 rf=00000000 duty=0/0/0
+FADC,1953/1934/1952,1952/1934/1953,15,193,2052
+FSTOP
+
+[boundary]
+identification_start_command=absent
+pwm_adapter=absent
+adc_adapter=absent
+motor_run=no
+power_injection=no
