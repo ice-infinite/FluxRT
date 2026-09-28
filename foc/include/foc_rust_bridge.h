@@ -52,22 +52,23 @@
 #include <stdint.h>
 
 #include "foc_types.h"
+#include "foc_product_contract.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /*
- * ABI 版本。主/次版本各占 16 位：0x0013_0000 表示第 19 代主版本。
- * ABI version. Major and minor occupy one 16-bit half each: 0x0013_0000 is
- * major revision 19.
+ * ABI 版本。主/次版本各占 16 位：0x0014_0000 表示第 20 代主版本。
+ * ABI version. Major and minor occupy one 16-bit half each: 0x0014_0000 is
+ * major revision 20.
  *
  * 提升规则 / Bump rule: 任何结构体字段、函数签名或语义（不仅是尺寸）变化
  * 都必须提升；main.c 会在启动时比对并拒绝不匹配的固件组合。
  * Bump for any struct field, signature or semantic change, not only size
  * changes. main.c compares this at boot and rejects a mismatched combination.
  */
-#define FOC_RUST_ABI_VERSION        (0x00130000UL)
+#define FOC_RUST_ABI_VERSION        (0x00140000UL)
 /* 运行时配置结构体的版本，与 ABI 版本独立演进，用于结构体内自检。
  * Version of the runtime configuration struct; it evolves independently of the
  * ABI version and is used for the struct's internal self-check. */
@@ -571,6 +572,11 @@ uint32_t foc_rust_abi_version(void);
 uint32_t foc_rust_context_required_size(void);
 /* 返回控制器结构体的对齐要求 [bytes] / Returns the controller alignment. */
 uint32_t foc_rust_context_required_align(void);
+/* 返回独立演进的产品公共契约版本。 */
+uint32_t foc_rust_product_contract_version(void);
+/* 只做纯逻辑校验，不保存命令、不接触硬件；未知值和非法组合均拒绝。 */
+foc_status_t foc_rust_validate_product_command(
+    const foc_product_command_t *command);
 
 /* 写出 EXP-B3 的冻结 12 kHz / 0.2 A / 0.4 V 安全包络。该配置只用于
  * Identification 筛查，不会修改普通 FOC 运行配置。 */

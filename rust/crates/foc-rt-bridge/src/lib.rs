@@ -81,15 +81,15 @@ use foc_control::{
     ControlMath, ControlParameters, CpuMath, CurrentCommand, CurrentLoop, FeedbackSnapshot,
     InverterVoltageModel, InverterVoltageModelConfig, LsiActuationConfig, LsiActuationError,
     LsiActuationInput, LsiActuationPlan, LsiDriveRequest, ObserverBackend,
-    ObserverReliabilityConfig, ObserverVoltageSource, PhaseCurrents, PwmCommand, RevUpConfig,
-    RevUpPhase, RevUpSequencer, RotorEstimator, RotorFeedback, SmoPllTuning, SpeedCommand,
-    SpeedLoop,
+    ObserverReliabilityConfig, ObserverVoltageSource, PhaseCurrents, ProductCommand, PwmCommand,
+    RevUpConfig, RevUpPhase, RevUpSequencer, RotorEstimator, RotorFeedback, SmoPllTuning,
+    SpeedCommand, SpeedLoop, PRODUCT_CONTRACT_VERSION,
 };
 
-/// ABI 版本：主版本占高 16 位，`0x000E_0000` 表示第 14 代；必须与 C 侧宏逐位
+/// ABI 版本：主版本占高 16 位，`0x0014_0000` 表示第 20 代；必须与 C 侧宏逐位
 /// 一致，否则 `main.c` 启动自检会拒绝运行。
 /// ABI version packed as 16-bit halves; must match the C macro bit for bit.
-pub const FOC_RUST_ABI_VERSION: u32 = 0x0013_0000;
+pub const FOC_RUST_ABI_VERSION: u32 = 0x0014_0000;
 pub const FOC_REALTIME_INPUT_VERSION: u32 = 1;
 pub const FOC_LSI_ACTUATION_CONFIG_VERSION: u32 = 1;
 pub const FOC_LSI_ACTUATION_INPUT_VERSION: u32 = 1;
@@ -2185,6 +2185,30 @@ pub extern "C" fn foc_rust_abi_version() -> u32 {
     FOC_RUST_ABI_VERSION
 }
 
+/// Returns the independently versioned product-level Axis/command contract.
+#[no_mangle]
+pub extern "C" fn foc_rust_product_contract_version() -> u32 {
+    PRODUCT_CONTRACT_VERSION
+}
+
+/// Validates one product command without storing it or touching hardware.
+///
+/// # Safety
+/// `command` must be null or point to one aligned, readable `ProductCommand`.
+#[no_mangle]
+pub unsafe extern "C" fn foc_rust_validate_product_command(
+    command: *const ProductCommand,
+) -> FocStatus {
+    let Some(command) = command.as_ref() else {
+        return FocStatus::InvalidArgument;
+    };
+    if command.validate().is_ok() {
+        FocStatus::Ok
+    } else {
+        FocStatus::InvalidArgument
+    }
+}
+
 /// 返回 `Controller` 的实际尺寸 `[bytes]`，供 C 确认容器容量够用。
 /// Returns the actual controller size `[bytes]` so C can confirm its capacity.
 #[no_mangle]
@@ -3903,8 +3927,37 @@ mod tests {
     }
 
     #[test]
+    fn product_contract_ffi_reports_version_and_rejects_invalid_commands() {
+        assert_eq!(foc_rust_product_contract_version(), 0x0001_0000);
+        let valid = ProductCommand {
+            command_kind: foc_control::ProductCommandKind::Setpoint as u32,
+            control_mode: foc_control::ControlMode::Velocity as u32,
+            input_mode: foc_control::InputMode::Passthrough as u32,
+            velocity_ref_rad_s: 10.0,
+            ..ProductCommand::default()
+        };
+        assert_eq!(
+            unsafe { foc_rust_validate_product_command(&valid) },
+            FocStatus::Ok
+        );
+
+        let invalid = ProductCommand {
+            input_mode: foc_control::InputMode::TorqueRamp as u32,
+            ..valid
+        };
+        assert_eq!(
+            unsafe { foc_rust_validate_product_command(&invalid) },
+            FocStatus::InvalidArgument
+        );
+        assert_eq!(
+            unsafe { foc_rust_validate_product_command(core::ptr::null()) },
+            FocStatus::InvalidArgument
+        );
+    }
+
+    #[test]
     fn realtime_input_layout_and_legacy_mapping_are_pinned_to_v19() {
-        assert_eq!(FOC_RUST_ABI_VERSION, 0x0013_0000);
+        assert_eq!(FOC_RUST_ABI_VERSION, 0x0014_0000);
         assert_eq!(FOC_REALTIME_INPUT_VERSION, 1);
         assert_eq!(FOC_REALTIME_HW_FAULT_DRIVER, 1 << 0);
         assert_eq!(FOC_REALTIME_HW_FAULT_BREAK, 1 << 1);
@@ -4294,8 +4347,8 @@ mod tests {
     }
 
     #[test]
-    fn lsi_ffi_defaults_and_layout_are_pinned_to_abi_v19() {
-        assert_eq!(FOC_RUST_ABI_VERSION, 0x0013_0000);
+    fn lsi_ffi_defaults_and_layout_remain_pinned_under_current_bridge() {
+        assert_eq!(FOC_RUST_ABI_VERSION, 0x0014_0000);
         assert_eq!(size_of::<FocLsiActuationConfig>(), 48);
         assert_eq!(size_of::<FocLsiActuationInput>(), 52);
         assert_eq!(size_of::<FocLsiActuationOutput>(), 40);

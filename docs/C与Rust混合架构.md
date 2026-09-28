@@ -79,20 +79,25 @@ rust/crates/foc-sim/
 
 可移植 CPU 快速近似放在算法层纯函数中，通过 `FastApproxMath` 实现同一 trait；目标选择
 只在 bridge 中完成。它已完成 PC/实机 A/B，但因没有实机闭环角度真值仍默认关闭。当前
-C/Rust ABI 为 `0x00080000`；新增诊断导出时也按 ABI 规则同步提升了版本。
+C/Rust 全局 bridge ABI 当前为 V20 / `0x00140000`；逐拍实时输入子契约仍为 V19 / 88 B。
+P1.1 新增独立产品契约 V1（`0x00010000`），用于 Axis/命令/快照，不替换当前 ISR 私有
+结构。详见[产品公共契约 V1](产品公共契约V1.md)。
 
 ## 4. C/Rust ABI 规则
 
 边界头文件是 `foc/include/foc_rust_bridge.h`，Rust 对应实现是 `rust/crates/foc-rt-bridge/src/lib.rs`。
 
 - 状态码和状态使用固定 `uint32_t` / `#[repr(u32)]`，避免 ARM GCC 短枚举与 Rust 枚举宽度不一致。
-- 跨边界结构体使用顺序一致的字段和 `#[repr(C)]`，C 侧有 `_Static_assert` 检查尺寸。
+- 跨边界结构体使用顺序一致的字段和 `#[repr(C)]`，C 侧 `_Static_assert` 与 Rust 测试检查
+  尺寸、对齐和关键 offset。
 - 不跨边界传 Rust 引用、`String`、切片、trait object、泛型或拥有析构逻辑的类型。
 - 不跨边界分配内存。C 提供 2048 字节、8 字节对齐的 `foc_rust_context_t`，Rust 在其中原位构造控制器；启动时还会校验实际需求尺寸。
 - C 必须先调用 `foc_rust_init()`；同一个上下文不得被线程与中断并发修改。
 - 裸指针转换只存在于 bridge crate。纯算法 crate 继续 `#![forbid(unsafe_code)]`。
 - 目标端 Rust panic handler 只做一件硬件相关的事：调用 C 的紧急关断钩子，随后停在自旋循环；它不会尝试恢复控制。
 - ABI 版本由 `FOC_RUST_ABI_VERSION` 与 `foc_rust_abi_version()` 对照；修改字段或函数签名时必须提升版本并同时修改两侧。
+- 产品契约另由 `FOC_PRODUCT_CONTRACT_VERSION` 与
+  `foc_rust_product_contract_version()` 在启动时逐位比对；未知版本和非法模式组合拒绝。
 
 ## 5. 当前实时路径
 

@@ -183,7 +183,8 @@ board/platform 只通过端口向上提供能力，不允许算法层反向 incl
 
 ### 6.2 AxisState
 
-建议目标状态：
+P1.1 已将目标状态冻结为产品契约 V1（数值、结构和完整拒绝规则见
+[产品公共契约 V1](产品公共契约V1.md)）：
 
 ```text
 Uninitialized
@@ -198,7 +199,7 @@ Uninitialized
 FaultLatched --显式清除且前置检查通过--> Disabled
 ```
 
-可细分请求：
+V1 的独立 `AxisRequest` 为：
 
 - `CurrentOffsetCalibration`；
 - `MotorIdentification`；
@@ -215,15 +216,19 @@ AxisState 负责“现在处于什么生命周期”，不负责表达目标控�
 
 ```rust
 pub enum ControlMode {
+    Inactive,
     Voltage,
     Duty,
+    Current,
     Torque,
     Velocity,
     Position,
 }
 ```
 
+- `Inactive` 只用于非 Setpoint 命令，不能拿零目标冒充“无控制”；
 - `Voltage/Duty` 只用于明确授权的调试或特殊应用；
+- `Current` 使用 `Id/Iq[A]`，与使用 `N*m` 的 `Torque` 明确分离；
 - `Torque` 使用最内层电流/转矩控制器；
 - `Velocity` 在转矩环外增加速度环；
 - `Position` 在速度与转矩环外增加位置环；
@@ -244,7 +249,8 @@ pub enum InputMode {
 ```
 
 `ControlMode` 决定闭合哪些控制环，`InputMode` 决定如何处理外部目标。二者不能混成一个
-大枚举，否则每增加一种轨迹就会复制全部控制模式。
+大枚举，否则每增加一种轨迹就会复制全部控制模式。P1.1 已冻结允许组合；未知或不兼容
+组合全部 fail-closed。
 
 ### 6.5 FeedbackMode
 

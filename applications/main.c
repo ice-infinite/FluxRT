@@ -1462,12 +1462,13 @@ int main(void)
      * starting point of the "no failure leaves an armed stage" rule, because no
      * later step has armed anything yet. */
     foc_platform_emergency_stop();
-    /* ABI 自检 / ABI self-check：版本、Rust 要求的上下文大小、Rust 要求的对齐。
-     * 三项任一不满足都说明 C 与 Rust 的编译配置不匹配，此时宁可挂起也不运行。
-     * Three independent checks: the version, the context size Rust requires and the
-     * alignment Rust requires. Any mismatch means the C and Rust build settings
+    /* ABI 自检 / ABI self-check：桥接版本、产品契约版本、Rust 要求的上下文大小与对齐。
+     * 任一项不满足都说明 C 与 Rust 的编译配置不匹配，此时宁可挂起也不运行。
+     * The bridge version, product-contract version, Rust context size and context
+     * alignment must all agree. Any mismatch means the C and Rust build settings
      * disagree, and idling is strictly better than running. */
     if ((foc_rust_abi_version() != FOC_RUST_ABI_VERSION) ||
+        (foc_rust_product_contract_version() != FOC_PRODUCT_CONTRACT_VERSION) ||
         (foc_rust_context_required_size() > sizeof(g_foc_controller)) ||
         (foc_rust_context_required_align() > _Alignof(foc_rust_context_t)))
     {
@@ -1562,6 +1563,8 @@ int main(void)
     rt_kprintf("FBOOT,p=%s,o=%s\n",
                FLUXRT_BUILD_PROFILE_NAME,
                FLUXRT_RUST_OPT_LEVEL_NAME);
+    rt_kprintf("FBOOT,pc=%08x\n",
+               (unsigned int)foc_rust_product_contract_version());
     rt_kprintf("FBOOT,a=%08x,c=%u/%u,r=%u,p=%u/%u/%u\n",
                (unsigned int)foc_rust_abi_version(),
                (unsigned int)foc_rust_context_required_size(),

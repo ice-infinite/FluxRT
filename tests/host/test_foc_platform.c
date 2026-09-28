@@ -450,17 +450,17 @@ int main(void)
 
     /* ABI 触发线 / ABI tripwires:
      *   ABI 版本必须与 foc/include/foc_rust_bridge.h 中的 FOC_RUST_ABI_VERSION
-     *   完全一致（当前 0x00130000）；上下文容量必须与静态断言一致；运行时配置 296 B、
+     *   完全一致（当前 0x00140000）；上下文容量必须与静态断言一致；运行时配置 296 B、
      *   遥测 100 B 是 C 与 Rust 双方共同约定的结构体尺寸。改任何一处都必须同时
      *   提升 ABI 版本并更新本测试，否则板上应拒绝启动（见 applications/main.c）。
      *   The ABI version must match FOC_RUST_ABI_VERSION in
-     *   foc/include/foc_rust_bridge.h exactly (currently 0x00130000); the context
+     *   foc/include/foc_rust_bridge.h exactly (currently 0x00140000); the context
      *   capacity must match its _Static_assert; and 296 B for the runtime
      *   configuration and 100 B
      *   for telemetry are the struct sizes both sides agreed on. Any change requires
      *   bumping the ABI version and updating this test, otherwise the board must
      *   refuse to start (see applications/main.c). */
-    assert(FOC_RUST_ABI_VERSION == 0x00130000UL);
+    assert(FOC_RUST_ABI_VERSION == 0x00140000UL);
     assert(FOC_REALTIME_INPUT_VERSION == 1UL);
     assert(sizeof(foc_feedback_t) == 20U);
     assert(sizeof(foc_realtime_input_t) == 88U);
