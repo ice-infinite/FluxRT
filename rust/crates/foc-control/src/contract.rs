@@ -297,6 +297,7 @@ impl ProductCommand {
                 if request == AxisRequest::None
                     || control != ControlMode::Inactive
                     || input != InputMode::Inactive
+                    || feedback != FeedbackMode::Sensorless
                     || self.flags != 0
                     || !self.setpoints_are_zero()
                 {
@@ -722,6 +723,13 @@ mod tests {
         let mut stale = request;
         stale.velocity_ref_rad_s = 1.0;
         assert_eq!(stale.validate(), Err(ContractError::UnsupportedCombination));
+
+        let mut stale_feedback = request;
+        stale_feedback.feedback_mode = FeedbackMode::Hall as u32;
+        assert_eq!(
+            stale_feedback.validate(),
+            Err(ContractError::UnsupportedCombination)
+        );
 
         let mut clear = ProductCommand {
             command_kind: ProductCommandKind::ClearFault as u32,

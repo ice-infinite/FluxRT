@@ -1,0 +1,11 @@
+{
+  "contract": "fluxrt-simulation-schema",
+  "version": 1,
+  "schema_id": "fluxrt.simulation.schema.v1",
+  "units": "SI",
+  "bundle_required": "contract,version,bundle_id,units,schema_path,schema_sha256,schema_id,schema_version,profile_path,profile_sha256,profile_id,profile_revision,board_id,motor_id,inverter_id,runtime_config_crc32,product_contract_version,bridge_abi_version,source_revision,model_revision,scenario_path,scenario_sha256,scenario_id,scenario_revision,trace_schema_path,trace_schema_sha256,trace_schema_id,trace_schema_version,comparison_path,comparison_sha256,comparison_id,comparison_version",
+  "profile_required": "contract,version,profile_id,revision,units,board_id,motor_id,inverter_id,runtime_config_crc32,product_contract_version,bridge_abi_version,source_revision,model_revision,pole_pairs,stator_resistance_ohm,ld_h,lq_h,flux_linkage_wb,rated_current_a,max_mechanical_velocity_rad_s,nominal_bus_voltage_v,inertia_kg_m2,viscous_friction_nm_s,pwm_frequency_hz,control_frequency_hz,speed_loop_frequency_hz,actuation_delay_pwm_ticks",
+  "scenario_required": "contract,version,scenario_id,revision,seed,units,profile_id,profile_revision,duration_s,trace_decimation,initial_velocity_rad_s,initial_electrical_angle_rad,initial_temperature_k,dc_bus_voltage_v,command_at_s,axis_request,control_mode,input_mode,feedback_mode,target_velocity_rad_s,startup_duration_s,load_step_at_s,load_torque_nm,sensor_noise_std_a,sensor_offset_a,sensor_quantization_a,sensor_delay_control_ticks,sensor_fault,power_source_model,brake_resistor_model,d1_events",
+  "trace_required": "contract,version,trace_schema_id,units,channels",
+  "comparison_required": "contract,version,comparison_id,units,d0_exact,d1_exact,d1_event_tick_tolerance,numeric_tolerances"
+}

@@ -45,6 +45,7 @@
 // 模块分工 / Module map:
 //   types      控制器与端口之间的纯数据结构（量纲见字段名）
 //   contract   产品层 Axis/模式/命令/反馈/遥测/故障的稳定公共契约
+//   command    固定容量 mailbox、来源优先级、lease 与命令仲裁
 //   math       可替换的数学后端 trait（sin/cos、幅值、atan2）
 //   params     被控对象与 PI 参数集，含来源标注与"未辨识"警告
 //   ports      反馈 / 功率级 / 安全 三个硬件端口 trait
@@ -58,6 +59,7 @@
 //   `params` the plant and PI sets, `ports` the three hardware traits,
 //   `controller` the cascaded loops, `observer` the sensorless estimators,
 //   `startup` the rev-up sequencer and `runtime` the stateful one-tick shell.
+pub mod command;
 pub mod contract;
 pub mod controller;
 pub mod identification;
@@ -74,6 +76,7 @@ pub mod voltage;
 // `foc-rt-bridge` 与 `foc-sim` 都依赖这个扁平命名空间。
 // Flat re-exports so callers write `foc_control::Xxx`; `foc-rt-bridge` and
 // `foc-sim` both rely on this namespace.
+pub use command::*;
 pub use contract::*;
 pub use controller::*;
 pub use identification::*;

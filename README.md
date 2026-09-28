@@ -24,9 +24,10 @@
 - P0.1 审计整改基线已收口：全量 Host/Rust/Python 回归和四档目标构建通过，构建脚本
   固定 `SOURCE_DATE_EPOCH` 后完整重生成哈希可复现。本次收口没有重新烧录或运行电机，
   P0.2～P0.5 的目标安全注入、耐久和实时性复验仍待执行。
-- P1.1 产品公共契约 V1 已冻结：Axis 状态/请求、控制/输入/反馈模式、SI 命令、反馈/
-  遥测/故障快照及 C/Rust ABI 已建立；全局 bridge 为 V20，既有 V19 快环输入和默认运行
-  行为未改。下一批是 P1.2 命令仲裁与 P1.3 双仿真共同 schema。
+- P1.1～P1.3 软件基础已完成：产品公共契约V1/bridge V20、固定容量命令仲裁与来源权限、
+  以及Rust PC + MATLAB共享的scenario/profile/trace/comparison契约已经建立；524 rpm场景的
+  完整D0身份和七字段D1生命周期严格对拍通过。既有V19快环和默认运行行为未改；下一软件
+  主线是P3.1可恢复配置核心，仿真D2～D4和目标命令接入仍未完成。
 - 已建立 Diagnostic / Calibration / Identification / Production 四个隔离构建档。Identification 的 EXP-B3 S4～S5.4硬件链通过；S5.5A/B确认LCR线对/位置差异，S5.5C又证明简单乘法比例不能把动态1.9503 mH拉入0.98～1.4103 mH诊断包络。Rust在该包络10个PC闭环工况全部完成，但现有仪器缺独立动态电流/差分PWM电压，精确 `Ld/Lq`、参数更新及再次powered run仍未授权。
 - A19 已在目标板完成 Calibration 首次下载、启动和 `foc_start` 拒绝门，并取得停机 256 拍连续原始码；当前缺可信万用表多点参考，仍未形成电压标定参数。
 - A17 已接通 PC0/PC3/PC1 三路 BEMF ADC 原始码的 12 kHz、256 拍只读固定窗；无功率实机采集通过，但尚未完成电压标定、动态相序、示波器对拍或观察器接入。
@@ -150,6 +151,9 @@ TIM1/ADC、固件默认和板上镜像仍保持 12/12 kHz，详见 A7 报告。
 - [P0.1 审计整改基线收口、四档尺寸与可重复哈希](docs/performance/2026-09-28-P0.1-审计整改基线收口.md)
 - [产品公共契约 V1：Axis、模式、SI 命令、快照和 C/Rust ABI](docs/产品公共契约V1.md)
 - [P1.1 产品公共契约冻结与四档构建证据](docs/performance/2026-09-28-P1.1-产品公共契约冻结.md)
+- [命令仲裁、来源权限、sequence、lease和timeout契约V1](docs/命令仲裁与租约契约V1.md)
+- [Rust PC与MATLAB共享的双仿真共同契约V1](docs/双仿真共同契约V1.md)
+- [P1.2/P1.3命令仲裁与双仿真D0/D1验证报告](docs/performance/2026-09-28-P1.2-P1.3-命令仲裁与双仿真共同契约.md)
 - [并行任务的文件隔离、串行集成与证据规则](docs/并行任务执行与集成规则.md)
 - [A22.1/A24.1 并行软件门与 A23 V19 输入 ABI 冻结](docs/performance/2026-09-27-A22.1-A24.1-并行软件门与A23-ABI冻结.md)
 - [A23.1～A24.3 V19 完整输入、Rust 传感器模型与 MATLAB 独立对拍](docs/performance/2026-09-27-A23.1-A24.3-V19输入与双仿真门.md)

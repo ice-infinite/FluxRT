@@ -3949,6 +3949,17 @@ mod tests {
             unsafe { foc_rust_validate_product_command(&invalid) },
             FocStatus::InvalidArgument
         );
+
+        let invalid_axis_request = ProductCommand {
+            command_kind: foc_control::ProductCommandKind::AxisRequest as u32,
+            axis_request: foc_control::AxisRequest::ClosedLoopControl as u32,
+            feedback_mode: foc_control::FeedbackMode::Hall as u32,
+            ..ProductCommand::default()
+        };
+        assert_eq!(
+            unsafe { foc_rust_validate_product_command(&invalid_axis_request) },
+            FocStatus::InvalidArgument
+        );
         assert_eq!(
             unsafe { foc_rust_validate_product_command(core::ptr::null()) },
             FocStatus::InvalidArgument

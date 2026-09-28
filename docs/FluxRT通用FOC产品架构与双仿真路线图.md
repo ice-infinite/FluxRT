@@ -363,6 +363,11 @@ flags
 - 超时后旧帧延迟到达；
 - fault clear 后没有新的控制租约。
 
+P1.2 已把本节落为 `foc-control::command` 纯逻辑：固定来源槽、来源权限、每来源全局
+sequence、排他时间窗/lease、同拍有界batch、Setpoint/AxisRequest分槽以及独立EStop通道。
+完整冻结语义见[命令仲裁与租约契约 V1](命令仲裁与租约契约V1.md)。当前仍未接目标管理
+任务或协议，实际 source policy 要由 P3 的版本化 `AppConfig` 提供。
+
 ---
 
 ## 9. 配置、标定和持久化
@@ -571,6 +576,11 @@ profile。
 ---
 
 ## 14. 双仿真总体设计
+
+P1.3 已先完成本章的 D0/D1 公共基础：canonical bundle/schema/profile/scenario/trace/
+comparison、524 rpm SI 迁移、Rust/MATLAB 独立 lifecycle engine 和严格比较器均已落地，见
+[双仿真共同契约 V1](双仿真共同契约V1.md)。连续波形和 fault 数值对拍仍属于 D2～D4，
+不能因 D0/D1 PASS 提前标记完成。
 
 FluxRT 正式保留两套仿真，而不是把 MATLAB 只当作 Rust 输出的画图工具。
 

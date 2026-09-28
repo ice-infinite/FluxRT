@@ -70,6 +70,7 @@ use foc_control::{
 pub mod phase_voltage_path;
 pub mod phase_voltage_sensor;
 pub mod scheduler;
+pub mod simulation_contract;
 pub use scheduler::{MultiRateScheduler, MultiRateTimingConfig, TimingConfigError};
 
 /// PC 平均值逆变器模型的死区配置（只描述平均压降，不含开关器件）。

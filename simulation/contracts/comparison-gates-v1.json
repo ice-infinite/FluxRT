@@ -1,0 +1,17 @@
+{
+  "contract": "fluxrt-comparison-gates",
+  "version": 1,
+  "comparison_id": "fluxrt.comparison.core.v1",
+  "units": "SI",
+  "d0_exact": ["bundle_id","bundle_sha256","schema_id","schema_version","schema_sha256","profile_id","profile_revision","profile_sha256","board_id","motor_id","inverter_id","runtime_config_crc32","product_contract_version","bridge_abi_version","source_revision","model_revision","workspace_revision","scenario_id","scenario_revision","scenario_sha256","trace_schema_id","trace_schema_version","trace_schema_sha256","comparison_id","comparison_version","comparison_sha256"],
+  "d1_exact": ["control_tick","axis_state","controller_internal_state","active_source","event","output_enabled","fault_flags","event_order"],
+  "d1_event_tick_tolerance": 0,
+  "numeric_tolerances": [
+    {"channel":"velocity_reference_rad_s","absolute":0.000001,"relative":0.000001},
+    {"channel":"id_a","absolute":0.0001,"relative":0.0001},
+    {"channel":"iq_a","absolute":0.0001,"relative":0.0001},
+    {"channel":"vd_command_v","absolute":0.0001,"relative":0.0001},
+    {"channel":"vq_command_v","absolute":0.0001,"relative":0.0001},
+    {"channel":"selected_electrical_angle_rad","absolute":0.00001,"relative":0.00001}
+  ]
+}
