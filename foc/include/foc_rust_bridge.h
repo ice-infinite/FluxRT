@@ -718,7 +718,8 @@ foc_status_t foc_rust_start_realtime(foc_rust_context_t *context,
  *
  * 本辅助函数只做字段映射，不校验数值。相电压明确标为未配置且无有效位，所以
  * 不可能因调用此函数而开放 Measured/Hybrid。actual_dt_s 必须由调用方填入本拍
- * 实际控制周期；V19 第一阶段只校验和携带该字段，控制律仍使用固定配置周期。
+ * 实际控制周期；V19 控制律仍使用固定配置周期，因此超过配置周期 +/-1% 会拒绝。
+ * control_sequence 在每次 start 后从 0 开始并逐拍 wrapping +1。
  */
 static inline void foc_realtime_input_from_legacy(
     const foc_feedback_t *feedback,

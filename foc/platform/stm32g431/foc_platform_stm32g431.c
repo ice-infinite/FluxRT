@@ -50,6 +50,7 @@
 #endif
 #include "foc_lsi_preload_sink_internal.h"
 #include "foc_math_accel.h"
+#include "foc_power_safety.h"
 #include "foc_pwm_timing.h"
 
 /* 平台级可调参数：母线窗口、软件过流阈值、占空比窗口、ISR 截止周期。
@@ -281,6 +282,10 @@ static uint32_t g_foc_sync_interval_valid;
                                            FOC_PLATFORM_DIAG_ADC_READ_ERROR | \
                                            FOC_PLATFORM_DIAG_BREAK_LATCHED | \
                                            FOC_PLATFORM_DIAG_CURRENT_TRIP | \
+                                           FOC_PLATFORM_DIAG_BUS_VOLTAGE_TRIP | \
+                                           FOC_PLATFORM_DIAG_DEADLINE_MISSED | \
+                                           FOC_PLATFORM_DIAG_CONTROL_ERROR | \
+                                           FOC_PLATFORM_DIAG_OUTPUT_REJECTED | \
                                            FOC_PLATFORM_DIAG_LSI_CAPTURE_ERROR | \
                                            FOC_PLATFORM_DIAG_TRIAL_ARMED)
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
@@ -320,6 +325,15 @@ static volatile foc_platform_diagnostics_t g_foc_diagnostics;
  * both the ISR and threads, so every shutdown path clears it before touching
  * registers. */
 static volatile uint32_t g_foc_control_armed;
+/* The C platform is the single owner of power-stage state. fault_epoch is
+ * captured before Rust runs and rechecked immediately before a CCR commit, so a
+ * higher-priority Break interrupt invalidates the in-flight result. */
+static foc_power_safety_t g_foc_power_safety;
+static volatile uint32_t g_foc_power_safety_initialized;
+static volatile uint32_t g_foc_pending_rust_faults;
+static volatile uint32_t g_foc_control_sequence;
+static volatile uint16_t g_foc_bus_min_raw;
+static volatile uint16_t g_foc_bus_max_raw;
 /* 绑定的 Rust 控制器上下文；由 foc_platform_bind_controller() 设置一次。
  * Bound Rust controller context; set once by foc_platform_bind_controller(). */
 static foc_rust_context_t *g_foc_controller;
@@ -328,6 +342,7 @@ static foc_rust_context_t *g_foc_controller;
  * platform start operation.  The ADC ISR is the sole active-session caller. */
 static foc_lsi_executor_t g_foc_lsi_executor;
 static foc_lsi_preload_session_t g_foc_lsi_preload_session;
+static foc_power_arm_token_t g_foc_lsi_arm_token;
 static volatile uint32_t g_foc_lsi_session_running;
 static volatile foc_lsi_drive_request_t g_foc_lsi_active_drive_request;
 #endif
@@ -589,8 +604,6 @@ static uint16_t foc_platform_current_trip_counts(void)
  * Called once at arm time to compare the configured voltage window against the
  * ADC reading.
  */
-#if !defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD) || \
-    defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
 static uint16_t foc_platform_bus_voltage_to_raw(float voltage_v)
 {
     float raw = (voltage_v * FOC_ADC_FULL_SCALE * FOC_BUS_PARTITIONING_FACTOR) /
@@ -605,7 +618,6 @@ static uint16_t foc_platform_bus_voltage_to_raw(float voltage_v)
     }
     return (uint16_t)(raw + 0.5f);
 }
-#endif
 
 /*
  * 最短路径立即关断功率级。这是整个工程最关键的一个函数。
@@ -643,6 +655,10 @@ static void foc_platform_disable_output_registers_fast(void)
         TIM1->CCR3 = 0U;
     }
     g_foc_control_armed = 0U;
+    if (g_foc_power_safety_initialized != 0U)
+    {
+        foc_power_safety_stop(&g_foc_power_safety);
+    }
     g_foc_diagnostics.flags &= ~(FOC_PLATFORM_DIAG_TRIAL_ARMED |
                                  FOC_PLATFORM_DIAG_REALTIME_ARMED);
 }
@@ -654,6 +670,113 @@ static void foc_platform_disable_power_fast(void)
     foc_lsi_capture_service_stop();
 #endif
     foc_platform_disable_output_registers_fast();
+}
+
+static uint32_t foc_platform_gate_is_low(void);
+static uint32_t foc_platform_driver_faulted(void);
+
+/* Latch first, then cut power.  The pending Rust mirror is intentionally not
+ * consumed from the higher-priority Break ISR because it may have interrupted
+ * Rust itself.  ADC/thread context drains it only after no Rust call is active. */
+static __attribute__((noinline)) void foc_platform_latch_fault_fast(
+    uint32_t platform_fault,
+    uint32_t rust_fault)
+{
+    if (g_foc_diagnostics.power_fault_count == 0U)
+    {
+        g_foc_diagnostics.first_power_fault = platform_fault;
+    }
+    g_foc_diagnostics.last_power_fault = platform_fault;
+    ++g_foc_diagnostics.power_fault_count;
+    foc_power_safety_latch_fault(&g_foc_power_safety, platform_fault);
+    g_foc_diagnostics.power_fault_epoch = g_foc_power_safety.fault_epoch;
+    g_foc_pending_rust_faults |= rust_fault;
+    foc_platform_disable_power_fast();
+}
+
+static void foc_platform_mirror_pending_rust_fault(void)
+{
+    uint32_t primask;
+    uint32_t faults;
+
+    if ((g_foc_controller == 0) ||
+        (g_foc_power_safety.state == FOC_POWER_SAFETY_ARMING))
+    {
+        return;
+    }
+    primask = __get_PRIMASK();
+    __disable_irq();
+    faults = g_foc_pending_rust_faults;
+    g_foc_pending_rust_faults = 0U;
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+    if (faults != 0U)
+    {
+        (void)foc_rust_latch_fault(g_foc_controller, faults);
+        g_foc_diagnostics.control_fault_flags =
+            foc_rust_fault_flags(g_foc_controller);
+    }
+}
+
+/* Atomic software commit around the hardware Break path. Interrupt masking does
+ * not mask the timer's asynchronous Break action: MOE still drops and BIF/B2IF
+ * still latch. The post-write register check therefore detects a Break that
+ * arrived between the state check and the preload writes. */
+static inline __attribute__((always_inline)) uint32_t
+foc_platform_commit_output(const foc_output_t *output,
+                           uint32_t expected_fault_epoch)
+{
+    const uint32_t channel_mask = TIM_CCER_CC1E |
+                                  TIM_CCER_CC2E |
+                                  TIM_CCER_CC3E;
+    uint32_t permitted;
+
+    /* This helper has one caller: ADC1_2_IRQHandler. Exception entry does not
+     * set PRIMASK, so it is known to be zero here. Re-enable immediately after
+     * the short register transaction to let the priority-0 Break handler run;
+     * the asynchronous timer Break action remains effective throughout. */
+    __disable_irq();
+    permitted = foc_power_safety_output_permitted_inline(
+        &g_foc_power_safety, expected_fault_epoch);
+    if ((permitted == 0U) ||
+        ((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U) ||
+        ((TIM1->CCER & channel_mask) != channel_mask) ||
+        ((TIM1->BDTR & TIM_BDTR_MOE) == 0U) ||
+        (foc_platform_gate_is_low() != 0U) ||
+        (foc_platform_driver_faulted() != 0U))
+    {
+        permitted = 0U;
+    }
+    if (permitted != 0U)
+    {
+        TIM1->CCR1 = (uint32_t)(output->duty_a *
+                                (float)FOC_PWM_PERIOD_TICKS + 0.5f);
+        TIM1->CCR2 = (uint32_t)(output->duty_b *
+                                (float)FOC_PWM_PERIOD_TICKS + 0.5f);
+        TIM1->CCR3 = (uint32_t)(output->duty_c *
+                                (float)FOC_PWM_PERIOD_TICKS + 0.5f);
+        __DSB();
+        if (((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U) ||
+            ((TIM1->BDTR & TIM_BDTR_MOE) == 0U) ||
+            (foc_platform_driver_faulted() != 0U))
+        {
+            permitted = 0U;
+        }
+    }
+    if (permitted == 0U)
+    {
+        foc_platform_latch_fault_fast(
+            (((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U) ?
+                FOC_POWER_FAULT_BREAK : FOC_POWER_FAULT_PLATFORM),
+            FOC_RUST_FAULT_PLATFORM_INPUT);
+    }
+    __enable_irq();
+    /* A pending priority-0 Break handler runs before this check after PRIMASK is
+     * restored, invalidating the epoch even if the register check raced it. */
+    return foc_power_safety_output_permitted_inline(
+        &g_foc_power_safety, expected_fault_epoch);
 }
 
 /*
@@ -776,6 +899,8 @@ static uint32_t foc_platform_lsi_enable_first_output_isr(void)
                                   TIM_CCER_CC2E |
                                   TIM_CCER_CC3E;
     uint32_t master_mode = TIM1->CR2;
+    uint32_t primask;
+    uint32_t armed = 0U;
 
     /* The first bounded preload was written with every output off. Transfer it
      * before enabling the physical path so stale startup CCRs cannot escape.
@@ -787,18 +912,40 @@ static uint32_t foc_platform_lsi_enable_first_output_isr(void)
     TIM1->EGR = TIM_EGR_UG;
     __DSB();
     TIM1->CR2 = master_mode;
-    TIM1->SR &= ~(TIM_SR_BIF | TIM_SR_B2IF);
-    TIM1->DIER |= TIM_DIER_BIE;
-    g_foc_control_armed = 1U;
-    TIM1->CCER |= channel_mask;
-    TIM1->BDTR |= TIM_BDTR_MOE;
-    FOC_GATE_ENABLE_PORT->BSRR = FOC_GATE_ENABLE_PINS;
-    __DSB();
-    if ((g_foc_control_armed == 0U) ||
-        ((TIM1->CCER & channel_mask) != channel_mask) ||
-        ((TIM1->BDTR & TIM_BDTR_MOE) == 0U) ||
-        (foc_platform_gate_is_low() != 0U) ||
-        (foc_platform_driver_faulted() != 0U))
+    primask = __get_PRIMASK();
+    __disable_irq();
+    if ((g_foc_power_safety.state == FOC_POWER_SAFETY_ARMING) &&
+        (g_foc_power_safety.fault_epoch == g_foc_lsi_arm_token.fault_epoch) &&
+        ((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) == 0U) &&
+        (foc_platform_driver_faulted() == 0U))
+    {
+        TIM1->DIER |= TIM_DIER_BIE;
+        TIM1->CCER |= channel_mask;
+        TIM1->BDTR |= TIM_BDTR_MOE;
+        FOC_GATE_ENABLE_PORT->BSRR = FOC_GATE_ENABLE_PINS;
+        __DSB();
+        if (((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) == 0U) &&
+            ((TIM1->CCER & channel_mask) == channel_mask) &&
+            ((TIM1->BDTR & TIM_BDTR_MOE) != 0U) &&
+            (foc_platform_gate_is_low() == 0U) &&
+            (foc_platform_driver_faulted() == 0U) &&
+            (foc_power_safety_commit_arm(
+                 &g_foc_power_safety, &g_foc_lsi_arm_token) != 0U))
+        {
+            g_foc_control_armed = 1U;
+            armed = 1U;
+        }
+    }
+    if (armed == 0U)
+    {
+        foc_platform_latch_fault_fast(FOC_POWER_FAULT_PLATFORM,
+                                      FOC_RUST_FAULT_PLATFORM_INPUT);
+    }
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+    if (armed == 0U)
     {
         foc_platform_lsi_abort_session_isr();
         return 0U;
@@ -1301,12 +1448,10 @@ static uint32_t foc_platform_configure_injected_adc(void)
      * 只是 ADC1 JEOS/ISR 入口延后了三个转换。Production 保持原来单 rank。
      */
     injected.InjectedNbrOfConversion = 4U;
-#elif defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+#else
     /* EXP-B3 只读监测门：rank1 仍为 U 相电流，rank2 增加同序列 Vbus。
      * 这里不连接辨识状态机、不写 CCR，也不授予 start 能力。 */
     injected.InjectedNbrOfConversion = 2U;
-#else
-    injected.InjectedNbrOfConversion = 1U;
 #endif
     injected.InjectedDiscontinuousConvMode = DISABLE;
     injected.AutoInjectedConv = DISABLE;
@@ -1341,7 +1486,7 @@ static uint32_t foc_platform_configure_injected_adc(void)
     {
         return 0U;
     }
-#elif defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+#else
     /* 与 ST MCSDK/IHM16M1 的 Vbus regular-channel 配置保持同一 47.5-cycle
      * 采样时间；本工程把它放进注入 rank2 以获得同序列证据。 */
     injected.InjectedSamplingTime = ADC_SAMPLETIME_47CYCLES_5;
@@ -1352,11 +1497,31 @@ static uint32_t foc_platform_configure_injected_adc(void)
         return 0U;
     }
 #endif
+#if defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD)
+    /* ADC1 already uses all four injected ranks for IU + U/V/W phase voltage.
+     * ADC2 rank2 carries synchronous Vbus; ADC1's longer four-rank sequence
+     * guarantees ADC2 rank2 is complete before the ADC1 JEOS interrupt. */
+    injected.InjectedNbrOfConversion = 2U;
+#else
     injected.InjectedNbrOfConversion = 1U;
+#endif
     injected.InjectedSamplingTime = ADC_SAMPLETIME_6CYCLES_5;
     injected.InjectedChannel = ADC_CHANNEL_14;
     injected.InjectedRank = ADC_INJECTED_RANK_1;
-    return (HAL_ADCEx_InjectedConfigChannel(&g_foc_adc2, &injected) == HAL_OK) ? 1U : 0U;
+    if (HAL_ADCEx_InjectedConfigChannel(&g_foc_adc2, &injected) != HAL_OK)
+    {
+        return 0U;
+    }
+#if defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD)
+    injected.InjectedSamplingTime = ADC_SAMPLETIME_47CYCLES_5;
+    injected.InjectedChannel = ADC_CHANNEL_1; /* PA0 = VBUS */
+    injected.InjectedRank = ADC_INJECTED_RANK_2;
+    if (HAL_ADCEx_InjectedConfigChannel(&g_foc_adc2, &injected) != HAL_OK)
+    {
+        return 0U;
+    }
+#endif
+    return 1U;
 }
 
 static uint32_t foc_platform_start_sync_monitor(void)
@@ -1409,6 +1574,39 @@ static uint32_t foc_platform_start_sync_monitor(void)
     TIM1->BDTR &= ~TIM_BDTR_MOE;
     TIM1->CNT = 0U;
     TIM1->CR1 |= TIM_CR1_CEN;
+    g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_SYNC_RUNNING;
+    return 1U;
+}
+
+/* Restart only the stopped trigger/ADC machinery after an explicit fault-clear
+ * preflight. It never enables CH1..CH3, MOE, BIE or the gate pins. */
+static uint32_t foc_platform_restart_sync_monitor_safe(void)
+{
+    __HAL_ADC_CLEAR_FLAG(&g_foc_adc1, ADC_FLAG_JEOC | ADC_FLAG_JEOS);
+    __HAL_ADC_CLEAR_FLAG(&g_foc_adc2, ADC_FLAG_JEOC | ADC_FLAG_JEOS);
+    if (((ADC2->CR & ADC_CR_JADSTART) == 0U) &&
+        (HAL_ADCEx_InjectedStart(&g_foc_adc2) != HAL_OK))
+    {
+        return 0U;
+    }
+    if (((ADC1->CR & ADC_CR_JADSTART) == 0U) &&
+        (HAL_ADCEx_InjectedStart_IT(&g_foc_adc1) != HAL_OK))
+    {
+        return 0U;
+    }
+    HAL_NVIC_EnableIRQ(ADC1_2_IRQn);
+    HAL_NVIC_EnableIRQ(TIM1_BRK_TIM15_IRQn);
+    TIM1->DIER &= ~TIM_DIER_BIE;
+    TIM1->CCR4 = FOC_PWM_PERIOD_TICKS - 1U;
+    TIM1->CCER |= TIM_CCER_CC4E;
+#if FOC_ADC_TRIGGER_USES_TIM2_DIVIDER
+    TIM2->SR = 0U;
+    TIM2->CNT = TIM2->ARR;
+    TIM2->CR1 |= TIM_CR1_CEN;
+#endif
+    TIM1->CNT = 0U;
+    TIM1->CR1 |= TIM_CR1_CEN;
+    g_foc_diagnostics.flags &= ~FOC_PLATFORM_DIAG_SYNC_SAMPLES_VALID;
     g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_SYNC_RUNNING;
     return 1U;
 }
@@ -1777,6 +1975,23 @@ static uint32_t foc_platform_validate_lsi_execution_adapter(void)
 
 foc_status_t foc_platform_init(void)
 {
+#if defined(FOC_TARGET_STM32G431)
+    if (g_foc_power_safety_initialized == 0U)
+    {
+        foc_power_safety_init(&g_foc_power_safety);
+        g_foc_pending_rust_faults = 0U;
+        g_foc_power_safety_initialized = 1U;
+    }
+    else if (g_foc_power_safety.state == FOC_POWER_SAFETY_FAULT_LATCHED)
+    {
+        foc_platform_emergency_stop();
+        return FOC_STATUS_HARDWARE_FAULT;
+    }
+    g_foc_bus_min_raw = foc_platform_bus_voltage_to_raw(
+        g_foc_platform_config.minimum_bus_voltage_v);
+    g_foc_bus_max_raw = foc_platform_bus_voltage_to_raw(
+        g_foc_platform_config.maximum_bus_voltage_v);
+#endif
     foc_platform_emergency_stop();
     foc_realtime_timing_reset(&g_foc_timing_stats);
     (void)foc_math_accel_init();
@@ -1855,23 +2070,34 @@ foc_status_t foc_platform_configure(const foc_platform_config_t *config)
     if ((config == 0) ||
         (config->struct_size != sizeof(foc_platform_config_t)) ||
         (config->config_version != FOC_PLATFORM_CONFIG_VERSION) ||
-        !(config->minimum_bus_voltage_v > 0.0f) ||
+        !(config->minimum_bus_voltage_v >= FOC_PLATFORM_HARD_MIN_BUS_VOLTAGE_V) ||
         !(config->maximum_bus_voltage_v > config->minimum_bus_voltage_v) ||
+        !(config->maximum_bus_voltage_v <= FOC_PLATFORM_HARD_MAX_BUS_VOLTAGE_V) ||
         !(config->software_current_trip_a > 0.0f) ||
-        !(config->minimum_duty >= 0.0f) ||
-        !(config->maximum_duty <= 1.0f) ||
+        !(config->software_current_trip_a <= FOC_PLATFORM_HARD_MAX_CURRENT_TRIP_A) ||
+        !(config->minimum_duty >= FOC_PLATFORM_HARD_MIN_DUTY) ||
+        !(config->maximum_duty <= FOC_PLATFORM_HARD_MAX_DUTY) ||
         !(config->maximum_duty > config->minimum_duty) ||
-        (config->isr_deadline_cycles == 0U))
+        (config->isr_deadline_cycles == 0U) ||
+        (config->isr_deadline_cycles >
+         FOC_PLATFORM_HARD_MAX_ISR_DEADLINE_CYCLES))
     {
         return FOC_STATUS_INVALID_ARGUMENT;
     }
 #if defined(FOC_TARGET_STM32G431)
-    if (g_foc_control_armed != 0U)
+    if ((g_foc_control_armed != 0U) ||
+        (g_foc_power_safety.state != FOC_POWER_SAFETY_DISABLED))
     {
         return FOC_STATUS_DISABLED;
     }
 #endif
     g_foc_platform_config = *config;
+#if defined(FOC_TARGET_STM32G431)
+    g_foc_bus_min_raw = foc_platform_bus_voltage_to_raw(
+        config->minimum_bus_voltage_v);
+    g_foc_bus_max_raw = foc_platform_bus_voltage_to_raw(
+        config->maximum_bus_voltage_v);
+#endif
     return FOC_STATUS_OK;
 }
 
@@ -1992,6 +2218,95 @@ void foc_platform_emergency_stop(void)
 #endif
 }
 
+foc_status_t foc_platform_clear_faults(void)
+{
+#if defined(FOC_TARGET_STM32G431)
+    const uint32_t self_test_flags = FOC_PLATFORM_DIAG_TIM1_CONFIGURED |
+                                     FOC_PLATFORM_DIAG_ADC_CONFIGURED |
+                                     FOC_PLATFORM_DIAG_ADC_CALIBRATED |
+                                     FOC_PLATFORM_DIAG_CURRENT_OFFSETS_VALID;
+    const uint32_t clear_flags = FOC_PLATFORM_DIAG_DRIVER_FAULT |
+                                 FOC_PLATFORM_DIAG_ADC_READ_ERROR |
+                                 FOC_PLATFORM_DIAG_BREAK_LATCHED |
+                                 FOC_PLATFORM_DIAG_CURRENT_TRIP |
+                                 FOC_PLATFORM_DIAG_DEADLINE_MISSED |
+                                 FOC_PLATFORM_DIAG_CONTROL_ERROR |
+                                 FOC_PLATFORM_DIAG_OUTPUT_REJECTED |
+                                 FOC_PLATFORM_DIAG_LSI_CAPTURE_ERROR |
+                                 FOC_PLATFORM_DIAG_BUS_VOLTAGE_TRIP;
+    const uint32_t channel_mask = TIM_CCER_CC1E |
+                                  TIM_CCER_CC2E |
+                                  TIM_CCER_CC3E;
+    uint32_t primask;
+    foc_status_t rust_status;
+
+    foc_platform_emergency_stop();
+    if ((g_foc_controller == 0) ||
+        (g_foc_power_safety.state != FOC_POWER_SAFETY_FAULT_LATCHED))
+    {
+        return FOC_STATUS_NOT_CONFIGURED;
+    }
+    if ((foc_platform_sample_monitor_inputs() == 0U) ||
+        ((g_foc_diagnostics.flags & self_test_flags) != self_test_flags) ||
+        (foc_platform_driver_faulted() != 0U) ||
+        (g_foc_diagnostics.bus_voltage_raw < g_foc_bus_min_raw) ||
+        (g_foc_diagnostics.bus_voltage_raw > g_foc_bus_max_raw) ||
+        (foc_platform_gate_is_low() == 0U) ||
+        ((TIM1->CCER & channel_mask) != 0U) ||
+        ((TIM1->BDTR & TIM_BDTR_MOE) != 0U))
+    {
+        return FOC_STATUS_HARDWARE_FAULT;
+    }
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    TIM1->DIER &= ~TIM_DIER_BIE;
+    TIM1->SR &= ~(TIM_SR_BIF | TIM_SR_B2IF);
+    __DSB();
+    if ((foc_platform_driver_faulted() != 0U) ||
+        ((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U) ||
+        (foc_power_safety_clear_faults(
+             &g_foc_power_safety, 1U) == 0U))
+    {
+        if (primask == 0U)
+        {
+            __enable_irq();
+        }
+        return FOC_STATUS_HARDWARE_FAULT;
+    }
+    g_foc_pending_rust_faults = 0U;
+    g_foc_diagnostics.flags &= ~clear_flags;
+    g_foc_diagnostics.control_fault_flags = 0U;
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+    if (g_foc_power_safety.state != FOC_POWER_SAFETY_DISABLED)
+    {
+        return FOC_STATUS_HARDWARE_FAULT;
+    }
+
+    rust_status = foc_rust_clear_fault(g_foc_controller);
+    if (rust_status != FOC_STATUS_OK)
+    {
+        foc_platform_latch_fault_fast(FOC_POWER_FAULT_CONTROL,
+                                      FOC_RUST_FAULT_PLATFORM_INPUT);
+        return rust_status;
+    }
+    if (foc_platform_restart_sync_monitor_safe() == 0U)
+    {
+        foc_platform_latch_fault_fast(FOC_POWER_FAULT_PLATFORM,
+                                      FOC_RUST_FAULT_PLATFORM_INPUT);
+        foc_platform_mirror_pending_rust_fault();
+        return FOC_STATUS_HARDWARE_FAULT;
+    }
+    foc_platform_refresh_safety_flags();
+    return FOC_STATUS_OK;
+#else
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
 /*
  * ADC1/ADC2 注入组转换完成中断 —— 本工程的唯一快环入口。
  * ADC1/ADC2 injected-conversion-complete interrupt: the only fast-loop entry.
@@ -2012,15 +2327,15 @@ void foc_platform_emergency_stop(void)
  *   ticks and added them, which overstated the budget.
  *
  * 实时约束 / Real-time constraints:
- *   无动态分配、无阻塞、无日志。A21.3 在 Diagnostic + Rust `s` + V19、
- *   12 kHz 下实测：trace 关闭时完整 ISR 最坏 9,627 cycles，其中 Rust
- *   control 段 8,524 cycles；trace 开启时完整 ISR 最坏 10,047 cycles。
- *   超出软件截止即计入 deadline miss 并立即关断，不尝试补救。
- *   No allocation, blocking or logging. A21.3 measured 9,627 cycles for the
- *   complete ISR with trace disabled (8,524 cycles in the Rust control span),
- *   or 10,047 cycles with trace enabled, using Diagnostic + Rust `s` + V19 at
- *   12 kHz. Exceeding the software deadline counts as a miss and shuts down
- *   immediately rather than attempting recovery.
+ *   无动态分配、无阻塞、无日志。周期数与具体源码/编译器/固件哈希绑定，权威
+ *   实测值记录在 docs/performance 的板端复验报告中，不在源码里复制一个会漂移的
+ *   数字。该证据不覆盖 trace-on、闭环或故障注入；超出软件截止即计入 deadline
+ *   miss 并立即关断。
+ *   No allocation, blocking or logging. Cycle counts are tied to an exact
+ *   source/compiler/image hash; the authoritative measurements live in the
+ *   board-validation report under docs/performance rather than being copied
+ *   here. They do not cover trace-on, closed-loop or injected-fault paths.
+ *   A software-deadline miss shuts down immediately.
  */
 #if defined(FOC_TARGET_STM32G431)
 void ADC1_2_IRQHandler(void)
@@ -2086,11 +2401,17 @@ void ADC1_2_IRQHandler(void)
          * co-timed. */
         g_foc_diagnostics.phase_u_raw = (uint16_t)ADC1->JDR1;
         g_foc_diagnostics.phase_v_raw = (uint16_t)ADC2->JDR1;
+#if defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD)
+        g_foc_diagnostics.bus_voltage_raw = (uint16_t)ADC2->JDR2;
+#else
+        g_foc_diagnostics.bus_voltage_raw = (uint16_t)ADC1->JDR2;
+#endif
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
         /* JEOS 在 rank2 完成后到达，因此 JDR1 电流与 JDR2 Vbus 属于同一
          * ADC1 注入序列。先抓取本拍寄存器事实，状态机和任何 CCR 写入都在
          * 三相电流重构之后执行。 */
-        g_foc_diagnostics.lsi_sync_bus_voltage_raw = (uint16_t)ADC1->JDR2;
+        g_foc_diagnostics.lsi_sync_bus_voltage_raw =
+            g_foc_diagnostics.bus_voltage_raw;
         g_foc_diagnostics.lsi_sync_bus_valid = 1U;
         ++g_foc_diagnostics.lsi_sync_bus_sample_count;
         lsi_raw_sample.control_tick = g_foc_diagnostics.sync_sample_count;
@@ -2134,7 +2455,8 @@ void ADC1_2_IRQHandler(void)
             phase_sample.phase_w_raw = (uint16_t)ADC1->JDR4;
             phase_sample.current_u_raw = g_foc_diagnostics.phase_u_raw;
             phase_sample.current_v_raw = g_foc_diagnostics.phase_v_raw;
-            /* 母线值来自最近一次慢速监测，不宣称与本拍严格同步。 */
+            /* 母线值来自 ADC2 rank2，与本拍同一 TIM1 触发；
+             * 相电压由 ADC1 的较长四 rank 序列完成时，Vbus 已转换完毕。 */
             phase_sample.bus_voltage_raw = g_foc_diagnostics.bus_voltage_raw;
             (void)foc_phase_voltage_capture_record_isr(
                 &g_foc_phase_voltage_capture, &phase_sample);
@@ -2190,11 +2512,36 @@ void ADC1_2_IRQHandler(void)
         peak = (delta_u > delta_v) ? delta_u : delta_v;
         peak = (peak > delta_w) ? peak : delta_w;
         trip_counts = foc_platform_current_trip_counts();
+        if (((g_foc_control_armed != 0U) ||
+             (g_foc_power_safety.state == FOC_POWER_SAFETY_ARMING)
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+             || (g_foc_lsi_session_running != 0U)
+#endif
+            ) &&
+            ((g_foc_diagnostics.bus_voltage_raw < g_foc_bus_min_raw) ||
+             (g_foc_diagnostics.bus_voltage_raw > g_foc_bus_max_raw)))
+        {
+            g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_BUS_VOLTAGE_TRIP;
+#if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+            if (g_foc_lsi_session_running != 0U)
+            {
+                foc_platform_lsi_abort_session_isr();
+            }
+#endif
+            foc_platform_latch_fault_fast(FOC_POWER_FAULT_BUS_VOLTAGE,
+                                          FOC_RUST_FAULT_PLATFORM_INPUT);
+        }
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
         if (peak > trip_counts)
         {
             g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_CURRENT_TRIP;
             lsi_raw_sample.flags |= FOC_LSI_RAW_FLAG_SOFTWARE_TRIP;
+            if (g_foc_lsi_session_running != 0U)
+            {
+                foc_platform_latch_fault_fast(
+                    FOC_POWER_FAULT_CURRENT,
+                    FOC_RUST_FAULT_PLATFORM_INPUT);
+            }
         }
         if (foc_lsi_capture_service_is_armed() != 0U)
         {
@@ -2256,15 +2603,33 @@ void ADC1_2_IRQHandler(void)
              * Three independent checks: software over-current, the driver fault
              * pin, and an unbound controller. Any of them shuts the power stage
              * down immediately without calling into Rust. */
-            if ((peak > trip_counts) ||
+            uint32_t control_fault_epoch = g_foc_power_safety.fault_epoch;
+
+            if ((foc_power_safety_output_permitted_inline(
+                     &g_foc_power_safety, control_fault_epoch) == 0U) ||
+                (peak > trip_counts) ||
                 (foc_platform_driver_faulted() != 0U) ||
                 (g_foc_controller == 0))
             {
                 if (peak > trip_counts)
                 {
                     g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_CURRENT_TRIP;
+                    foc_platform_latch_fault_fast(
+                        FOC_POWER_FAULT_CURRENT,
+                        FOC_RUST_FAULT_PLATFORM_INPUT);
                 }
-                foc_platform_disable_power_fast();
+                else if (foc_platform_driver_faulted() != 0U)
+                {
+                    foc_platform_latch_fault_fast(
+                        FOC_POWER_FAULT_DRIVER,
+                        FOC_RUST_FAULT_PLATFORM_INPUT);
+                }
+                else
+                {
+                    foc_platform_latch_fault_fast(
+                        FOC_POWER_FAULT_PLATFORM,
+                        FOC_RUST_FAULT_PLATFORM_INPUT);
+                }
             }
             else
             {
@@ -2293,7 +2658,7 @@ void ADC1_2_IRQHandler(void)
                  * CommandModel; measured phase voltage remains unavailable. */
                 foc_realtime_input_from_legacy(
                     &feedback,
-                    g_foc_diagnostics.realtime_step_count,
+                    g_foc_control_sequence,
                     1.0f / (float)FOC_CONTROL_FREQUENCY_HZ,
                     &input);
 #if defined(FLUXRT_TRACE_BUILD)
@@ -2315,6 +2680,7 @@ void ADC1_2_IRQHandler(void)
                                                         &input,
                                                         &output,
                                                         telemetry_output);
+                ++g_foc_control_sequence;
                 control_cycle_end = DWT->CYCCNT;
                 g_foc_diagnostics.last_control_status = control_status;
                 if (control_status != FOC_STATUS_OK)
@@ -2329,7 +2695,9 @@ void ADC1_2_IRQHandler(void)
                         (uint16_t)(output.duty_c * 1000.0f + 0.5f);
                     ++g_foc_diagnostics.realtime_error_count;
                     g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_CONTROL_ERROR;
-                    foc_platform_disable_power_fast();
+                    foc_platform_latch_fault_fast(
+                        FOC_POWER_FAULT_CONTROL,
+                        FOC_RUST_FAULT_ALGORITHM_OUTPUT);
                 }
                 else if (!(output.duty_a >= g_foc_platform_config.minimum_duty &&
                            output.duty_a <= g_foc_platform_config.maximum_duty) ||
@@ -2348,17 +2716,21 @@ void ADC1_2_IRQHandler(void)
                         (uint16_t)(output.duty_c * 1000.0f + 0.5f);
                     ++g_foc_diagnostics.realtime_error_count;
                     g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_OUTPUT_REJECTED;
-                    foc_platform_disable_power_fast();
+                    foc_platform_latch_fault_fast(
+                        FOC_POWER_FAULT_OUTPUT,
+                        FOC_RUST_FAULT_ALGORITHM_OUTPUT);
                 }
                 else
                 {
-                    TIM1->CCR1 = (uint32_t)(output.duty_a * (float)FOC_PWM_PERIOD_TICKS + 0.5f);
-                    TIM1->CCR2 = (uint32_t)(output.duty_b * (float)FOC_PWM_PERIOD_TICKS + 0.5f);
-                    TIM1->CCR3 = (uint32_t)(output.duty_c * (float)FOC_PWM_PERIOD_TICKS + 0.5f);
-                    ++g_foc_diagnostics.realtime_step_count;
+                    if (foc_platform_commit_output(
+                            &output, control_fault_epoch) != 0U)
+                    {
+                        ++g_foc_diagnostics.realtime_step_count;
 #if defined(FLUXRT_TRACE_BUILD)
-                    trace_sampled = foc_platform_trace_capture(&feedback, &output, &telemetry);
+                        trace_sampled = foc_platform_trace_capture(
+                            &feedback, &output, &telemetry);
 #endif
+                    }
                 }
             }
             if (control_executed == 0U)
@@ -2366,6 +2738,14 @@ void ADC1_2_IRQHandler(void)
                 control_cycle_start = DWT->CYCCNT;
                 control_cycle_end = control_cycle_start;
             }
+        }
+        /* The steady-state path has no pending mirror. Avoid entering a second
+         * PRIMASK critical section on every 12 kHz tick; a Break that arrives
+         * after this volatile read is still cut off in hardware immediately
+         * and is mirrored on the following monitor/control tick. */
+        if (g_foc_pending_rust_faults != 0U)
+        {
+            foc_platform_mirror_pending_rust_fault();
         }
         ADC1->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
         ADC2->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
@@ -2422,7 +2802,9 @@ void ADC1_2_IRQHandler(void)
                 else
 #endif
                 {
-                foc_platform_disable_power_fast();
+                    foc_platform_latch_fault_fast(
+                        FOC_POWER_FAULT_DEADLINE,
+                        FOC_RUST_FAULT_PLATFORM_INPUT);
                 }
             }
         }
@@ -2455,11 +2837,22 @@ void TIM1_BRK_TIM15_IRQHandler(void)
 {
     if ((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U)
     {
-        /* 先清标志再处理，避免在处理期间重复进入。
-         * Clear the flags first so re-entry cannot happen during handling. */
-        TIM1->SR &= ~(TIM_SR_BIF | TIM_SR_B2IF);
+        /* Keep BIF/B2IF sticky until explicit recovery. Disable the interrupt
+         * source before returning so the uncleared status cannot retrigger. */
+        TIM1->DIER &= ~TIM_DIER_BIE;
         ++g_foc_diagnostics.break_fault_count;
         g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_BREAK_LATCHED;
+        if (g_foc_diagnostics.power_fault_count == 0U)
+        {
+            g_foc_diagnostics.first_power_fault = FOC_POWER_FAULT_BREAK;
+        }
+        g_foc_diagnostics.last_power_fault = FOC_POWER_FAULT_BREAK;
+        ++g_foc_diagnostics.power_fault_count;
+        foc_power_safety_latch_fault(&g_foc_power_safety,
+                                     FOC_POWER_FAULT_BREAK);
+        g_foc_diagnostics.power_fault_epoch =
+            g_foc_power_safety.fault_epoch;
+        g_foc_pending_rust_faults |= FOC_RUST_FAULT_PLATFORM_INPUT;
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
         if (g_foc_lsi_session_running != 0U)
         {
@@ -2468,7 +2861,7 @@ void TIM1_BRK_TIM15_IRQHandler(void)
         else
 #endif
         {
-        foc_platform_disable_power_fast();
+            foc_platform_disable_power_fast();
         }
         /* 同步采样时基也停掉：栅极已断，继续采样只会产生误导性的数据。
          * Also stop the sampling time base: with the gates cut, continued
@@ -2580,7 +2973,11 @@ foc_status_t foc_platform_apply_output(const foc_output_t *output)
     }
 
 #if defined(FOC_TARGET_STM32G431)
-    if (g_foc_control_armed == 0U)
+    uint32_t fault_epoch = g_foc_power_safety.fault_epoch;
+
+    if ((g_foc_control_armed == 0U) ||
+        (foc_power_safety_output_permitted(
+             &g_foc_power_safety, fault_epoch) == 0U))
     {
         return FOC_STATUS_DISABLED;
     }
@@ -2589,7 +2986,9 @@ foc_status_t foc_platform_apply_output(const foc_output_t *output)
                                      FOC_PLATFORM_DIAG_CURRENT_TRIP |
                                      FOC_PLATFORM_DIAG_ADC_READ_ERROR)) != 0U))
     {
-        foc_platform_disable_power_fast();
+        foc_platform_latch_fault_fast(FOC_POWER_FAULT_PLATFORM,
+                                      FOC_RUST_FAULT_PLATFORM_INPUT);
+        foc_platform_mirror_pending_rust_fault();
         foc_platform_refresh_safety_flags();
         return FOC_STATUS_HARDWARE_FAULT;
     }
@@ -2606,28 +3005,22 @@ foc_status_t foc_platform_apply_output(const foc_output_t *output)
          * Out of range means shutdown, not clamp-and-continue: clamping would
          * make a wrong control output look tolerated and hide an upstream
          * algorithm fault. */
-        foc_platform_disable_power_fast();
+        foc_platform_latch_fault_fast(FOC_POWER_FAULT_OUTPUT,
+                                      FOC_RUST_FAULT_ALGORITHM_OUTPUT);
+        foc_platform_mirror_pending_rust_fault();
         foc_platform_refresh_safety_flags();
         return FOC_STATUS_INVALID_ARGUMENT;
     }
 
     /* 归一化占空比 -> CCR counts，+0.5 实现四舍五入。
      * Normalised duty to CCR counts, with +0.5 for rounding. */
-    TIM1->CCR1 = (uint32_t)((output->duty_a * (float)FOC_PWM_PERIOD_TICKS) + 0.5f);
-    TIM1->CCR2 = (uint32_t)((output->duty_b * (float)FOC_PWM_PERIOD_TICKS) + 0.5f);
-    TIM1->CCR3 = (uint32_t)((output->duty_c * (float)FOC_PWM_PERIOD_TICKS) + 0.5f);
-    ++g_foc_diagnostics.trial_apply_count;
-    /* 写后复核：如果在这几条指令之间驱动器报了故障，必须立刻撤销而不是
-     * 等下一个小周期。
-     * Post-write re-check: if the driver reported a fault between these
-     * instructions, it must be undone immediately rather than on the next
-     * period. */
-    if ((g_foc_control_armed == 0U) || (foc_platform_driver_faulted() != 0U))
+    if (foc_platform_commit_output(output, fault_epoch) == 0U)
     {
-        foc_platform_disable_power_fast();
+        foc_platform_mirror_pending_rust_fault();
         foc_platform_refresh_safety_flags();
         return FOC_STATUS_HARDWARE_FAULT;
     }
+    ++g_foc_diagnostics.trial_apply_count;
     return FOC_STATUS_OK;
 #else
     foc_platform_emergency_stop();
@@ -2677,9 +3070,14 @@ foc_status_t foc_platform_control_start(float target_speed_rpm)
     foc_platform_emergency_stop();
     return FOC_STATUS_DISABLED;
 #elif defined(FOC_TARGET_STM32G431)
+    const uint32_t channel_mask = TIM_CCER_CC1E |
+                                  TIM_CCER_CC2E |
+                                  TIM_CCER_CC3E;
     uint32_t neutral_ticks;
+    uint32_t primask;
     uint16_t bus_min_raw;
     uint16_t bus_max_raw;
+    foc_power_arm_token_t arm_token;
     foc_feedback_t feedback;
     foc_status_t status;
 
@@ -2707,16 +3105,29 @@ foc_status_t foc_platform_control_start(float target_speed_rpm)
     {
         return FOC_STATUS_NOT_CONFIGURED;
     }
+    if (foc_power_safety_begin_arm(&g_foc_power_safety, &arm_token) == 0U)
+    {
+        return FOC_STATUS_HARDWARE_FAULT;
+    }
     status = foc_rust_start_realtime(g_foc_controller, 1U, target_speed_rpm);
     if (status != FOC_STATUS_OK)
     {
+        foc_power_safety_abort_arm(&g_foc_power_safety);
         return status;
+    }
+    if ((g_foc_power_safety.state != FOC_POWER_SAFETY_ARMING) ||
+        (g_foc_power_safety.fault_epoch != arm_token.fault_epoch))
+    {
+        foc_platform_disable_power_fast();
+        foc_platform_mirror_pending_rust_fault();
+        return FOC_STATUS_HARDWARE_FAULT;
     }
 
     neutral_ticks = FOC_PWM_PERIOD_TICKS / 2U;
     g_foc_diagnostics.peak_current_delta_counts = 0U;
     g_foc_diagnostics.trial_apply_count = 0U;
     g_foc_diagnostics.realtime_step_count = 0U;
+    g_foc_control_sequence = 0U;
     g_foc_diagnostics.realtime_error_count = 0U;
     foc_realtime_timing_reset(&g_foc_timing_stats);
     g_foc_diagnostics.maximum_isr_cycles = 0U;
@@ -2726,32 +3137,73 @@ foc_status_t foc_platform_control_start(float target_speed_rpm)
     g_foc_diagnostics.deadline_miss_count = 0U;
     g_foc_diagnostics.last_control_status = FOC_STATUS_OK;
     g_foc_diagnostics.control_fault_flags = 0U;
-    g_foc_diagnostics.last_duty_a_per_mille = 500U;
-    g_foc_diagnostics.last_duty_b_per_mille = 500U;
-    g_foc_diagnostics.last_duty_c_per_mille = 500U;
-    g_foc_diagnostics.flags &= ~(FOC_PLATFORM_DIAG_CURRENT_TRIP |
-                                 FOC_PLATFORM_DIAG_DEADLINE_MISSED |
-                                 FOC_PLATFORM_DIAG_CONTROL_ERROR |
-                                 FOC_PLATFORM_DIAG_OUTPUT_REJECTED);
+    /* These fields mean "last rejected duty", not the neutral preload below.
+     * Leave them at zero until an actual control/output rejection records a
+     * triplet, so a normal stop cannot be mistaken for a rejected 50% command. */
+    g_foc_diagnostics.last_duty_a_per_mille = 0U;
+    g_foc_diagnostics.last_duty_b_per_mille = 0U;
+    g_foc_diagnostics.last_duty_c_per_mille = 0U;
     TIM1->CCR1 = neutral_ticks;
     TIM1->CCR2 = neutral_ticks;
     TIM1->CCR3 = neutral_ticks;
     TIM1->EGR = TIM_EGR_UG;
-    TIM1->SR &= ~(TIM_SR_BIF | TIM_SR_B2IF);
-    TIM1->DIER |= TIM_DIER_BIE;
+    __DSB();
 
-    g_foc_control_armed = 1U;
-    g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_TRIAL_ARMED |
-                               FOC_PLATFORM_DIAG_REALTIME_ARMED;
-    TIM1->CCER |= TIM_CCER_CC1E | TIM_CCER_CC2E | TIM_CCER_CC3E;
-    TIM1->BDTR |= TIM_BDTR_MOE;
-    FOC_GATE_ENABLE_PORT->BSRR = FOC_GATE_ENABLE_PINS;
-    if ((g_foc_control_armed == 0U) || (foc_platform_driver_faulted() != 0U))
+    /* The final arm commit is one short critical section. Hardware Break stays
+     * asynchronous while IRQ delivery is masked, so BIF/MOE are checked both
+     * before and after opening the physical path. */
+    primask = __get_PRIMASK();
+    __disable_irq();
+    if ((g_foc_power_safety.state != FOC_POWER_SAFETY_ARMING) ||
+        (g_foc_power_safety.fault_epoch != arm_token.fault_epoch) ||
+        ((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U) ||
+        (foc_platform_driver_faulted() != 0U) ||
+        (g_foc_diagnostics.bus_voltage_raw < bus_min_raw) ||
+        (g_foc_diagnostics.bus_voltage_raw > bus_max_raw))
     {
-        foc_platform_disable_power_fast();
-        foc_rust_stop(g_foc_controller);
+        status = FOC_STATUS_HARDWARE_FAULT;
+    }
+    else
+    {
+        TIM1->DIER |= TIM_DIER_BIE;
+        TIM1->CCER |= channel_mask;
+        TIM1->BDTR |= TIM_BDTR_MOE;
+        FOC_GATE_ENABLE_PORT->BSRR = FOC_GATE_ENABLE_PINS;
+        __DSB();
+        if (((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U) ||
+            ((TIM1->CCER & channel_mask) != channel_mask) ||
+            ((TIM1->BDTR & TIM_BDTR_MOE) == 0U) ||
+            (foc_platform_gate_is_low() != 0U) ||
+            (foc_platform_driver_faulted() != 0U) ||
+            (foc_power_safety_commit_arm(
+                 &g_foc_power_safety, &arm_token) == 0U))
+        {
+            status = FOC_STATUS_HARDWARE_FAULT;
+        }
+        else
+        {
+            g_foc_control_armed = 1U;
+            g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_TRIAL_ARMED |
+                                       FOC_PLATFORM_DIAG_REALTIME_ARMED;
+            status = FOC_STATUS_OK;
+        }
+    }
+    if (status != FOC_STATUS_OK)
+    {
+        foc_platform_latch_fault_fast(
+            (((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U) ?
+                FOC_POWER_FAULT_BREAK : FOC_POWER_FAULT_PLATFORM),
+            FOC_RUST_FAULT_PLATFORM_INPUT);
+    }
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+    if (status != FOC_STATUS_OK)
+    {
+        foc_platform_mirror_pending_rust_fault();
         foc_platform_refresh_safety_flags();
-        return FOC_STATUS_HARDWARE_FAULT;
+        return status;
     }
     foc_platform_refresh_safety_flags();
     return FOC_STATUS_OK;
@@ -2765,6 +3217,7 @@ void foc_platform_control_stop(void)
 {
 #if defined(FOC_TARGET_STM32G431)
     uint32_t primask = __get_PRIMASK();
+    uint32_t pending_faults;
     __disable_irq();
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
     if (g_foc_lsi_session_running != 0U)
@@ -2777,8 +3230,19 @@ void foc_platform_control_stop(void)
     }
 #endif
     foc_platform_disable_power_fast();
+    pending_faults = g_foc_pending_rust_faults;
+    g_foc_pending_rust_faults = 0U;
     if (g_foc_controller != 0)
     {
+        /* Break may have stopped the ADC timebase before its deferred Rust
+         * mirror could run. Drain that latch while interrupts are masked, then
+         * stop; stop() preserves Fault when a fault bit is present. */
+        if (pending_faults != 0U)
+        {
+            (void)foc_rust_latch_fault(g_foc_controller, pending_faults);
+            g_foc_diagnostics.control_fault_flags =
+                foc_rust_fault_flags(g_foc_controller);
+        }
         foc_rust_stop(g_foc_controller);
     }
     if (primask == 0U)
@@ -2867,6 +3331,11 @@ foc_status_t foc_platform_lsi_start(uint32_t confirmation)
     {
         result = FOC_STATUS_NOT_CONFIGURED;
     }
+    else if (foc_power_safety_begin_arm(
+                 &g_foc_power_safety, &g_foc_lsi_arm_token) == 0U)
+    {
+        result = FOC_STATUS_HARDWARE_FAULT;
+    }
     else if (foc_lsi_preload_session_open_active(
                  &g_foc_lsi_preload_session,
                  FOC_LSI_ACTIVE_CONFIRMATION,
@@ -2875,6 +3344,7 @@ foc_status_t foc_platform_lsi_start(uint32_t confirmation)
                  g_foc_diagnostics.sync_sample_count) !=
              FOC_LSI_PRELOAD_RESULT_OK)
     {
+        foc_power_safety_abort_arm(&g_foc_power_safety);
         result = FOC_STATUS_HARDWARE_FAULT;
     }
     else
@@ -2885,6 +3355,7 @@ foc_status_t foc_platform_lsi_start(uint32_t confirmation)
         if (management_result != FOC_LSI_MANAGEMENT_OK)
         {
             foc_lsi_preload_session_abort(&g_foc_lsi_preload_session);
+            foc_power_safety_abort_arm(&g_foc_power_safety);
             result = FOC_STATUS_DISABLED;
         }
         else
@@ -3200,6 +3671,11 @@ foc_status_t foc_platform_get_diagnostics(foc_platform_diagnostics_t *diagnostic
     {
         uint32_t primask;
 
+        /* A priority-0 Break cannot call Rust safely because it may pre-empt
+         * the realtime bridge. Diagnostics are management-thread context, so
+         * use this read boundary to complete the deferred C -> Rust fault
+         * mirror before publishing a coherent snapshot. */
+        foc_platform_mirror_pending_rust_fault();
         primask = __get_PRIMASK();
         __disable_irq();
         foc_platform_refresh_safety_flags();

@@ -17,9 +17,13 @@
 - TIM1 已按中心对齐 12 kHz 运行，ADC1/ADC2 由 TIM1 TRGO 同步注入采样；PA11/Break2、1.15 A 软件过流和驱动器故障关断已接入。
 - 默认上电保持 CH1～CH3、MOE 和 PB13/PB14/PB15 关闭；只有串口显式执行 `foc_start` 才会 arm，`foc_stop` 立即关断。
 - Rust 已运行对齐、强制角度升速、Id/Iq PI、圆限幅、SVPWM 和 SMO。默认 `SMO=启用`、`closed_loop=0`；闭环只能在停机后通过 Shell 临时打开。
-- 已建立完整 ISR 同拍 WCET，并完成过 Rust `3/s/z` 实机矩阵；A23 V19 后 Diagnostic
-  改以 `z` 解决 128 KiB 容量门，其余档位仍为 `s`。V19 + `z` 的运行态 WCET 尚待复测，
-  不能沿用旧数值。
+- 已建立完整 ISR 同拍 WCET，并完成过 Rust `3/s/z` 实机矩阵；当前四档统一使用
+  Rust `s`。2026-09-28 审计整改后的 Diagnostic 固件已重新烧录，trace-off 三次
+  5 s 开环最坏为 9,763 cycles（物理周期 68.92%），0 error/miss/fault；trace-on、
+  闭环和故障注入仍需分别复验。
+- P0.1 审计整改基线已收口：全量 Host/Rust/Python 回归和四档目标构建通过，构建脚本
+  固定 `SOURCE_DATE_EPOCH` 后完整重生成哈希可复现。本次收口没有重新烧录或运行电机，
+  P0.2～P0.5 的目标安全注入、耐久和实时性复验仍待执行。
 - 已建立 Diagnostic / Calibration / Identification / Production 四个隔离构建档。Identification 的 EXP-B3 S4～S5.4硬件链通过；S5.5A/B确认LCR线对/位置差异，S5.5C又证明简单乘法比例不能把动态1.9503 mH拉入0.98～1.4103 mH诊断包络。Rust在该包络10个PC闭环工况全部完成，但现有仪器缺独立动态电流/差分PWM电压，精确 `Ld/Lq`、参数更新及再次powered run仍未授权。
 - A19 已在目标板完成 Calibration 首次下载、启动和 `foc_start` 拒绝门，并取得停机 256 拍连续原始码；当前缺可信万用表多点参考，仍未形成电压标定参数。
 - A17 已接通 PC0/PC3/PC1 三路 BEMF ADC 原始码的 12 kHz、256 拍只读固定窗；无功率实机采集通过，但尚未完成电压标定、动态相序、示波器对拍或观察器接入。
@@ -97,16 +101,24 @@ Identification 参数辨识构建（S5.5C离线真值与包络门已完成；下
 Diagnostic、Calibration、Identification、Production 输出分别位于 `cmake-build`、
 `cmake-build-calibration`、`cmake-build-identification`、`cmake-build-production`，Rust 静态库也按档位和优化等级
 隔离。A21.1 回收浮点文本解析链、A21.2 选定 `s` 后，A21.3 对 V19 常态路径做了
-数值等价裁剪。Diagnostic + `s` 的 trace-off 最坏完整 ISR 由 10,612 降至
-9,627/12,750 cycles，占 12 kHz 物理周期 67.96%，已通过 70% 阶段门；trace-on
-最坏 10,047 cycles、0 miss。四档省略参数时仍统一默认 `s`；`z`、`3` 仅用于
-显式回归比较。这不代表闭环、长测或产品验收已通过。详见
+数值等价裁剪。A21.3 历史基线为 9,627 cycles；加入功率安全事务和同步 Vbus 后，
+先升至 10,344 cycles，经保持语义不变的热路径内联后，当前 Diagnostic + `s`
+三次 trace-off 最坏为 9,763 cycles，占 12 kHz 物理周期 68.92%，重新通过 70%
+阶段门。四档省略参数时仍统一默认 `s`；`z`、`3` 仅用于显式回归比较。这不代表
+trace-on、闭环、故障注入、长测或产品验收已通过。详见
 [构建档与优化等级](docs/构建档与优化等级.md)。
 
 Rust 算法/桥接、Clippy、交叉编译和 C 平台安全测试：
 
 ```powershell
 .\test.ps1
+```
+
+Python 核心回归只使用标准库，依赖集由 `requirements-core.lock` 显式记录为空。
+需要连接串口硬件时，单独安装已锁定的硬件工具依赖：
+
+```powershell
+python -m pip install -r .\requirements-hardware.lock
 ```
 
 生成文件位于 `cmake-build`：
@@ -130,8 +142,9 @@ TIM1/ADC、固件默认和板上镜像仍保持 12/12 kHz，详见 A7 报告。
 
 详细说明：
 
-- [A0～A28 已完成历史、后续任务阶段与验收清单](docs/后续任务阶段计划.md)
+- [A0～A28历史、P0～P6统一后续任务表与验收清单](docs/后续任务阶段计划.md)
 - [项目操作记录、当前交接与 Git 追溯规则](docs/工程操作日志.md)
+- [P0.1 审计整改基线收口、四档尺寸与可重复哈希](docs/performance/2026-09-28-P0.1-审计整改基线收口.md)
 - [并行任务的文件隔离、串行集成与证据规则](docs/并行任务执行与集成规则.md)
 - [A22.1/A24.1 并行软件门与 A23 V19 输入 ABI 冻结](docs/performance/2026-09-27-A22.1-A24.1-并行软件门与A23-ABI冻结.md)
 - [A23.1～A24.3 V19 完整输入、Rust 传感器模型与 MATLAB 独立对拍](docs/performance/2026-09-27-A23.1-A24.3-V19输入与双仿真门.md)
@@ -152,6 +165,8 @@ TIM1/ADC、固件默认和板上镜像仍保持 12/12 kHz，详见 A7 报告。
 - [FOC 算法组合、应用场景与工程落地指南](docs/FOC算法组合与应用场景.md)
 - [FOC 整改工程架构分配与代码落位规范](docs/整改架构与职责分配.md)
 - [借鉴 ST MCSDK 与 VESC 的工程修正、补全和验证路线](docs/ST与VESC工程改进路线图.md)
+- [FluxRT 通用 FOC 产品架构、U0～U11 路线与 Rust/MATLAB 双仿真契约](docs/FluxRT通用FOC产品架构与双仿真路线图.md)
+- [FluxRT Studio 上位机、在线调参、实时可视化与协议设计](docs/FluxRTStudio上位机架构与调参可视化设计.md)
 - [ST MCSDK 参考参数、硬件接口与 PC 闭环仿真](docs/ST_MCSDK参考参数与仿真.md)
 - [CORDIC 硬件数学加速、CPU 回退与换芯片方法](docs/硬件数学加速与CPU回退.md)
 - [Rust FOC 与 MATLAB 一键联合仿真和绘图](docs/MATLAB联合仿真.md)

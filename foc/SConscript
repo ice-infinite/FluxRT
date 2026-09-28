@@ -43,6 +43,7 @@ src = [
     'runtime/foc_phase_voltage_model.c',
     'runtime/foc_phase_voltage_quality.c',
     'runtime/foc_phase_voltage_realtime_input.c',
+    'runtime/foc_power_safety.c',
     'runtime/foc_pwm_timing.c',
     'runtime/foc_realtime_timing.c',
     'platform/stm32g431/foc_lsi_preload_sink.c',

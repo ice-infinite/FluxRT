@@ -34,6 +34,7 @@
 #include "foc_rust_bridge.h"
 #include "foc_phase_voltage_capture.h"
 #include "foc_phase_voltage_model.h"
+#include "foc_power_safety.h"
 #include "foc_realtime_timing.h"
 #include "foc_types.h"
 
@@ -46,6 +47,17 @@
  * Default ISR software deadline. A measured CM4.1 handover peak was 12,548
  * cycles; 12,750 retains 1,417 cycles (10.0%) of the 14,167-cycle period. */
 #define FOC_DEFAULT_ISR_DEADLINE_CYCLES (12750UL)
+
+/* Board-qualified hard envelope. Runtime configuration may only tighten these
+ * limits; it may never widen them. Keep these separate from user defaults so a
+ * Shell/API request cannot silently redefine the hardware safety case. */
+#define FOC_PLATFORM_HARD_MIN_BUS_VOLTAGE_V (7.0f)
+#define FOC_PLATFORM_HARD_MAX_BUS_VOLTAGE_V (18.0f)
+#define FOC_PLATFORM_HARD_MAX_CURRENT_TRIP_A (1.15f)
+#define FOC_PLATFORM_HARD_MIN_DUTY (0.03f)
+#define FOC_PLATFORM_HARD_MAX_DUTY (0.97f)
+#define FOC_PLATFORM_HARD_MAX_ISR_DEADLINE_CYCLES \
+    FOC_DEFAULT_ISR_DEADLINE_CYCLES
 
 /*
  * 诊断位。这是一套**硬件视角**的位域，与 foc_rust_bridge.h 中
@@ -124,6 +136,9 @@ enum
     /* Identification-only bounded Ls(I) session is currently owned by the ADC
      * ISR.  This is a live-state bit, not a build capability bit. */
     FOC_PLATFORM_DIAG_LSI_SESSION_RUNNING = (1UL << 25),
+    /* Synchronous runtime Vbus left the configured window. Sticky until an
+     * explicit platform fault-clear preflight succeeds. */
+    FOC_PLATFORM_DIAG_BUS_VOLTAGE_TRIP = (1UL << 26),
 };
 
 /*
@@ -258,6 +273,13 @@ typedef struct
     uint16_t lsi_sync_bus_voltage_raw;
     uint16_t lsi_sync_bus_valid;
     uint32_t lsi_sync_bus_sample_count;
+    /* Sticky-fault history. Explicit clear resets the active latch but preserves
+     * these forensic fields. Values use FOC_POWER_FAULT_* from the C safety
+     * transaction module. */
+    uint32_t first_power_fault;
+    uint32_t last_power_fault;
+    uint32_t power_fault_count;
+    uint32_t power_fault_epoch;
 } foc_platform_diagnostics_t;
 
 /*
@@ -367,6 +389,10 @@ foc_status_t foc_platform_bind_controller(foc_rust_context_t *context);
 foc_status_t foc_platform_control_start(float target_speed_rpm);
 void foc_platform_control_stop(void);
 void foc_platform_emergency_stop(void);
+/* Explicit sticky-fault recovery. This never arms the power stage. It succeeds
+ * only with outputs off, driver input healthy, Vbus in range and board
+ * self-test flags intact; start/stop do not clear faults implicitly. */
+foc_status_t foc_platform_clear_faults(void);
 foc_status_t foc_platform_read_feedback(foc_feedback_t *feedback);
 foc_status_t foc_platform_apply_output(const foc_output_t *output);
 foc_status_t foc_platform_get_diagnostics(foc_platform_diagnostics_t *diagnostics);

@@ -226,6 +226,8 @@ typedef struct
 {
     uint32_t struct_size;
     uint32_t version;
+    /* First accepted tick after start is 0; each later accepted tick must be
+     * wrapping +1. Duplicate, skipped or stale control inputs are rejected. */
     uint32_t control_sequence;
     uint32_t valid_flags;
     uint32_t hardware_fault_flags;
@@ -236,6 +238,8 @@ typedef struct
     uint32_t phase_voltage_reason_mask;
     uint32_t observer_voltage_selection;
     uint32_t phase_voltage_fallback_event_count;
+    /* Scheduler evidence only in ABI V19. Fixed-step control math remains in
+     * use, so this value must be within +/-1% of the configured period. */
     float actual_dt_s;
     float phase_current_a;
     float phase_current_b;

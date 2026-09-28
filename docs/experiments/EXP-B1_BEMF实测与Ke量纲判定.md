@@ -163,7 +163,7 @@ Ke(相RMS)  = V_ph_rms  / (n/1000)        其中 V_ph_rms  = V_ph_pk / √2
 - [ ] 可调限流电源：12.0~12.6 V，限流 2 A
 - [ ] **板上固件必须是 FluxRT Diagnostic**（不是 Motor_Profiler！）——验证方法见步骤 0
 - [ ] USB 连接，串口 COM6 @ 115200（ST-Link VCP）
-- [ ] PC 上已装 Python + pyserial（`pip install pyserial`）
+- [ ] PC 上已装 Python + 已锁定的 pyserial（`python -m pip install -r requirements-hardware.lock`）
 - [ ] **Motor Pilot / 其它串口程序完全退出**（否则抢串口）
 - [ ] 电机周边无松动物体；手边有随时可断电的手段（电源开关或拔线）
 

@@ -27,10 +27,10 @@
  * Saturating increment, so a wrap cannot make a worst case look smaller.
  *
  * 计数器溢出后回绕会把一个大值变成小值，从而使最坏值统计失真；这里宁可
- * 停在 UINT32_MAX（170 MHz 下约 25 秒才可能到达，正常一次运行远小于此）。
+ * 停在 UINT32_MAX（12 kHz 每拍累加时约 4.14 天才可能到达）。
  * A wrapping counter would turn a large value into a small one and corrupt the
- * worst-case statistics. Stopping at UINT32_MAX is safe: at 170 MHz that takes
- * about 25 seconds of continuous ticking, far beyond a normal run.
+ * worst-case statistics. Stopping at UINT32_MAX is safe: when incremented once
+ * per 12 kHz control tick, saturation takes about 4.14 days.
  */
 static void foc_realtime_timing_increment(uint32_t *value)
 {

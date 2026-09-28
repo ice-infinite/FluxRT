@@ -28,6 +28,17 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# 固定脚本进程的文本编码，避免 Windows PowerShell 在不同机器上把 UTF-8
+# 的中文测试名转成乱码。这些设置只影响当前 test.ps1 进程及子进程。
+# Pin text encoding for this script process and its children so Windows PowerShell
+# does not render UTF-8 test names differently across developer machines.
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[Console]::InputEncoding = $utf8NoBom
+[Console]::OutputEncoding = $utf8NoBom
+$OutputEncoding = $utf8NoBom
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
+
 $projectDir = $PSScriptRoot
 $testSource = Join-Path $projectDir 'tests\host'
 $testBuild = Join-Path $projectDir 'build\host-tests'

@@ -934,6 +934,7 @@ impl RotorEstimator for SmoPllEstimator {
         self.state.omega_rad_s = omega;
     }
 
+    #[inline(always)]
     fn set_acquisition_direction(&mut self, direction: i8) {
         self.acquisition_direction = direction.signum();
     }
@@ -1066,6 +1067,7 @@ impl RotorEstimator for SmoPllEstimator {
         }
     }
 
+    #[inline(always)]
     fn is_reliable(&self) -> bool {
         // Reliability is evaluated at 1 kHz after the 64-sample speed window.
         // The required consecutive windows are runtime-configurable.
@@ -1078,6 +1080,7 @@ impl RotorEstimator for SmoPllEstimator {
         self.reliable_samples >= self.reliability.consecutive_samples
     }
 
+    #[inline(always)]
     fn is_reliable_for_run(&self, minimum_speed_rpm: f32, maximum_phase_error_rad: f32) -> bool {
         // `minimum_speed_rpm` in `self.reliability` is the acquisition threshold.
         // Once the observer owns the angle, retain every gate except that one and
@@ -1101,6 +1104,7 @@ impl RotorEstimator for SmoPllEstimator {
             && self.raw_phase_error_rad.abs() <= maximum_phase_error_rad
     }
 
+    #[inline(always)]
     fn diagnostics(&self) -> ObserverDiagnostics {
         ObserverDiagnostics {
             bemf_alpha_v: self.state.emf.alpha,
@@ -1427,6 +1431,7 @@ impl RotorEstimator for ConfigurableObserver {
         }
     }
 
+    #[inline(always)]
     fn set_acquisition_direction(&mut self, direction: i8) {
         match self.backend {
             ObserverBackend::SmoPll => self.smo.set_acquisition_direction(direction),
@@ -1478,6 +1483,7 @@ impl RotorEstimator for ConfigurableObserver {
 
     /// 返回选中后端的可信判定。
     /// Returns the selected backend's reliability decision.
+    #[inline(always)]
     fn is_reliable(&self) -> bool {
         match self.backend {
             ObserverBackend::SmoPll => self.smo.is_reliable(),
@@ -1496,6 +1502,7 @@ impl RotorEstimator for ConfigurableObserver {
         }
     }
 
+    #[inline(always)]
     fn is_reliable_for_run(&self, minimum_speed_rpm: f32, maximum_phase_error_rad: f32) -> bool {
         match self.backend {
             ObserverBackend::SmoPll => self
@@ -1511,6 +1518,7 @@ impl RotorEstimator for ConfigurableObserver {
         }
     }
 
+    #[inline(always)]
     fn diagnostics(&self) -> ObserverDiagnostics {
         match self.backend {
             ObserverBackend::SmoPll => self.smo.diagnostics(),

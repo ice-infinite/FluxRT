@@ -61,7 +61,13 @@ param(
     # Rust release 优化等级；省略时四档统一选择 s。
     # Rust release opt-level. Omission selects s for every profile.
     [ValidateSet('3', 's', 'z')]
-    [string]$RustOptLevel
+    [string]$RustOptLevel,
+    # 固定 C/C++ 内建的 __DATE__/__TIME__，使相同源码和工具链在重新生成后仍得到相同固件。
+    # 0 表示 Unix epoch；若发布流程需要其它可重复时间戳，可显式传入该秒值。
+    # Pins the C/C++ __DATE__/__TIME__ built-ins so regeneration stays reproducible.
+    # Zero means the Unix epoch; release jobs may pass another stable epoch explicitly.
+    [ValidateRange(0, [long]::MaxValue)]
+    [long]$SourceDateEpoch = 0
 )
 
 Set-StrictMode -Version Latest
@@ -139,13 +145,24 @@ $previousProcessEnvironment = @{
     ENV_ROOT = [Environment]::GetEnvironmentVariable('ENV_ROOT', 'Process')
     PKGS_ROOT = [Environment]::GetEnvironmentVariable('PKGS_ROOT', 'Process')
     PKGS_DIR = [Environment]::GetEnvironmentVariable('PKGS_DIR', 'Process')
+    SOURCE_DATE_EPOCH = [Environment]::GetEnvironmentVariable('SOURCE_DATE_EPOCH', 'Process')
 }
 
 function Restore-ProcessEnvironment
 {
     foreach ($entry in $previousProcessEnvironment.GetEnumerator())
     {
-        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
+        if ($null -eq $entry.Value)
+        {
+            # Passing DictionaryEntry.Value=$null through PowerShell's overload binder
+            # creates an empty variable instead of removing it. Preserve the original
+            # "unset" state explicitly so this script cannot leak build controls.
+            Remove-Item -LiteralPath ("Env:" + $entry.Key) -ErrorAction SilentlyContinue
+        }
+        else
+        {
+            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
+        }
     }
 }
 
@@ -159,6 +176,7 @@ $env:PATH = "$cargoDir;$toolchainDir;$ninjaDir;$env:PATH"
 $env:ENV_ROOT = $envRoot
 $env:PKGS_ROOT = Join-Path $envRoot 'packages'
 $env:PKGS_DIR = $env:PKGS_ROOT
+$env:SOURCE_DATE_EPOCH = $SourceDateEpoch.ToString([Globalization.CultureInfo]::InvariantCulture)
 
 # 删除前重复构造并比较目标路径，避免变量写错时 Remove-Item 删掉工程目录本身。
 # The target path is rebuilt and compared before deletion, so a mistake in the
@@ -186,7 +204,7 @@ Push-Location $projectDir
 try
 {
     Write-Host '[Tools]' -ForegroundColor Cyan
-    Write-Host "Profile=$profileName RustOptLevel=$RustOptLevel BuildDir=$buildDirectoryName"
+    Write-Host "Profile=$profileName RustOptLevel=$RustOptLevel BuildDir=$buildDirectoryName SourceDateEpoch=$SourceDateEpoch"
     & $cmake --version | Select-Object -First 1
     & $ninja --version
     & $scons --version | Select-Object -First 1

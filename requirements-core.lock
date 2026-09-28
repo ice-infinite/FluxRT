@@ -1,0 +1,3 @@
+# FluxRT core host tests and offline analysis intentionally have no third-party
+# Python dependencies. Keep this file so a clean environment can install the
+# exact core set with `python -m pip install -r requirements-core.lock`.

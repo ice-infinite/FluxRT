@@ -262,6 +262,25 @@ static int foc_stop(int argc, char **argv)
 }
 MSH_CMD_EXPORT(foc_stop, -);
 
+/* Sticky platform/Rust faults can only be cleared through this explicit
+ * recovery preflight. The command never arms PWM; a separate foc_start is still
+ * required after current inputs, Vbus and board self-tests are healthy. */
+static int foc_fault_clear(int argc, char **argv)
+{
+    foc_status_t status;
+
+    if (argc != 1)
+    {
+        rt_kprintf("foc_fault_clear\n");
+        return -1;
+    }
+    (void)argv;
+    status = foc_platform_clear_faults();
+    rt_kprintf("FCLEAR,%u\n", (unsigned int)status);
+    return (status == FOC_STATUS_OK) ? 0 : -1;
+}
+MSH_CMD_EXPORT(foc_fault_clear, -);
+
 /*
  * 打印同拍 WCET 统计：FTIMING 同时是紧凑人读记录和机器接口。
  * Prints the same-tick WCET statistics. FTIMING is both the compact human-readable
@@ -410,6 +429,11 @@ static int foc_status(int argc, char **argv)
                (unsigned int)diagnostics.last_duty_a_per_mille,
                (unsigned int)diagnostics.last_duty_b_per_mille,
                (unsigned int)diagnostics.last_duty_c_per_mille);
+    rt_kprintf("FFAULT,%08x,%08x,%u,%u\n",
+               (unsigned int)diagnostics.first_power_fault,
+               (unsigned int)diagnostics.last_power_fault,
+               (unsigned int)diagnostics.power_fault_count,
+               (unsigned int)diagnostics.power_fault_epoch);
     rt_kprintf("FPROF,%u,%u,%08x,%08x,%02x,%08x,%08x\n",
                (unsigned int)g_foc_profile_status,
                (unsigned int)g_foc_profile_report.profile_revision,
@@ -1022,6 +1046,17 @@ static void foc_print_config(void)
                (int)(g_foc_platform_config.minimum_duty * 1000.0f),
                (int)(g_foc_platform_config.maximum_duty * 1000.0f),
                (unsigned int)g_foc_platform_config.isr_deadline_cycles);
+    /* CH 是板级不可放宽边界；CL 是本次实际生效值。两行同时打印，
+     * 让串口审计能直接发现“请求值越过硬上限”，而不需要回查头文件。
+     * CH is the non-relaxable board envelope and CL is the effective runtime
+     * configuration. Printing both makes a relaxed request visible in a serial audit. */
+    rt_kprintf("CH,%d/%d,%d,%d/%d,%u\n",
+               (int)(FOC_PLATFORM_HARD_MIN_BUS_VOLTAGE_V * 1000.0f),
+               (int)(FOC_PLATFORM_HARD_MAX_BUS_VOLTAGE_V * 1000.0f),
+               (int)(FOC_PLATFORM_HARD_MAX_CURRENT_TRIP_A * 1000.0f),
+               (int)(FOC_PLATFORM_HARD_MIN_DUTY * 1000.0f),
+               (int)(FOC_PLATFORM_HARD_MAX_DUTY * 1000.0f),
+               (unsigned int)FOC_PLATFORM_HARD_MAX_ISR_DEADLINE_CYCLES);
     rt_kprintf("CO,%d/%d/%d,%d/%d/%d\n",
                (int)(g_foc_runtime_config.observer_smo_k_slide_v * 1000.0f),
                (int)(g_foc_runtime_config.observer_smo_boundary_a * 1000.0f),
@@ -1132,7 +1167,11 @@ static int foc_cfg(int argc, char **argv)
     {
         if (strcmp(argv[2], "smo") == 0) candidate->observer_backend = FOC_OBSERVER_SMO_PLL;
         else if (strcmp(argv[2], "bemf") == 0) candidate->observer_backend = FOC_OBSERVER_BEMF_PLL;
-        else if (strcmp(argv[2], "st") == 0) candidate->observer_backend = FOC_OBSERVER_ST_STO_PLL;
+        else if (strcmp(argv[2], "st") == 0)
+        {
+            rt_kprintf("FCFG,observer-st-reserved\n");
+            return -1;
+        }
         else return -1;
     }
     else if (strcmp(argv[1], "closedloop") == 0)
@@ -1473,7 +1512,15 @@ int main(void)
      * and bind connects the platform output to the Rust controller. Any failure
      * makes foc_start refuse rather than arm. */
     platform_config_status = foc_platform_configure(&g_foc_platform_config);
-    platform_status = foc_platform_init();
+    if (platform_config_status == FOC_STATUS_OK)
+    {
+        platform_status = foc_platform_init();
+    }
+    else
+    {
+        foc_platform_emergency_stop();
+        platform_status = FOC_STATUS_NOT_CONFIGURED;
+    }
     if (platform_status == FOC_STATUS_OK)
     {
         (void)foc_platform_get_diagnostics(&diagnostics);
@@ -1487,7 +1534,8 @@ int main(void)
             platform_status = FOC_STATUS_INVALID_ARGUMENT;
         }
     }
-    bind_status = ((platform_status == FOC_STATUS_OK) &&
+    bind_status = ((platform_config_status == FOC_STATUS_OK) &&
+                   (platform_status == FOC_STATUS_OK) &&
                    (rust_status == FOC_STATUS_OK)) ?
         foc_platform_bind_controller(&g_foc_controller) : FOC_STATUS_NOT_CONFIGURED;
     /* 等 ADC 零点标定（32 次平均）与同步采样跑起来，否则第一次读回的是全 0。
@@ -1619,6 +1667,9 @@ int main(void)
             {
                 (void)foc_platform_read_feedback(&feedback);
             }
+            /* Feedback reads update slow-monitor fields, so publish a snapshot
+             * only afterwards; otherwise ALV reports the previous Vbus sample. */
+            (void)foc_platform_get_diagnostics(&diagnostics);
             rt_kprintf("ALV,%08x,%u,%u,%u,%u\n",
                        (unsigned int)diagnostics.flags,
                        (unsigned int)diagnostics.sync_sample_count,

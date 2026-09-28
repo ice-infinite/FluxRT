@@ -166,6 +166,50 @@ static void test_pwm_timing_contract(void)
     assert(foc_pwm_timing_plan_is_valid(&candidate) == 0U);
 }
 
+static void test_platform_hard_envelope(void)
+{
+    foc_platform_config_t config = {
+        sizeof(foc_platform_config_t),
+        FOC_PLATFORM_CONFIG_VERSION,
+        FOC_PLATFORM_HARD_MIN_BUS_VOLTAGE_V,
+        FOC_PLATFORM_HARD_MAX_BUS_VOLTAGE_V,
+        FOC_PLATFORM_HARD_MAX_CURRENT_TRIP_A,
+        FOC_PLATFORM_HARD_MIN_DUTY,
+        FOC_PLATFORM_HARD_MAX_DUTY,
+        FOC_PLATFORM_HARD_MAX_ISR_DEADLINE_CYCLES,
+    };
+    foc_platform_config_t candidate;
+
+    candidate = config;
+    candidate.minimum_bus_voltage_v -= 0.1f;
+    assert(foc_platform_configure(&candidate) == FOC_STATUS_INVALID_ARGUMENT);
+    candidate = config;
+    candidate.maximum_bus_voltage_v += 0.1f;
+    assert(foc_platform_configure(&candidate) == FOC_STATUS_INVALID_ARGUMENT);
+    candidate = config;
+    candidate.software_current_trip_a += 0.1f;
+    assert(foc_platform_configure(&candidate) == FOC_STATUS_INVALID_ARGUMENT);
+    candidate = config;
+    candidate.minimum_duty -= 0.01f;
+    assert(foc_platform_configure(&candidate) == FOC_STATUS_INVALID_ARGUMENT);
+    candidate = config;
+    candidate.maximum_duty += 0.01f;
+    assert(foc_platform_configure(&candidate) == FOC_STATUS_INVALID_ARGUMENT);
+    candidate = config;
+    candidate.isr_deadline_cycles += 1U;
+    assert(foc_platform_configure(&candidate) == FOC_STATUS_INVALID_ARGUMENT);
+
+    /* All caller-controlled limits may be tightened without changing board
+     * hard limits. */
+    config.minimum_bus_voltage_v = 8.0f;
+    config.maximum_bus_voltage_v = 17.0f;
+    config.software_current_trip_a = 1.0f;
+    config.minimum_duty = 0.04f;
+    config.maximum_duty = 0.96f;
+    config.isr_deadline_cycles -= 100U;
+    assert(foc_platform_configure(&config) == FOC_STATUS_OK);
+}
+
 /*
  * 同拍时序记录与 WCET 语义的回归测试。
  * Regression test for the same-tick timing record and the WCET semantics.
@@ -582,6 +626,8 @@ int main(void)
     assert(timing.struct_size == sizeof(timing));
     assert(timing.version == FOC_REALTIME_TIMING_VERSION);
     assert(timing.sample_count == 0U);
+
+    test_platform_hard_envelope();
 
     puts("FOC C PLATFORM SAFE EMPTY STATE: PASS");
     return 0;

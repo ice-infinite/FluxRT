@@ -23,8 +23,8 @@
 |---|---|---|
 | 控制器 | STM32G431RBT6，170 MHz，128 KiB Flash | 只要换算法就有充足资源 |
 | PWM/控制环 | 当前均约 12 kHz | 已经实现高频 PWM、低频控制环解耦 |
-| 完整 ISR WCET | A21.3开环：trace-off 9,627/12,750 cycles，0 miss；占12 kHz物理周期67.96%，trace-on最坏10,047 | 已可直接提频、长测或开放闭环 |
-| Flash | A21.3 Diagnostic + `s` 为108,008 B（82.40%），Production + `s` 为99,204 B（75.69%） | 容量充足就等于闭环和发布已经验证 |
+| 完整 ISR WCET | 审计整改后开环：trace-off三轮最坏9,763 cycles、0 miss/error/fault，占12 kHz物理周期68.92%；整改后trace-on待复测 | 已可直接提频、长测或开放闭环 |
+| Flash | 审计整改后Diagnostic + `s` 为110,524 B（84.32%），Production + `s` 为101,608 B（77.52%） | 容量充足就等于闭环和发布已经验证 |
 | 电机参数 | Rs=5.29 Ω、Ld=Lq=1.058 mH、磁链来自 Workbench | 参数已经由当前实物辨识 |
 | 无感闭环 | 两轮 5 秒短时接管成功，上电默认仍关闭 | 已完成全工况或量产验证 |
 | 死区补偿 | 仅 Host/Rust/Matlab 仿真有实验实现 | MCU 目标固件已经补偿 |

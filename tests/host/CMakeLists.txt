@@ -3,6 +3,22 @@ project(fluxrt_host_tests C)
 
 enable_testing()
 
+add_executable(foc_power_safety_tests
+    test_foc_power_safety.c
+    ../../foc/runtime/foc_power_safety.c
+)
+target_include_directories(foc_power_safety_tests PRIVATE
+    ../../foc/include
+)
+target_compile_features(foc_power_safety_tests PRIVATE c_std_11)
+if(MSVC)
+    target_compile_options(foc_power_safety_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(foc_power_safety_tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
+endif()
+add_test(NAME foc_power_safety_transaction COMMAND foc_power_safety_tests)
+
 add_executable(foc_platform_tests
     test_foc_platform.c
     ../../applications/foc_production_profile.c

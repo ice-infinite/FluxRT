@@ -1,0 +1,3 @@
+# FluxRT optional PC hardware-tool dependency lock.
+# Core tests and offline analysis use the Python standard library only.
+pyserial==3.5

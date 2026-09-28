@@ -294,6 +294,7 @@ impl RevUpSequencer {
     /// 则保证开始渐变的那一拍不会把 `dt_s` 计两次。
     /// A negative `dt_s` would rewind the sequence, so it is clamped to zero, and
     /// `transition_just_started` keeps the start tick from counting `dt_s` twice.
+    #[inline(always)]
     pub fn update(
         &mut self,
         dt_s: f32,

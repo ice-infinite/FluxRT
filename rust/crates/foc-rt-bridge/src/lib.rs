@@ -492,6 +492,8 @@ pub struct FocFeedback {
 pub struct FocRealtimeInput {
     pub struct_size: u32,
     pub version: u32,
+    /// Starts at zero after each start and advances by wrapping +1 per valid
+    /// scheduler invocation, independently of the later control result.
     pub control_sequence: u32,
     pub valid_flags: u32,
     pub hardware_fault_flags: u32,
@@ -502,6 +504,7 @@ pub struct FocRealtimeInput {
     pub phase_voltage_reason_mask: u32,
     pub observer_voltage_selection: u32,
     pub phase_voltage_fallback_event_count: u32,
+    /// Scheduler evidence; fixed-step V19 accepts only +/-1% of configured dt.
     pub actual_dt_s: f32,
     pub phase_current_a: f32,
     pub phase_current_b: f32,
@@ -1284,6 +1287,10 @@ struct Controller {
     /// 执行速度 PI 并推进转速斜坡。
     /// Speed-loop divider counter [cycles].
     speed_counter: u32,
+    /// Last successfully consumed C control sequence. `u32::MAX` is the reset
+    /// sentinel, so the first accepted tick is zero through the same wrapping
+    /// increment rule used by every later tick.
+    last_control_sequence: u32,
     /// 开环保持段已等待观测器的时间 `[s]`；只在 `OpenLoopHold` 累加。
     /// Time spent waiting for the observer during open-loop hold `[s]`.
     observer_wait_elapsed_s: f32,
@@ -1342,6 +1349,7 @@ impl Controller {
             target_speed_rpm: params.default_target_speed_rpm,
             speed_reference_rpm: 0.0,
             speed_counter: 0,
+            last_control_sequence: u32::MAX,
             observer_wait_elapsed_s: 0.0,
             observer_loss_elapsed_s: 0.0,
             closed_loop_initialized: false,
@@ -1352,7 +1360,8 @@ impl Controller {
 
     /// 停机：状态回 `Disabled`，复位两个环、观测器、启动时序、限速器与全部计时。
     /// Stops and resets both loops, the observer, the sequencer, the limiters and
-    /// every timer; the state returns to `Disabled`.
+    /// every timer; a fault-free controller returns to `Disabled`, while a
+    /// controller with sticky fault bits remains in `Fault`.
     ///
     /// **不清除 `fault_flags`**：故障位是粘滞的，只有 `foc_rust_clear_fault()`
     /// 才能清零。这样"故障发生过"这一事实不会被一次例行停机抹掉。
@@ -1364,7 +1373,11 @@ impl Controller {
     /// The observer is reset to a known angle so a restart cannot inherit a stale
     /// handover angle.
     fn stop(&mut self) {
-        self.state = FocState::Disabled;
+        self.state = if self.fault_flags == 0 {
+            FocState::Disabled
+        } else {
+            FocState::Fault
+        };
         self.current_loop.reset();
         self.speed_loop.reset();
         self.trial_angle_rad = 0.0;
@@ -1381,11 +1394,17 @@ impl Controller {
         self.speed_current_command = CurrentCommand::default();
         self.speed_reference_rpm = 0.0;
         self.speed_counter = 0;
+        self.last_control_sequence = u32::MAX;
         self.observer_wait_elapsed_s = 0.0;
         self.observer_loss_elapsed_s = 0.0;
         self.closed_loop_initialized = false;
         self.inverter_voltage_model.reset();
         self.telemetry = FocTelemetry::default();
+        // A reset snapshot still describes a valid, stopped controller.  Leaving
+        // the derived default state (0 = Uninitialized) here made `foc_status`
+        // contradict `foc_rust_state()` after every normal stop.
+        self.telemetry.state = self.state as u32;
+        self.telemetry.observer_backend = self.observer.backend() as u32;
     }
 }
 
@@ -1474,6 +1493,7 @@ fn config_is_valid(config: &FocBasicConfig) -> bool {
 /// 拦掉，而不是等算法算出非法占空比再报故障。
 /// A zero bus voltage would make every duty normalization blow up, so it is
 /// rejected here rather than being caught later as an invalid output.
+#[inline(always)]
 fn feedback_is_valid(feedback: &FocFeedback) -> bool {
     feedback.phase_current_a.is_finite()
         && feedback.phase_current_b.is_finite()
@@ -1487,6 +1507,7 @@ fn feedback_is_valid(feedback: &FocFeedback) -> bool {
 /// Optional physical values are checked only when their corresponding valid bit
 /// is set; metadata enums and bitmasks are always checked so unknown C values
 /// cannot silently acquire meaning in a newer binary.
+#[inline(always)]
 fn realtime_input_envelope_is_valid(input: &FocRealtimeInput) -> bool {
     let required_flags = FOC_REALTIME_VALID_PHASE_CURRENTS | FOC_REALTIME_VALID_DC_BUS_VOLTAGE;
     if input.struct_size != size_of::<FocRealtimeInput>() as u32
@@ -1547,6 +1568,42 @@ fn realtime_input_envelope_is_valid(input: &FocRealtimeInput) -> bool {
             || input.electrical_angle_rad.is_finite())
         && (input.valid_flags & FOC_REALTIME_VALID_SENSOR_TEMPERATURE == 0
             || input.sensor_temperature_c.is_finite())
+}
+
+/// Validates the fixed-rate scheduler contract which depends on the configured
+/// controller and therefore cannot be checked by the ABI-envelope validator.
+/// `actual_dt_s` remains an evidence field in ABI V19; accepting a materially
+/// different period while still running fixed-step PI/observer math would be
+/// misleading, so a +/-1% window fails closed.
+#[inline(always)]
+fn realtime_tick_contract_is_valid(controller: &Controller, input: &FocRealtimeInput) -> bool {
+    // Compare the normalized period against one instead of dividing on every
+    // 12 kHz tick. Configuration validation already guarantees a non-zero PWM
+    // frequency; this keeps the same +/-1% fail-closed window while removing a
+    // floating-point division from the target hot path.
+    let normalized_period = input.actual_dt_s * controller.params.pwm_frequency_hz as f32;
+    input.control_sequence == controller.last_control_sequence.wrapping_add(1)
+        // `actual_dt_s` was already proven finite and positive by the envelope
+        // validator. Overflow still becomes infinity and fails this ordered
+        // comparison, so a second explicit `is_finite` check is redundant.
+        && (normalized_period - 1.0).abs() <= 0.01
+}
+
+fn observer_acquisition_timed_out(
+    controller: &mut Controller,
+    phase: RevUpPhase,
+    dt_s: f32,
+) -> bool {
+    if controller.runtime_config.closed_loop_enable != 0 && phase == RevUpPhase::OpenLoopHold {
+        controller.observer_wait_elapsed_s += dt_s;
+        controller.observer_wait_elapsed_s
+            >= controller.runtime_config.observer_acquisition_timeout_s
+    } else {
+        /* Transition already owns a bounded handover trajectory. Carrying the
+         * hold timer into it could fault a successful acquisition mid-blend. */
+        controller.observer_wait_elapsed_s = 0.0;
+        false
+    }
 }
 
 /// Eligibility contract for the future Measured path. The sequence relation is
@@ -1845,7 +1902,10 @@ fn runtime_config_is_valid(config: &FocRuntimeConfig) -> bool {
     let inverter = config.inverter_voltage_model;
     config.struct_size == size_of::<FocRuntimeConfig>() as u32
         && config.config_version == FOC_RUST_CONFIG_VERSION
-        && ObserverBackend::from_raw(config.observer_backend).is_some()
+        && matches!(
+            ObserverBackend::from_raw(config.observer_backend),
+            Some(ObserverBackend::SmoPll | ObserverBackend::FloatBemfPll)
+        )
         && config.observer_enable <= 1
         && config.closed_loop_enable <= 1
         && (config.closed_loop_enable == 0 || config.observer_enable != 0)
@@ -2036,6 +2096,7 @@ fn configure_runtime(controller: &mut Controller, config: FocRuntimeConfig) {
     controller.speed_current_command = CurrentCommand::default();
     controller.speed_reference_rpm = 0.0;
     controller.speed_counter = 0;
+    controller.last_control_sequence = u32::MAX;
     controller.observer_wait_elapsed_s = 0.0;
     controller.observer_loss_elapsed_s = 0.0;
     controller.closed_loop_initialized = false;
@@ -2045,6 +2106,8 @@ fn configure_runtime(controller: &mut Controller, config: FocRuntimeConfig) {
     controller.inverter_voltage_model =
         InverterVoltageModel::from_validated_config(inverter_voltage_model_config(&config));
     controller.telemetry = FocTelemetry::default();
+    controller.telemetry.state = controller.state as u32;
+    controller.telemetry.observer_backend = controller.observer.backend() as u32;
 }
 
 /// 把 C 的上下文指针转成 `&mut Controller`，并校验哨兵；失败返回 `None`。
@@ -2441,6 +2504,9 @@ pub unsafe extern "C" fn foc_rust_configure_basic(
     let Some(config) = (unsafe { config.as_ref() }) else {
         return FocStatus::InvalidArgument;
     };
+    if controller.state != FocState::Disabled {
+        return FocStatus::InvalidArgument;
+    }
     if !config_is_valid(config) {
         controller.algorithm_configured = false;
         controller.stop();
@@ -2462,8 +2528,12 @@ pub unsafe extern "C" fn foc_rust_configure_basic(
     );
     controller.current_loop.reset();
     controller.speed_loop.reset();
+    controller.last_control_sequence = u32::MAX;
     controller.algorithm_configured = true;
     controller.state = FocState::Disabled;
+    controller.telemetry = FocTelemetry::default();
+    controller.telemetry.state = controller.state as u32;
+    controller.telemetry.observer_backend = controller.observer.backend() as u32;
     FocStatus::Ok
 }
 
@@ -2492,7 +2562,11 @@ pub unsafe extern "C" fn foc_rust_configure_st_reference(
     let Some(controller) = (unsafe { controller_mut(context) }) else {
         return FocStatus::InvalidArgument;
     };
-    configure_runtime(controller, default_st_runtime_config());
+    let config = default_st_runtime_config();
+    if controller.state != FocState::Disabled || !runtime_config_is_valid(&config) {
+        return FocStatus::InvalidArgument;
+    }
+    configure_runtime(controller, config);
     FocStatus::Ok
 }
 
@@ -2525,6 +2599,9 @@ pub unsafe extern "C" fn foc_rust_request_start(
     };
     if controller.state == FocState::Fault {
         return FocStatus::HardwareFault;
+    }
+    if controller.state != FocState::Disabled {
+        return FocStatus::Disabled;
     }
     if !controller.algorithm_configured || platform_ready == 0 {
         controller.state = FocState::Disabled;
@@ -2606,11 +2683,14 @@ pub unsafe extern "C" fn foc_rust_start_realtime(
     controller.target_speed_rpm = target_speed_rpm;
     controller.speed_reference_rpm = 0.0;
     controller.speed_counter = 0;
+    controller.last_control_sequence = u32::MAX;
     controller.observer_wait_elapsed_s = 0.0;
     controller.observer_loss_elapsed_s = 0.0;
     controller.closed_loop_initialized = false;
-    controller.telemetry = FocTelemetry::default();
     controller.state = FocState::Alignment;
+    controller.telemetry = FocTelemetry::default();
+    controller.telemetry.state = controller.state as u32;
+    controller.telemetry.observer_backend = controller.observer.backend() as u32;
     FocStatus::Ok
 }
 
@@ -2622,9 +2702,9 @@ pub unsafe extern "C" fn foc_rust_start_realtime(
 ///
 /// 这是实时路径的唯一入口（配合 `foc_rust_start_realtime()`），在 **12 kHz 的 ADC
 /// 中断**里执行。实时约束：无动态分配、无阻塞、无日志、无 Mutex 等待；三角运算走
-/// `PlatformMath`（目标板 CORDIC），`mat` 对象每拍在栈上新建。A21.3 在
-/// Diagnostic + Rust `s` + V19 上实测的 trace-off control 段最坏为
-/// 8,524 cycles @170 MHz `[HW]`（同拍完整 ISR 为 9,627 cycles）。
+/// `PlatformMath`（目标板 CORDIC），`mat` 对象每拍在栈上新建。周期数与具体固件哈希
+/// 绑定，权威实测值放在 `docs/performance` 的板端复验报告中，不在会参与 Rust crate
+/// 元数据的文档属性里复制。该证据不覆盖 trace-on、闭环或故障注入路径。
 /// Runs inside the 12 kHz ADC ISR with no allocation, blocking or logging; the
 /// math object is rebuilt on the stack every tick.
 ///
@@ -2678,6 +2758,14 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
         controller.state = FocState::Fault;
         return FocStatus::HardwareFault;
     }
+    // Sequence and dt describe the scheduler invocation, not whether the selected
+    // voltage source or control algorithm later succeeds. Consume the sequence as
+    // soon as this contract is valid so an unavailable Measured tick cannot make
+    // the following tick look like a gap. Invalid sequence/dt is never consumed.
+    if !realtime_tick_contract_is_valid(controller, input) {
+        return FocStatus::InvalidArgument;
+    }
+    controller.last_control_sequence = input.control_sequence;
     // Measured is represented and fully validated in V19, but it is not yet an
     // implemented observer source. UNAVAILABLE is the fail-closed result of a
     // pure-Measured request; Hybrid fallback arrives as CommandModel and is safe.
@@ -2690,7 +2778,6 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
         let _measured_eligible = measured_phase_voltage_is_eligible(input);
         return FocStatus::NotConfigured;
     }
-
     let feedback = input.legacy_feedback();
     // V19 在进入核心前只做一次指针、上下文和输入包络校验。核心接收已经验证的
     // Rust 引用，避免旧实现再次创建一套 FFI 栈帧、清零输出和检查同一上下文。
@@ -2981,22 +3068,10 @@ unsafe fn foc_rust_realtime_step_core(
     // 发热。超时后锁存 `FOC_FAULT_OBSERVER_STARTUP` 并进入 `Fault`。
     // Acquisition timeout: counts only while waiting for the observer in
     // open-loop hold, so a non-converging observer cannot spin forever.
-    if controller.runtime_config.closed_loop_enable != 0
-        && matches!(
-            startup.phase,
-            RevUpPhase::OpenLoopHold | RevUpPhase::ObserverTransition
-        )
-    {
-        controller.observer_wait_elapsed_s += dt_s;
-        if controller.observer_wait_elapsed_s
-            >= controller.runtime_config.observer_acquisition_timeout_s
-        {
-            controller.fault_flags |= FOC_FAULT_OBSERVER_STARTUP;
-            controller.state = FocState::Fault;
-            return FocStatus::HardwareFault;
-        }
-    } else {
-        controller.observer_wait_elapsed_s = 0.0;
+    if observer_acquisition_timed_out(controller, startup.phase, dt_s) {
+        controller.fault_flags |= FOC_FAULT_OBSERVER_STARTUP;
+        controller.state = FocState::Fault;
+        return FocStatus::HardwareFault;
     }
 
     // 失锁超时：只在观测器**已经在提供控制角**之后计时。允许短暂失锁而不立刻故障，
@@ -3799,6 +3874,19 @@ mod tests {
         FocRealtimeInput::command_model_from_legacy(feedback, 0, 1.0 / 12_000.0)
     }
 
+    unsafe fn realtime_step_and_advance(
+        context: *mut FocRustContextStorage,
+        input: &mut FocRealtimeInput,
+        output: *mut FocOutput,
+        telemetry: *mut FocTelemetry,
+    ) -> FocStatus {
+        let status = unsafe { foc_rust_realtime_step(context, input, output, telemetry) };
+        if status == FocStatus::Ok {
+            input.control_sequence = input.control_sequence.wrapping_add(1);
+        }
+        status
+    }
+
     fn started_realtime_context() -> FocRustContextStorage {
         let mut context = context();
         let mut runtime = FocRuntimeConfig::default();
@@ -3971,6 +4059,80 @@ mod tests {
     }
 
     #[test]
+    fn realtime_tick_contract_rejects_bad_dt_duplicates_and_gaps() {
+        let mut context = started_realtime_context();
+        let mut input = realtime_input(FocFeedback {
+            dc_bus_voltage: 13.0,
+            ..FocFeedback::default()
+        });
+        let mut output = FocOutput::default();
+
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step(&mut context, &input, &mut output, core::ptr::null_mut())
+            },
+            FocStatus::Ok
+        );
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step(&mut context, &input, &mut output, core::ptr::null_mut())
+            },
+            FocStatus::InvalidArgument
+        );
+        input.control_sequence = 2;
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step(&mut context, &input, &mut output, core::ptr::null_mut())
+            },
+            FocStatus::InvalidArgument
+        );
+        input.control_sequence = 1;
+        input.actual_dt_s = 1.0 / 10_000.0;
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step(&mut context, &input, &mut output, core::ptr::null_mut())
+            },
+            FocStatus::InvalidArgument
+        );
+        input.actual_dt_s = 1.0 / 12_000.0;
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step(&mut context, &input, &mut output, core::ptr::null_mut())
+            },
+            FocStatus::Ok
+        );
+
+        let controller = unsafe { controller_mut(&mut context) }.expect("controller");
+        controller.last_control_sequence = u32::MAX;
+        input.control_sequence = 0;
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step(&mut context, &input, &mut output, core::ptr::null_mut())
+            },
+            FocStatus::Ok
+        );
+    }
+
+    #[test]
+    fn observer_acquisition_timeout_stops_at_transition() {
+        let mut controller = Controller::new();
+        controller.runtime_config.closed_loop_enable = 1;
+        controller.runtime_config.observer_acquisition_timeout_s = 1.0;
+        controller.observer_wait_elapsed_s = 0.8;
+        assert!(!observer_acquisition_timed_out(
+            &mut controller,
+            RevUpPhase::OpenLoopHold,
+            0.1,
+        ));
+        assert!(!observer_acquisition_timed_out(
+            &mut controller,
+            RevUpPhase::ObserverTransition,
+            0.5,
+        ));
+        assert_eq!(controller.observer_wait_elapsed_s, 0.0);
+    }
+
+    #[test]
     fn realtime_hardware_fault_is_processed_before_control_and_clears_output() {
         let mut context = started_realtime_context();
         let mut input = realtime_input(FocFeedback {
@@ -4014,6 +4176,7 @@ mod tests {
         );
 
         input.observer_voltage_selection = FOC_REALTIME_OBSERVER_VOLTAGE_UNAVAILABLE;
+        input.control_sequence = 1;
         assert_eq!(
             unsafe { foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry) },
             FocStatus::NotConfigured
@@ -4027,8 +4190,8 @@ mod tests {
         input.phase_voltage_a_v = 7.0;
         input.phase_voltage_b_v = 6.0;
         input.phase_voltage_c_v = 5.0;
-        input.control_sequence = 42;
-        input.phase_voltage_sequence = 41;
+        input.control_sequence = 2;
+        input.phase_voltage_sequence = 1;
         input.phase_voltage_age_ticks = 1;
         assert!(measured_phase_voltage_is_eligible(&input));
         assert_eq!(
@@ -4036,17 +4199,19 @@ mod tests {
             FocStatus::NotConfigured
         );
 
-        input.phase_voltage_age_ticks = 2;
+        input.control_sequence = 3;
+        input.phase_voltage_age_ticks = 3;
         assert!(!measured_phase_voltage_is_eligible(&input));
         assert_eq!(
             unsafe { foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry) },
             FocStatus::NotConfigured
         );
 
-        input.control_sequence = 0;
-        input.phase_voltage_sequence = u32::MAX;
-        input.phase_voltage_age_ticks = 1;
-        assert!(measured_phase_voltage_is_eligible(&input));
+        let mut wrapped = input;
+        wrapped.control_sequence = 0;
+        wrapped.phase_voltage_sequence = u32::MAX;
+        wrapped.phase_voltage_age_ticks = 1;
+        assert!(measured_phase_voltage_is_eligible(&wrapped));
 
         // A22 reports Hybrid fallback as the actual CommandModel selection.
         input.phase_voltage_provenance = FOC_REALTIME_PHASE_VOLTAGE_PROVENANCE_ST_NOMINAL;
@@ -4054,7 +4219,7 @@ mod tests {
         input.phase_voltage_reason_mask = FOC_REALTIME_PHASE_VOLTAGE_REASON_STALE;
         input.observer_voltage_selection = FOC_REALTIME_OBSERVER_VOLTAGE_COMMAND_MODEL;
         input.phase_voltage_fallback_event_count = 1;
-        input.control_sequence = 5;
+        input.control_sequence = 4;
         input.phase_voltage_sequence = 99;
         input.phase_voltage_age_ticks = 77;
         assert_eq!(
@@ -4077,9 +4242,9 @@ mod tests {
         let mut input = FocRealtimeInput::command_model_from_legacy(
             feedback,
             0,
-            // Deliberately non-nominal: A23 carries and validates actual_dt_s,
-            // but does not yet alter the established fixed-frequency control law.
-            1.0 / 10_000.0,
+            // V19 retains fixed-step control math and rejects scheduler evidence
+            // outside +/-1% of the configured 12 kHz period.
+            1.0 / 12_000.0,
         );
         let mut new_output = FocOutput::default();
         let mut legacy_output = FocOutput::default();
@@ -4292,11 +4457,39 @@ mod tests {
                 foc_rust_configure_basic(&mut context, &config()),
                 FocStatus::Ok
             );
+            let mut configured_telemetry = FocTelemetry::default();
+            assert_eq!(
+                foc_rust_get_telemetry(&mut context, &mut configured_telemetry),
+                FocStatus::Ok
+            );
+            assert_eq!(configured_telemetry.state, FocState::Disabled as u32);
             assert_eq!(
                 foc_rust_request_start(&mut context, 0),
                 FocStatus::NotConfigured
             );
             assert_eq!(foc_rust_request_start(&mut context, 1), FocStatus::Ok);
+            assert_eq!(foc_rust_state(&mut context), FocState::Running);
+        }
+    }
+
+    #[test]
+    fn compatibility_configuration_cannot_reset_a_running_controller() {
+        let mut context = context();
+        unsafe {
+            assert_eq!(foc_rust_init(&mut context), FocStatus::Ok);
+            assert_eq!(
+                foc_rust_configure_basic(&mut context, &config()),
+                FocStatus::Ok
+            );
+            assert_eq!(foc_rust_request_start(&mut context, 1), FocStatus::Ok);
+            assert_eq!(
+                foc_rust_configure_basic(&mut context, &config()),
+                FocStatus::InvalidArgument
+            );
+            assert_eq!(
+                foc_rust_configure_st_reference(&mut context),
+                FocStatus::InvalidArgument
+            );
             assert_eq!(foc_rust_state(&mut context), FocState::Running);
         }
     }
@@ -4386,6 +4579,16 @@ mod tests {
                 FocStatus::Ok
             );
             foc_rust_stop(&mut context);
+            let mut stopped_telemetry = FocTelemetry::default();
+            assert_eq!(
+                foc_rust_get_telemetry(&mut context, &mut stopped_telemetry),
+                FocStatus::Ok
+            );
+            assert_eq!(stopped_telemetry.state, FocState::Disabled as u32);
+            assert_eq!(
+                stopped_telemetry.observer_backend,
+                ObserverBackend::SmoPll as u32
+            );
             assert_eq!(
                 foc_rust_fast_step(&mut context, &feedback, &reference, &mut output),
                 FocStatus::Disabled
@@ -4401,6 +4604,15 @@ mod tests {
             );
             assert_eq!(output.duty_b, 0.0);
             assert_eq!(foc_rust_fault_flags(&mut context), 0x10);
+            foc_rust_stop(&mut context);
+            assert_eq!(foc_rust_state(&mut context), FocState::Fault);
+            assert_eq!(
+                foc_rust_get_telemetry(&mut context, &mut stopped_telemetry),
+                FocStatus::Ok
+            );
+            assert_eq!(stopped_telemetry.state, FocState::Fault as u32);
+            assert_eq!(foc_rust_clear_fault(&mut context), FocStatus::Ok);
+            assert_eq!(foc_rust_state(&mut context), FocState::Disabled);
         }
     }
 
@@ -4504,7 +4716,7 @@ mod tests {
             dc_bus_voltage: 13.0,
             ..FocFeedback::default()
         };
-        let input = realtime_input(feedback);
+        let mut input = realtime_input(feedback);
         let mut output = FocOutput::default();
         let mut telemetry = FocTelemetry::default();
         unsafe {
@@ -4566,7 +4778,12 @@ mod tests {
             );
             for _ in 0..300 {
                 assert_eq!(
-                    foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry,),
+                    realtime_step_and_advance(
+                        &mut context,
+                        &mut input,
+                        &mut output,
+                        &mut telemetry,
+                    ),
                     FocStatus::Ok
                 );
                 assert!(output.duty_a.is_finite());
@@ -4594,7 +4811,7 @@ mod tests {
             dc_bus_voltage: 13.0,
             ..FocFeedback::default()
         };
-        let input = realtime_input(feedback);
+        let mut input = realtime_input(feedback);
         let mut output = FocOutput::default();
         let mut telemetry = FocTelemetry::default();
         unsafe {
@@ -4622,7 +4839,12 @@ mod tests {
             );
             for _ in 0..32 {
                 assert_eq!(
-                    foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry,),
+                    realtime_step_and_advance(
+                        &mut context,
+                        &mut input,
+                        &mut output,
+                        &mut telemetry,
+                    ),
                     FocStatus::Ok
                 );
             }
@@ -4657,7 +4879,7 @@ mod tests {
             dc_bus_voltage: 13.0,
             ..FocFeedback::default()
         };
-        let input = realtime_input(feedback);
+        let mut input = realtime_input(feedback);
         let mut output = FocOutput::default();
         let mut telemetry = FocTelemetry::default();
         unsafe {
@@ -4673,7 +4895,12 @@ mod tests {
             let mut reached_ramp = false;
             for _ in 0..32 {
                 assert_eq!(
-                    foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry),
+                    realtime_step_and_advance(
+                        &mut context,
+                        &mut input,
+                        &mut output,
+                        &mut telemetry,
+                    ),
                     FocStatus::Ok
                 );
                 assert_eq!(telemetry.observer_electrical_angle_rad, 0.0);
@@ -4689,7 +4916,7 @@ mod tests {
             assert!(reached_ramp);
 
             assert_eq!(
-                foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry),
+                realtime_step_and_advance(&mut context, &mut input, &mut output, &mut telemetry,),
                 FocStatus::Ok
             );
             // 首个升速拍只建立电流模型；由于估计电流等于同拍实测电流，首拍
@@ -4697,7 +4924,7 @@ mod tests {
             assert_eq!(telemetry.observer_bemf_alpha_v, 0.0);
             assert_eq!(telemetry.observer_bemf_beta_v, 0.0);
             assert_eq!(
-                foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry),
+                realtime_step_and_advance(&mut context, &mut input, &mut output, &mut telemetry,),
                 FocStatus::Ok
             );
         }
@@ -4718,7 +4945,7 @@ mod tests {
             dc_bus_voltage: 13.0,
             ..FocFeedback::default()
         };
-        let input = realtime_input(feedback);
+        let mut input = realtime_input(feedback);
         let mut output = FocOutput::default();
         let mut telemetry = FocTelemetry::default();
         unsafe {
@@ -4734,7 +4961,12 @@ mod tests {
 
             for _ in 0..64 {
                 assert_eq!(
-                    foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry),
+                    realtime_step_and_advance(
+                        &mut context,
+                        &mut input,
+                        &mut output,
+                        &mut telemetry,
+                    ),
                     FocStatus::Ok
                 );
                 if telemetry.state == FocState::OpenLoopHold as u32 {
@@ -4748,7 +4980,7 @@ mod tests {
             assert_eq!(countdown, (runtime.pwm_frequency_hz / 3).max(1));
 
             assert_eq!(
-                foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry),
+                realtime_step_and_advance(&mut context, &mut input, &mut output, &mut telemetry,),
                 FocStatus::Ok
             );
             assert_eq!(
@@ -4800,6 +5032,21 @@ mod tests {
             runtime.observer_acquisition_maximum_phase_error_rad = 0.65;
             runtime.observer_run_reliability.maximum_phase_error_rad =
                 core::f32::consts::FRAC_PI_2 + 0.001;
+            assert_eq!(
+                foc_rust_configure(&mut context, &runtime),
+                FocStatus::InvalidArgument
+            );
+        }
+    }
+
+    #[test]
+    fn reserved_st_observer_slot_is_not_target_selectable() {
+        let mut context = context();
+        let mut runtime = FocRuntimeConfig::default();
+        unsafe {
+            assert_eq!(foc_rust_init(&mut context), FocStatus::Ok);
+            assert_eq!(foc_rust_default_st_config(&mut runtime), FocStatus::Ok);
+            runtime.observer_backend = ObserverBackend::StStoPll as u32;
             assert_eq!(
                 foc_rust_configure(&mut context, &runtime),
                 FocStatus::InvalidArgument
@@ -4931,7 +5178,7 @@ mod tests {
             dc_bus_voltage: 13.0,
             ..FocFeedback::default()
         };
-        let input = realtime_input(feedback);
+        let mut input = realtime_input(feedback);
         let mut output = FocOutput::default();
         let mut telemetry = FocTelemetry::default();
         unsafe {
@@ -4948,7 +5195,12 @@ mod tests {
             );
             let mut status = FocStatus::Ok;
             for _ in 0..100 {
-                status = foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry);
+                status = realtime_step_and_advance(
+                    &mut context,
+                    &mut input,
+                    &mut output,
+                    &mut telemetry,
+                );
                 if status != FocStatus::Ok {
                     break;
                 }
@@ -4983,7 +5235,7 @@ mod tests {
             dc_bus_voltage: 13.0,
             ..FocFeedback::default()
         };
-        let input = realtime_input(feedback);
+        let mut input = realtime_input(feedback);
         let mut output = FocOutput::default();
         let mut telemetry = FocTelemetry::default();
         unsafe {
@@ -5005,7 +5257,12 @@ mod tests {
 
             let mut status = FocStatus::Ok;
             for _ in 0..32 {
-                status = foc_rust_realtime_step(&mut context, &input, &mut output, &mut telemetry);
+                status = realtime_step_and_advance(
+                    &mut context,
+                    &mut input,
+                    &mut output,
+                    &mut telemetry,
+                );
                 if status != FocStatus::Ok {
                     break;
                 }

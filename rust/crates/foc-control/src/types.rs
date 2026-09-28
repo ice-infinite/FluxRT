@@ -180,6 +180,7 @@ impl PwmCommand {
     /// zero parameter) or SVPWM over-modulated. The caller must disable the gate
     /// drive instead of clamping and continuing: clamping would hide a control law
     /// that has already failed.
+    #[inline(always)]
     pub fn is_valid(&self) -> bool {
         self.duty_a.is_finite()
             && self.duty_b.is_finite()
