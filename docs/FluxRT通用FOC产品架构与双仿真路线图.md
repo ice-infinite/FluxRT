@@ -926,6 +926,12 @@ U0 → U1 → U2 → U3 → U4 → U5 → U7 → U8-S/U8-T → U6 → U8-H → U
 
 完成门：任意模拟掉电不会产生半份可用配置，错误板卡/电机组合拒绝 arm。
 
+P3.1 已完成其中的纯配置核心：六组定宽配置、512 B双槽、双CRC、最后提交标记、
+candidate/approved/active、V0→V1迁移、factory fallback、自动/显式回滚和全写入点掉电
+穷举均已落地；错误硬件身份和缺失反馈标定由 `validate_for_arm` 拒绝。目标Flash、设备端
+pending/active事务和MATLAB profile自动导入仍未接入，因此U3整体尚未完成。详见
+[可恢复配置核心 V1](可恢复配置核心V1.md)。
+
 ### U4：反馈源与基础标定
 
 目标：在同一 Axis 下支持 Sensorless、ABZ 和 Hall。
