@@ -16,6 +16,7 @@ use foc_control::{
 };
 
 pub const FOC_ADVANCED_ABI_VERSION: u32 = 0x0001_0000;
+pub const FOC_ADVANCED_PROBE_INPUT_VERSION: u32 = 1;
 
 /// Hardware-coupled features require an independently proven platform
 /// capability.  Pure reference shaping and dq decoupling do not require bits.
@@ -82,6 +83,71 @@ pub struct FocAdvancedRuntimeConfig {
     pub platform_capabilities: u32,
     pub reserved: u32,
     pub algorithm: AdvancedFocConfig,
+}
+
+/// Synthetic control-frame input used only by the target no-power timing path.
+///
+/// The normal powered entry never accepts this structure.  The C platform must
+/// prove Gate/MOE/phase channels off around every call; the Rust side then runs
+/// the same advanced supervisor and current-loop composition as the product
+/// path, while replacing only the observer-derived frame with these explicit
+/// finite values.  This makes per-feature target timing reproducible without
+/// pretending that a stationary, unpowered BEMF observer is reliable.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FocAdvancedProbeInput {
+    pub struct_size: u32,
+    pub version: u32,
+    pub base_id_reference_a: f32,
+    pub base_iq_reference_a: f32,
+    pub electrical_angle_rad: f32,
+    pub mechanical_speed_rad_s: f32,
+    pub previous_vd_command_v: f32,
+    pub previous_vq_command_v: f32,
+    pub phase_current_a: f32,
+    pub phase_current_b: f32,
+    pub phase_current_c: f32,
+}
+
+impl Default for FocAdvancedProbeInput {
+    fn default() -> Self {
+        Self {
+            struct_size: size_of::<Self>() as u32,
+            version: FOC_ADVANCED_PROBE_INPUT_VERSION,
+            base_id_reference_a: 0.0,
+            base_iq_reference_a: 0.25,
+            electrical_angle_rad: 0.35,
+            mechanical_speed_rad_s: 60.0,
+            previous_vd_command_v: 0.0,
+            previous_vq_command_v: 7.3,
+            phase_current_a: 0.10,
+            phase_current_b: -0.04,
+            phase_current_c: -0.06,
+        }
+    }
+}
+
+impl FocAdvancedProbeInput {
+    pub(crate) fn is_valid(&self) -> bool {
+        self.struct_size == size_of::<Self>() as u32
+            && self.version == FOC_ADVANCED_PROBE_INPUT_VERSION
+            && self.base_id_reference_a.is_finite()
+            && self.base_iq_reference_a.is_finite()
+            && self.electrical_angle_rad.is_finite()
+            && self.mechanical_speed_rad_s.is_finite()
+            && self.previous_vd_command_v.is_finite()
+            && self.previous_vq_command_v.is_finite()
+            && self.phase_current_a.is_finite()
+            && self.phase_current_b.is_finite()
+            && self.phase_current_c.is_finite()
+    }
+
+    pub(crate) fn current_reference(&self) -> CurrentCommand {
+        CurrentCommand {
+            id_ref_a: self.base_id_reference_a,
+            iq_ref_a: self.base_iq_reference_a,
+        }
+    }
 }
 
 impl Default for FocAdvancedRuntimeConfig {
@@ -301,6 +367,7 @@ pub(crate) fn default_advanced_runtime_config(
 const _: () = assert!(size_of::<AdvancedFocConfig>() == 128);
 const _: () = assert!(size_of::<FocAdvancedRuntimeConfig>() == 144);
 const _: () = assert!(size_of::<FocAdvancedTelemetry>() == 68);
+const _: () = assert!(size_of::<FocAdvancedProbeInput>() == 44);
 
 #[cfg(test)]
 mod tests {

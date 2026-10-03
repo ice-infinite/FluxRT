@@ -20,6 +20,7 @@ extern "C" {
 
 #define FOC_ADVANCED_ABI_VERSION       (0x00010000UL)
 #define FOC_ADVANCED_CONFIG_VERSION    (1UL)
+#define FOC_ADVANCED_PROBE_INPUT_VERSION (1UL)
 
 #define FOC_ADVANCED_FEATURE_MTPA             (1UL << 0)
 #define FOC_ADVANCED_FEATURE_FIELD_WEAKENING  (1UL << 1)
@@ -109,6 +110,23 @@ typedef struct
     foc_advanced_algorithm_config_t algorithm;
 } foc_advanced_runtime_config_t;
 
+/* Diagnostic-only synthetic observer/control frame for the no-power target
+ * timing path.  It is never consumed by the powered realtime entry. */
+typedef struct
+{
+    uint32_t struct_size;
+    uint32_t version;
+    float base_id_reference_a;
+    float base_iq_reference_a;
+    float electrical_angle_rad;
+    float mechanical_speed_rad_s;
+    float previous_vd_command_v;
+    float previous_vq_command_v;
+    float phase_current_a;
+    float phase_current_b;
+    float phase_current_c;
+} foc_advanced_probe_input_t;
+
 typedef struct
 {
     uint32_t struct_size;
@@ -140,11 +158,24 @@ foc_status_t foc_rust_configure_advanced(
 foc_status_t foc_rust_get_advanced_telemetry(
     foc_rust_context_t *context,
     foc_advanced_telemetry_t *telemetry);
+/* Executes the normal observer/startup body and the exact advanced/current-loop
+ * composition in one call, but substitutes the trusted control frame above.
+ * The caller must keep Gate, MOE and all phase channels physically off and must
+ * discard the returned duty from every active output path. */
+foc_status_t foc_rust_realtime_step_advanced_no_power(
+    foc_rust_context_t *context,
+    const foc_realtime_input_t *input,
+    const foc_advanced_probe_input_t *probe_input,
+    foc_output_t *output,
+    foc_telemetry_t *telemetry,
+    foc_advanced_telemetry_t *advanced_telemetry);
 
 _Static_assert(sizeof(foc_advanced_algorithm_config_t) == 128U,
                "advanced algorithm config ABI size mismatch");
 _Static_assert(sizeof(foc_advanced_runtime_config_t) == 144U,
                "advanced runtime config ABI size mismatch");
+_Static_assert(sizeof(foc_advanced_probe_input_t) == 44U,
+               "advanced probe input ABI size mismatch");
 _Static_assert(sizeof(foc_advanced_telemetry_t) == 68U,
                "advanced telemetry ABI size mismatch");
 

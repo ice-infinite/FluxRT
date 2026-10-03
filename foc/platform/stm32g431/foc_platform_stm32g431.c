@@ -52,6 +52,7 @@
 #include "foc_lsi_preload_sink_internal.h"
 #include "foc_math_accel.h"
 #include "foc_monitor_sampling.h"
+#include "foc_platform_advanced_candidate.h"
 #include "foc_platform_motion_candidate.h"
 #include "foc_power_safety.h"
 #include "foc_pwm_timing.h"
@@ -360,6 +361,32 @@ static volatile uint16_t g_foc_bus_max_raw;
 /* 绑定的 Rust 控制器上下文；由 foc_platform_bind_controller() 设置一次。
  * Bound Rust controller context; set once by foc_platform_bind_controller(). */
 static foc_rust_context_t *g_foc_controller;
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+static foc_advanced_probe_t g_foc_advanced_probe;
+static foc_advanced_probe_input_t g_foc_advanced_probe_input;
+static foc_advanced_telemetry_t g_foc_advanced_probe_telemetry;
+static volatile uint32_t g_foc_advanced_probe_active;
+static float g_foc_advanced_probe_nominal_bus_voltage_v;
+
+static uint32_t foc_platform_advanced_enter_critical(void)
+{
+    uint32_t was_enabled =
+        (NVIC_GetEnableIRQ(ADC1_2_IRQn) != 0U) ? 1U : 0U;
+    NVIC_DisableIRQ(ADC1_2_IRQn);
+    __DMB();
+    return was_enabled;
+}
+
+static void foc_platform_advanced_exit_critical(uint32_t key)
+{
+    __DMB();
+    if (key != 0U)
+    {
+        NVIC_EnableIRQ(ADC1_2_IRQn);
+    }
+}
+#endif
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_MOTION_CONTROL_CANDIDATE)
 /* P4.2E1 ownership: these objects are private to this platform translation
@@ -844,6 +871,17 @@ static __attribute__((noinline)) void foc_platform_latch_fault_fast(
     g_foc_motion_runtime_enabled = 0U;
     g_foc_motion_command_ready = 0U;
 #endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    if (g_foc_advanced_probe.state == FOC_ADVANCED_PROBE_RUNNING)
+    {
+        (void)foc_advanced_probe_fail(
+            &g_foc_advanced_probe,
+            FOC_ADVANCED_PROBE_RESULT_FAULT_EPOCH_CHANGED,
+            g_foc_power_safety.fault_epoch);
+    }
+    g_foc_advanced_probe_active = 0U;
+#endif
     foc_platform_disable_power_fast();
 }
 
@@ -1189,6 +1227,163 @@ fail_closed:
         foc_platform_latch_fault_fast(FOC_POWER_FAULT_CONTROL,
                                       FOC_RUST_FAULT_MOTION_CONTROL);
     }
+    return control_status;
+}
+#endif
+
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+static void foc_platform_advanced_probe_snapshot(
+    foc_advanced_probe_register_snapshot_t *snapshot)
+{
+    const uint32_t channel_mask = TIM_CCER_CC1E |
+                                  TIM_CCER_CC2E |
+                                  TIM_CCER_CC3E;
+
+    (void)memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->control_armed = g_foc_control_armed;
+    snapshot->power_safety_state = g_foc_power_safety.state;
+    snapshot->fault_epoch = g_foc_power_safety.fault_epoch;
+    snapshot->break_latched =
+        ((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U) ? 1U : 0U;
+    snapshot->driver_faulted = foc_platform_driver_faulted();
+    snapshot->gate_is_low = foc_platform_gate_is_low();
+    snapshot->moe_enabled =
+        ((TIM1->BDTR & TIM_BDTR_MOE) != 0U) ? 1U : 0U;
+    snapshot->phase_channels_enabled =
+        ((TIM1->CCER & channel_mask) != 0U) ? 1U : 0U;
+}
+
+static foc_advanced_probe_result_t foc_platform_advanced_probe_commit_isr(
+    const foc_output_t *output)
+{
+    foc_advanced_probe_register_snapshot_t before;
+    foc_advanced_probe_register_snapshot_t after;
+
+    foc_platform_advanced_probe_snapshot(&before);
+    TIM1->CCR1 = (uint32_t)(output->duty_a *
+                            (float)FOC_PWM_PERIOD_TICKS + 0.5f);
+    TIM1->CCR2 = (uint32_t)(output->duty_b *
+                            (float)FOC_PWM_PERIOD_TICKS + 0.5f);
+    TIM1->CCR3 = (uint32_t)(output->duty_c *
+                            (float)FOC_PWM_PERIOD_TICKS + 0.5f);
+    __DSB();
+    foc_platform_advanced_probe_snapshot(&after);
+    return foc_advanced_probe_complete_commit(&g_foc_advanced_probe,
+                                              &before,
+                                              &after);
+}
+
+static foc_status_t foc_platform_advanced_probe_step_isr(
+    int32_t current_u_counts,
+    int32_t current_v_counts,
+    int32_t current_w_counts)
+{
+    foc_advanced_probe_register_snapshot_t snapshot;
+    foc_advanced_probe_result_t probe_result;
+    foc_feedback_t feedback;
+    foc_realtime_input_t input;
+    foc_output_t output = {0};
+    foc_status_t control_status;
+
+    foc_platform_advanced_probe_snapshot(&snapshot);
+    probe_result = foc_advanced_probe_begin_tick(&g_foc_advanced_probe,
+                                                 &snapshot);
+    if (probe_result != FOC_ADVANCED_PROBE_RESULT_OK)
+    {
+        control_status = FOC_STATUS_HARDWARE_FAULT;
+        goto fail_closed;
+    }
+
+    (void)current_u_counts;
+    (void)current_v_counts;
+    (void)current_w_counts;
+    feedback.phase_current_a = g_foc_advanced_probe_input.phase_current_a;
+    feedback.phase_current_b = g_foc_advanced_probe_input.phase_current_b;
+    feedback.phase_current_c = g_foc_advanced_probe_input.phase_current_c;
+    feedback.dc_bus_voltage = g_foc_advanced_probe_nominal_bus_voltage_v;
+    feedback.electrical_angle_rad =
+        g_foc_advanced_probe_input.electrical_angle_rad;
+    foc_realtime_input_from_legacy(&feedback,
+                                   g_foc_control_sequence,
+                                   1.0f /
+                                       (float)FOC_CONTROL_FREQUENCY_HZ,
+                                   &input);
+    control_status = foc_rust_realtime_step_advanced_no_power(
+        g_foc_controller,
+        &input,
+        &g_foc_advanced_probe_input,
+        &output,
+        0,
+        &g_foc_advanced_probe_telemetry);
+    ++g_foc_control_sequence;
+
+    /* FNV-1a over discrete decisions gives a deterministic per-tick signature
+     * without requiring bit-identical target/PC floating-point duties. */
+    g_foc_advanced_probe.decision_signature ^=
+        g_foc_advanced_probe_telemetry.active_features;
+    g_foc_advanced_probe.decision_signature *= 16777619UL;
+    g_foc_advanced_probe.decision_signature ^=
+        g_foc_advanced_probe_telemetry.region;
+    g_foc_advanced_probe.decision_signature *= 16777619UL;
+    g_foc_advanced_probe.decision_signature ^=
+        g_foc_advanced_probe_telemetry.modulation_mode;
+    g_foc_advanced_probe.decision_signature *= 16777619UL;
+    g_foc_advanced_probe.decision_signature ^=
+        g_foc_advanced_probe_telemetry.status_flags;
+    g_foc_advanced_probe.decision_signature *= 16777619UL;
+    ++g_foc_advanced_probe.decision_samples;
+
+    foc_platform_advanced_probe_snapshot(&snapshot);
+    probe_result = foc_advanced_probe_complete_control(
+        &g_foc_advanced_probe, control_status, &snapshot);
+    if ((probe_result != FOC_ADVANCED_PROBE_RESULT_OK) ||
+        (control_status != FOC_STATUS_OK))
+    {
+        goto fail_closed;
+    }
+    if (!(output.duty_a >= g_foc_platform_config.minimum_duty &&
+          output.duty_a <= g_foc_platform_config.maximum_duty) ||
+        !(output.duty_b >= g_foc_platform_config.minimum_duty &&
+          output.duty_b <= g_foc_platform_config.maximum_duty) ||
+        !(output.duty_c >= g_foc_platform_config.minimum_duty &&
+          output.duty_c <= g_foc_platform_config.maximum_duty))
+    {
+        (void)foc_advanced_probe_fail(
+            &g_foc_advanced_probe,
+            FOC_ADVANCED_PROBE_RESULT_CONTROL_FAILURE,
+            g_foc_power_safety.fault_epoch);
+        control_status = FOC_STATUS_INVALID_ARGUMENT;
+        goto fail_closed;
+    }
+
+    probe_result = foc_platform_advanced_probe_commit_isr(&output);
+    if ((probe_result == FOC_ADVANCED_PROBE_RESULT_OK) ||
+        (probe_result == FOC_ADVANCED_PROBE_RESULT_COMPLETE))
+    {
+        ++g_foc_diagnostics.realtime_step_count;
+        g_foc_diagnostics.last_control_status = FOC_STATUS_OK;
+        return FOC_STATUS_OK;
+    }
+    control_status = FOC_STATUS_HARDWARE_FAULT;
+
+fail_closed:
+    foc_platform_advanced_probe_snapshot(&snapshot);
+    if (g_foc_advanced_probe.state == FOC_ADVANCED_PROBE_RUNNING)
+    {
+        (void)foc_advanced_probe_fail(
+            &g_foc_advanced_probe,
+            (snapshot.fault_epoch !=
+             g_foc_advanced_probe.expected_fault_epoch) ?
+                FOC_ADVANCED_PROBE_RESULT_FAULT_EPOCH_CHANGED :
+                FOC_ADVANCED_PROBE_RESULT_CONTROL_FAILURE,
+            snapshot.fault_epoch);
+    }
+    ++g_foc_diagnostics.realtime_error_count;
+    g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_CONTROL_ERROR;
+    g_foc_diagnostics.last_control_status = control_status;
+    foc_platform_latch_fault_fast(FOC_POWER_FAULT_CONTROL,
+                                  FOC_RUST_FAULT_ADVANCED_CONTROL);
     return control_status;
 }
 #endif
@@ -2406,6 +2601,16 @@ foc_status_t foc_platform_init(void)
     (void)foc_motion_probe_init(&g_foc_motion_probe);
     (void)foc_motion_torque_trial_init(&g_foc_motion_torque_trial);
 #endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    (void)foc_advanced_probe_init(&g_foc_advanced_probe);
+    g_foc_advanced_probe_active = 0U;
+    g_foc_advanced_probe_nominal_bus_voltage_v = 0.0f;
+    (void)memset(&g_foc_advanced_probe_input, 0,
+                 sizeof(g_foc_advanced_probe_input));
+    (void)memset(&g_foc_advanced_probe_telemetry, 0,
+                 sizeof(g_foc_advanced_probe_telemetry));
+#endif
     g_foc_bus_min_raw = foc_platform_bus_voltage_to_raw(
         g_foc_platform_config.minimum_bus_voltage_v);
     g_foc_bus_max_raw = foc_platform_bus_voltage_to_raw(
@@ -3044,6 +3249,156 @@ foc_status_t foc_platform_motion_candidate_torque_trial_get_status(
         FOC_STATUS_OK : FOC_STATUS_NOT_CONFIGURED;
 #else
     (void)status;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_advanced_candidate_probe_start(
+    const foc_advanced_runtime_config_t *config,
+    const foc_advanced_probe_input_t *probe_input,
+    uint32_t requested_ticks,
+    float nominal_bus_voltage_v,
+    float target_speed_rpm)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    foc_advanced_probe_register_snapshot_t snapshot;
+    foc_advanced_probe_result_t probe_result;
+    foc_status_t status;
+    uint32_t expected_fault_epoch;
+    uint32_t key;
+
+    if ((config == 0) || (probe_input == 0) ||
+        !(nominal_bus_voltage_v > 0.0f) ||
+        (g_foc_controller == 0))
+    {
+        return FOC_STATUS_INVALID_ARGUMENT;
+    }
+    if ((g_foc_control_armed != 0U) ||
+        (g_foc_advanced_probe_active != 0U) ||
+        (g_foc_power_safety.state != FOC_POWER_SAFETY_DISABLED))
+    {
+        return FOC_STATUS_DISABLED;
+    }
+
+    key = foc_platform_advanced_enter_critical();
+    foc_platform_disable_power_fast();
+    TIM1->CCR1 = 0U;
+    TIM1->CCR2 = 0U;
+    TIM1->CCR3 = 0U;
+    expected_fault_epoch = g_foc_power_safety.fault_epoch;
+    foc_platform_advanced_probe_snapshot(&snapshot);
+    (void)foc_advanced_probe_init(&g_foc_advanced_probe);
+    status = foc_rust_configure_advanced(g_foc_controller, config);
+    if (status == FOC_STATUS_OK)
+    {
+        status = foc_rust_start_realtime(g_foc_controller,
+                                         1U,
+                                         target_speed_rpm);
+    }
+    if (status == FOC_STATUS_OK)
+    {
+        probe_result = foc_advanced_probe_start(&g_foc_advanced_probe,
+                                                requested_ticks,
+                                                expected_fault_epoch,
+                                                &snapshot);
+        if (probe_result != FOC_ADVANCED_PROBE_RESULT_OK)
+        {
+            status = FOC_STATUS_NOT_CONFIGURED;
+        }
+    }
+    if ((status == FOC_STATUS_OK) &&
+        (g_foc_power_safety.state == FOC_POWER_SAFETY_DISABLED) &&
+        (g_foc_power_safety.fault_epoch == expected_fault_epoch))
+    {
+        g_foc_advanced_probe_input = *probe_input;
+        g_foc_advanced_probe_nominal_bus_voltage_v = nominal_bus_voltage_v;
+        g_foc_advanced_probe_active = 1U;
+        g_foc_control_sequence = 0U;
+        g_foc_diagnostics.realtime_step_count = 0U;
+        g_foc_diagnostics.realtime_error_count = 0U;
+        g_foc_diagnostics.deadline_miss_count = 0U;
+        g_foc_diagnostics.maximum_isr_cycles = 0U;
+        g_foc_diagnostics.maximum_precontrol_cycles = 0U;
+        g_foc_diagnostics.maximum_control_cycles = 0U;
+        g_foc_diagnostics.maximum_postcontrol_cycles = 0U;
+        g_foc_diagnostics.last_control_status = FOC_STATUS_OK;
+        foc_realtime_timing_reset(&g_foc_timing_stats);
+    }
+    else
+    {
+        g_foc_advanced_probe_active = 0U;
+        foc_rust_stop(g_foc_controller);
+        if (status == FOC_STATUS_OK)
+        {
+            status = FOC_STATUS_HARDWARE_FAULT;
+        }
+    }
+    foc_platform_advanced_exit_critical(key);
+    return status;
+#else
+    (void)config;
+    (void)probe_input;
+    (void)requested_ticks;
+    (void)nominal_bus_voltage_v;
+    (void)target_speed_rpm;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_advanced_candidate_probe_get_status(
+    foc_advanced_probe_status_t *status,
+    foc_advanced_telemetry_t *telemetry)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    foc_advanced_probe_result_t result;
+    uint32_t key;
+
+    if ((status == 0) || (telemetry == 0))
+    {
+        return FOC_STATUS_INVALID_ARGUMENT;
+    }
+    key = foc_platform_advanced_enter_critical();
+    result = foc_advanced_probe_get_status(&g_foc_advanced_probe, status);
+    *telemetry = g_foc_advanced_probe_telemetry;
+    foc_platform_advanced_exit_critical(key);
+    return (result == FOC_ADVANCED_PROBE_RESULT_OK) ?
+        FOC_STATUS_OK : FOC_STATUS_NOT_CONFIGURED;
+#else
+    (void)status;
+    (void)telemetry;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_advanced_candidate_probe_finish(void)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    foc_advanced_runtime_config_t disabled_config;
+    foc_status_t status;
+    uint32_t key = foc_platform_advanced_enter_critical();
+
+    foc_platform_disable_power_fast();
+    TIM1->CCR1 = 0U;
+    TIM1->CCR2 = 0U;
+    TIM1->CCR3 = 0U;
+    g_foc_advanced_probe_active = 0U;
+    foc_rust_stop(g_foc_controller);
+    status = foc_rust_default_advanced_config(g_foc_controller,
+                                              &disabled_config);
+    if (status == FOC_STATUS_OK)
+    {
+        status = foc_rust_configure_advanced(g_foc_controller,
+                                             &disabled_config);
+    }
+    foc_platform_advanced_exit_critical(key);
+    return status;
+#else
     return FOC_STATUS_NOT_CONFIGURED;
 #endif
 }
@@ -3795,6 +4150,23 @@ void ADC1_2_IRQHandler(void)
             }
         }
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+        else if ((g_foc_advanced_probe_active != 0U) &&
+                 (g_foc_advanced_probe.state ==
+                  FOC_ADVANCED_PROBE_RUNNING))
+        {
+            /* P5.3 target evidence runs in the real ADC ISR while every physical
+             * output enable stays off. Only inactive CCR preload values change. */
+            timing_active = 1U;
+            control_executed = 1U;
+            control_cycle_start = DWT->CYCCNT;
+            (void)foc_platform_advanced_probe_step_isr(current_u_counts,
+                                                       current_v_counts,
+                                                       current_w_counts);
+            control_cycle_end = DWT->CYCCNT;
+        }
+#endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_MOTION_CONTROL_CANDIDATE)
         else if (g_foc_motion_probe.state == FOC_MOTION_PROBE_RUNNING)
         {
@@ -3876,6 +4248,20 @@ void ADC1_2_IRQHandler(void)
                         &g_foc_motion_probe,
                         FOC_MOTION_PROBE_RESULT_CONTROL_FAILURE,
                         g_foc_power_safety.fault_epoch);
+                }
+#endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+                if ((g_foc_advanced_probe.state ==
+                     FOC_ADVANCED_PROBE_RUNNING) ||
+                    (g_foc_advanced_probe.state ==
+                     FOC_ADVANCED_PROBE_COMPLETE))
+                {
+                    (void)foc_advanced_probe_fail(
+                        &g_foc_advanced_probe,
+                        FOC_ADVANCED_PROBE_RESULT_CONTROL_FAILURE,
+                        g_foc_power_safety.fault_epoch);
+                    g_foc_advanced_probe_active = 0U;
                 }
 #endif
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
@@ -4172,6 +4558,10 @@ static foc_status_t foc_platform_control_start_internal(
     if ((g_foc_controller == 0) || (g_foc_control_armed != 0U)
 #if defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD)
         || (g_foc_phase_voltage_capture.state == FOC_PHASE_VOLTAGE_CAPTURE_ARMED)
+#endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+        || (g_foc_advanced_probe_active != 0U)
 #endif
        )
     {

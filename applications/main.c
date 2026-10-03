@@ -47,6 +47,7 @@
 #endif
 #if defined(FLUXRT_ADVANCED_CANDIDATE_BUILD)
 #include "foc_advanced_bridge.h"
+#include "foc_platform_advanced_candidate.h"
 #endif
 #if defined(FLUXRT_POWER_CANDIDATE_BUILD)
 #include "foc_power_management.h"
@@ -1636,6 +1637,173 @@ static int foc_cfg(int argc, char **argv)
 }
 MSH_CMD_EXPORT(foc_cfg, -);
 #endif
+#endif
+
+#if defined(FLUXRT_ADVANCED_CANDIDATE_BUILD)
+/* foc_advanced_wcet [ticks] [mode]
+ * mode: 0=basic, 1=MTPA, 2=FW, 3=MTPV, 4=decoupling, 5=DPWM,
+ *       6=overmodulation, 7=all target-supported features.
+ *
+ * The command never arms the power stage.  Capability bits for modes 5/6/7 are
+ * scoped to this synthetic no-power transaction and are removed by finish(). */
+static int foc_advanced_wcet(int argc, char **argv)
+{
+    foc_advanced_runtime_config_t probe_config;
+    foc_advanced_probe_input_t probe_input;
+    foc_advanced_probe_status_t probe_status;
+    foc_advanced_telemetry_t telemetry;
+    foc_realtime_timing_stats_t timing;
+    foc_platform_diagnostics_t diagnostics;
+    uint32_t requested_ticks = 36000U;
+    uint32_t mode = 7U;
+    uint32_t features = 0U;
+    uint32_t capabilities = 0U;
+    uint32_t started_ms;
+    uint32_t timeout_ms;
+    foc_status_t status;
+    foc_status_t finish_status;
+    int result = -1;
+
+    if ((argc > 3) ||
+        ((argc >= 2) &&
+         (foc_shell_parse_u32(argv[1], &requested_ticks) == 0U)) ||
+        ((argc == 3) &&
+         (foc_shell_parse_u32(argv[2], &mode) == 0U)) ||
+        (requested_ticks < FOC_ADVANCED_PROBE_MIN_TICKS) ||
+        (requested_ticks > FOC_ADVANCED_PROBE_MAX_TICKS) ||
+        (mode > 7U))
+    {
+        return -1;
+    }
+    switch (mode)
+    {
+    case 0U:
+        break;
+    case 1U:
+        features = FOC_ADVANCED_FEATURE_MTPA;
+        break;
+    case 2U:
+        features = FOC_ADVANCED_FEATURE_FIELD_WEAKENING;
+        break;
+    case 3U:
+        features = FOC_ADVANCED_FEATURE_MTPV;
+        break;
+    case 4U:
+        features = FOC_ADVANCED_FEATURE_DECOUPLING;
+        break;
+    case 5U:
+        features = FOC_ADVANCED_FEATURE_DPWM;
+        capabilities = FOC_ADVANCED_CAP_DPWM_CURRENT_RECONSTRUCTION;
+        break;
+    case 6U:
+        features = FOC_ADVANCED_FEATURE_OVERMODULATION;
+        capabilities = FOC_ADVANCED_CAP_OVERMOD_MIN_PULSE;
+        break;
+    default:
+        features = FOC_ADVANCED_FEATURE_MTPA |
+                   FOC_ADVANCED_FEATURE_FIELD_WEAKENING |
+                   FOC_ADVANCED_FEATURE_MTPV |
+                   FOC_ADVANCED_FEATURE_DECOUPLING |
+                   FOC_ADVANCED_FEATURE_DPWM |
+                   FOC_ADVANCED_FEATURE_OVERMODULATION;
+        capabilities = FOC_ADVANCED_CAP_DPWM_CURRENT_RECONSTRUCTION |
+                       FOC_ADVANCED_CAP_OVERMOD_MIN_PULSE;
+        break;
+    }
+
+    status = foc_rust_default_advanced_config(&g_foc_controller,
+                                              &probe_config);
+    if (status != FOC_STATUS_OK)
+    {
+        rt_kprintf("FADV,default,%u\n", (unsigned int)status);
+        return -1;
+    }
+    probe_config.algorithm.enabled_features = features;
+    probe_config.algorithm.region_update_divider = 1U;
+    probe_config.platform_capabilities = capabilities;
+
+    (void)memset(&probe_input, 0, sizeof(probe_input));
+    probe_input.struct_size = sizeof(probe_input);
+    probe_input.version = FOC_ADVANCED_PROBE_INPUT_VERSION;
+    probe_input.base_id_reference_a = 0.0f;
+    probe_input.base_iq_reference_a = 0.6f;
+    probe_input.electrical_angle_rad = 0.35f;
+    probe_input.mechanical_speed_rad_s = 150.0f;
+    probe_input.previous_vd_command_v = 0.0f;
+    probe_input.previous_vq_command_v = 7.3f;
+    probe_input.phase_current_a = 0.10f;
+    probe_input.phase_current_b = -0.04f;
+    probe_input.phase_current_c = -0.06f;
+
+    started_ms = (uint32_t)rt_tick_get_millisecond();
+    timeout_ms = (requested_ticks / 12U) + 2000U;
+    status = foc_platform_advanced_candidate_probe_start(
+        &probe_config,
+        &probe_input,
+        requested_ticks,
+        g_foc_runtime_config.nominal_bus_voltage_v,
+        g_foc_runtime_config.default_target_speed_rpm);
+    if (status != FOC_STATUS_OK)
+    {
+        rt_kprintf("FADV,start,%u\n", (unsigned int)status);
+        (void)foc_platform_advanced_candidate_probe_finish();
+        return -1;
+    }
+
+    do
+    {
+        rt_thread_mdelay(1);
+        status = foc_platform_advanced_candidate_probe_get_status(
+            &probe_status,
+            &telemetry);
+        if ((status != FOC_STATUS_OK) ||
+            (probe_status.state == FOC_ADVANCED_PROBE_COMPLETE) ||
+            (probe_status.state == FOC_ADVANCED_PROBE_FAILED))
+        {
+            break;
+        }
+    } while ((uint32_t)((uint32_t)rt_tick_get_millisecond() -
+                        started_ms) < timeout_ms);
+
+    (void)foc_platform_get_timing(&timing);
+    (void)foc_platform_get_diagnostics(&diagnostics);
+    rt_kprintf("FADV,m=%u,f=%02x,s=%u,r=%u,n=%u/%u,sig=%08x/%u,"
+               "a=%02x,st=%08x,rg=%u,mod=%u,wcet=%u,ctrl=%u,miss=%u\n",
+               (unsigned int)mode,
+               (unsigned int)features,
+               (unsigned int)probe_status.state,
+               (unsigned int)probe_status.last_result,
+               (unsigned int)probe_status.executed_ticks,
+               (unsigned int)probe_status.requested_ticks,
+               (unsigned int)probe_status.decision_signature,
+               (unsigned int)probe_status.decision_samples,
+               (unsigned int)telemetry.active_features,
+               (unsigned int)telemetry.status_flags,
+               (unsigned int)telemetry.region,
+               (unsigned int)telemetry.modulation_mode,
+               (unsigned int)timing.wcet.total_cycles,
+               (unsigned int)timing.peak_control_cycles,
+               (unsigned int)diagnostics.deadline_miss_count);
+
+    result = ((status == FOC_STATUS_OK) &&
+              (probe_status.state == FOC_ADVANCED_PROBE_COMPLETE) &&
+              (probe_status.executed_ticks == requested_ticks) &&
+              (probe_status.decision_samples == requested_ticks) &&
+              (probe_status.rejected_tick_count == 0U) &&
+              (diagnostics.deadline_miss_count == 0U) &&
+              ((features == 0U) ||
+               ((telemetry.status_flags &
+                 (FOC_ADVANCED_STATUS_CONFIGURED |
+                  FOC_ADVANCED_STATUS_BASIC_FALLBACK |
+                  FOC_ADVANCED_STATUS_FAULTED)) ==
+                FOC_ADVANCED_STATUS_CONFIGURED))) ? 0 : -1;
+    finish_status = foc_platform_advanced_candidate_probe_finish();
+    rt_kprintf("FADV,end,%u,%u\n",
+               (unsigned int)((result == 0) ? 0U : 1U),
+               (unsigned int)finish_status);
+    return ((finish_status == FOC_STATUS_OK) && (result == 0)) ? 0 : -1;
+}
+MSH_CMD_EXPORT(foc_advanced_wcet, -);
 #endif
 
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \

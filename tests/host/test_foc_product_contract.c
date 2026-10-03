@@ -32,6 +32,8 @@ int main(void)
     assert(sizeof(foc_advanced_algorithm_config_t) == 128U);
     assert(sizeof(foc_advanced_runtime_config_t) == 144U);
     assert(sizeof(foc_advanced_telemetry_t) == 68U);
+    assert(FOC_ADVANCED_PROBE_INPUT_VERSION == 1U);
+    assert(sizeof(foc_advanced_probe_input_t) == 44U);
     assert(FOC_POWER_ABI_VERSION == 0x00010000UL);
     assert(sizeof(foc_power_runtime_config_t) == 80U);
     assert(sizeof(foc_power_input_t) == 36U);

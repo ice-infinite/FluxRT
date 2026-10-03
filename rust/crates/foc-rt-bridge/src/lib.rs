@@ -3013,6 +3013,78 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
     }
 }
 
+#[cfg(feature = "advanced-foc")]
+#[no_mangle]
+/// Diagnostic-only no-power entry for target per-tick/WCET evidence.
+///
+/// It retains the normal observer/startup and exact advanced/current-loop body,
+/// but substitutes one explicit, trusted rotor/reference frame so an unpowered
+/// motor does not have to fake BEMF reliability.  It never writes hardware; the
+/// C platform must prove Gate/MOE/phase channels off before and after the call
+/// and may write the returned duty only to inactive preload registers.
+///
+/// # Safety
+/// Every non-null pointer must be valid, aligned and non-overlapping.  The
+/// controller must be exclusively owned by the ADC ISR for the whole probe.
+pub unsafe extern "C" fn foc_rust_realtime_step_advanced_no_power(
+    context: *mut FocRustContextStorage,
+    input: *const FocRealtimeInput,
+    probe_input: *const FocAdvancedProbeInput,
+    output: *mut FocOutput,
+    telemetry: *mut FocTelemetry,
+    advanced_telemetry: *mut FocAdvancedTelemetry,
+) -> FocStatus {
+    let Some(output) = (unsafe { output.as_mut() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    zero_output(output);
+    let Some(controller) = (unsafe { controller_mut(context) }) else {
+        return FocStatus::InvalidArgument;
+    };
+    let Some(input) = (unsafe { input.as_ref() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    let Some(probe_input) = (unsafe { probe_input.as_ref() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    let Some(advanced_telemetry_out) = (unsafe { advanced_telemetry.as_mut() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    *advanced_telemetry_out = FocAdvancedTelemetry::disabled();
+    if controller.state == FocState::Fault {
+        return FocStatus::HardwareFault;
+    }
+    if !probe_input.is_valid() || !realtime_input_envelope_is_valid(input) {
+        return FocStatus::InvalidArgument;
+    }
+    if input.hardware_fault_flags != 0 {
+        controller.fault_flags |= FOC_FAULT_PLATFORM_INPUT;
+        controller.state = FocState::Fault;
+        return FocStatus::HardwareFault;
+    }
+    if !realtime_tick_contract_is_valid(controller, input) {
+        return FocStatus::InvalidArgument;
+    }
+    controller.last_control_sequence = input.control_sequence;
+    if input.observer_voltage_selection == FOC_REALTIME_OBSERVER_VOLTAGE_UNAVAILABLE
+        || input.observer_voltage_selection == FOC_REALTIME_OBSERVER_VOLTAGE_MEASURED
+    {
+        return FocStatus::NotConfigured;
+    }
+    let feedback = input.legacy_feedback();
+    let status = unsafe {
+        foc_rust_realtime_step_core(
+            controller,
+            &feedback,
+            output,
+            telemetry,
+            RealtimeReferenceMode::AdvancedProbe(probe_input),
+        )
+    };
+    *advanced_telemetry_out = controller.advanced_telemetry;
+    status
+}
+
 #[cfg(feature = "motion-control")]
 #[no_mangle]
 /// Candidate single-FFI realtime path combining observer/startup, divided
@@ -3216,6 +3288,8 @@ unsafe fn foc_rust_realtime_step_with_motion_impl<const FORCE_MOTION_REFERENCE: 
 
 enum RealtimeReferenceMode<'a> {
     Legacy(core::marker::PhantomData<&'a ()>),
+    #[cfg(feature = "advanced-foc")]
+    AdvancedProbe(&'a FocAdvancedProbeInput),
     #[cfg(feature = "motion-control")]
     Motion {
         context: &'a mut MotionAbiContext,
@@ -3230,14 +3304,32 @@ impl RealtimeReferenceMode<'_> {
         Self::Legacy(core::marker::PhantomData)
     }
 
-    #[cfg(feature = "motion-control")]
-    fn force_motion_reference(&self) -> bool {
+    fn force_reference(&self) -> bool {
         match self {
+            #[cfg(feature = "advanced-foc")]
+            Self::AdvancedProbe(_) => true,
+            #[cfg(feature = "motion-control")]
             Self::Motion {
                 force_motion_reference,
                 ..
             } => *force_motion_reference,
             Self::Legacy(_) => false,
+        }
+    }
+
+    #[cfg(feature = "advanced-foc")]
+    fn advanced_probe_input(&self) -> Option<FocAdvancedProbeInput> {
+        match self {
+            Self::AdvancedProbe(input) => Some(**input),
+            _ => None,
+        }
+    }
+
+    fn forces_control_frame(&self) -> bool {
+        match self {
+            #[cfg(feature = "advanced-foc")]
+            Self::AdvancedProbe(_) => true,
+            _ => false,
         }
     }
 }
@@ -3495,9 +3587,27 @@ unsafe fn foc_rust_realtime_step_core(
     // 本拍内部统一用这两个局部量：观测器输出与可靠性在同一拍内不会再变，取局部副本
     // 可以避免中途误读被后续分支改写的字段。
     // Local copies keep the observer result consistent across the branches below.
+    #[cfg(feature = "advanced-foc")]
+    let mut observer_feedback = controller.observer_feedback;
+    #[cfg(not(feature = "advanced-foc"))]
     let observer_feedback = controller.observer_feedback;
+    #[cfg(feature = "advanced-foc")]
+    let mut observer_acquisition_reliable = controller.observer_reliable;
+    #[cfg(not(feature = "advanced-foc"))]
     let observer_acquisition_reliable = controller.observer_reliable;
+    #[cfg(feature = "advanced-foc")]
+    let mut observer_run_reliable = controller.observer_run_reliable;
+    #[cfg(not(feature = "advanced-foc"))]
     let observer_run_reliable = controller.observer_run_reliable;
+    #[cfg(feature = "advanced-foc")]
+    if let Some(probe) = reference_mode.advanced_probe_input() {
+        observer_feedback = RotorFeedback {
+            electrical_angle_rad: wrap_angle_0_to_2pi(probe.electrical_angle_rad),
+            mechanical_speed_rad_s: probe.mechanical_speed_rad_s,
+        };
+        observer_acquisition_reliable = true;
+        observer_run_reliable = true;
+    }
     /* 进入交接前必须通过带 64 ms 方差与连续确认计数的严格获取门；一旦已经进入
      * ObserverTransition，则改用运行保持门。若渐变期间继续要求“重新获取”，任一
      * 方差窗口抖动都会把已经开始的渐变反复打回开环，实机永远无法完成接管。
@@ -3561,12 +3671,13 @@ unsafe fn foc_rust_realtime_step_core(
         observer_iq_a,
         controller.runtime_config.closed_loop_current_slew_a_per_s,
     );
-    #[cfg(feature = "motion-control")]
-    let force_motion_reference = reference_mode.force_motion_reference();
-    let observer_controls = matches!(
-        startup.phase,
-        RevUpPhase::ObserverTransition | RevUpPhase::ClosedLoop
-    );
+    let force_reference = reference_mode.force_reference();
+    let force_control_frame = reference_mode.forces_control_frame();
+    let observer_controls = force_control_frame
+        || matches!(
+            startup.phase,
+            RevUpPhase::ObserverTransition | RevUpPhase::ClosedLoop
+        );
     // 524 rpm is the acquisition threshold inherited from OBS_MINIMUM_SPEED_RPM.
     // Once the observer owns the angle, the separately configured retention gate
     // applies (0 rpm by default, matching MIN_APPLICATION_SPEED_RPM in the ST
@@ -3624,7 +3735,11 @@ unsafe fn foc_rust_realtime_step_core(
             // forced angle to observer angle. In ClosedLoop it equals the
             // observer angle. A transient reliability drop keeps this continuous
             // and is handled by the timed observer-loss fault above.
-            electrical_angle_rad: startup.angle_for_control_rad,
+            electrical_angle_rad: if force_control_frame {
+                observer_feedback.electrical_angle_rad
+            } else {
+                startup.angle_for_control_rad
+            },
             mechanical_speed_rad_s: observer_feedback.mechanical_speed_rad_s,
         }
     } else {
@@ -3695,16 +3810,7 @@ unsafe fn foc_rust_realtime_step_core(
     // 速度环输出。这是"1 kHz 速度环 + 12 kHz 电流环"之间不产生转矩阶跃的关键。
     // The Iq/Id slew runs every tick, which is what keeps a 1 kHz speed loop from
     // stepping a 12 kHz current loop.
-    controller.current_reference = if startup.phase == RevUpPhase::ClosedLoop || {
-        #[cfg(feature = "motion-control")]
-        {
-            force_motion_reference
-        }
-        #[cfg(not(feature = "motion-control"))]
-        {
-            false
-        }
-    } {
+    controller.current_reference = if startup.phase == RevUpPhase::ClosedLoop || force_reference {
         match &mut reference_mode {
             RealtimeReferenceMode::Legacy(_) => legacy_closed_loop_reference(
                 controller,
@@ -3712,6 +3818,17 @@ unsafe fn foc_rust_realtime_step_core(
                 startup.current_reference,
                 dt_s,
             ),
+            #[cfg(feature = "advanced-foc")]
+            RealtimeReferenceMode::AdvancedProbe(probe) => {
+                controller.state = match startup.phase {
+                    RevUpPhase::Alignment => FocState::Alignment,
+                    RevUpPhase::OpenLoopRamp => FocState::OpenLoopRamp,
+                    RevUpPhase::OpenLoopHold => FocState::OpenLoopHold,
+                    RevUpPhase::ObserverTransition => FocState::ObserverTransition,
+                    RevUpPhase::ClosedLoop => FocState::ClosedLoop,
+                };
+                probe.current_reference()
+            }
             #[cfg(feature = "motion-control")]
             RealtimeReferenceMode::Motion {
                 context,
@@ -3743,7 +3860,7 @@ unsafe fn foc_rust_realtime_step_core(
                         return FocStatus::HardwareFault;
                     }
                 };
-                if force_motion_reference {
+                if force_reference {
                     /* Diagnostic-only dry run: advance the motion shadow and
                      * expose its result, but preserve the real startup state and
                      * current reference.  A direct Alignment -> ClosedLoop jump
@@ -3875,16 +3992,23 @@ unsafe fn foc_rust_realtime_step_core(
                     base_reference: controller.current_reference,
                     measured_current_dq: frame.current_dq,
                     current_alpha_beta,
-                    previous_voltage_dq: foc_algorithm::Dq {
-                        d: controller.telemetry.vd_command_v,
-                        q: controller.telemetry.vq_command_v,
-                    },
+                    previous_voltage_dq: reference_mode.advanced_probe_input().map_or(
+                        foc_algorithm::Dq {
+                            d: controller.telemetry.vd_command_v,
+                            q: controller.telemetry.vq_command_v,
+                        },
+                        |probe| foc_algorithm::Dq {
+                            d: probe.previous_vd_command_v,
+                            q: probe.previous_vq_command_v,
+                        },
+                    ),
                     estimated_electrical_angle_rad: snapshot.rotor.electrical_angle_rad,
                     estimated_electrical_speed_rad_s: observer_feedback.mechanical_speed_rad_s
                         * controller.params.motor.pole_pairs as f32,
                     dc_bus_voltage_v: snapshot.dc_bus_voltage,
                     linear_voltage_utilization: controller.params.voltage_utilization,
-                    closed_loop_active: controller.state == FocState::ClosedLoop,
+                    closed_loop_active: force_control_frame
+                        || controller.state == FocState::ClosedLoop,
                     observer_reliable,
                     allow_voltage_injection: false,
                     request_flying_start: false,
@@ -4805,6 +4929,88 @@ mod tests {
                 0
             );
         }
+    }
+
+    #[cfg(feature = "advanced-foc")]
+    #[test]
+    fn advanced_no_power_entry_uses_the_real_policy_without_faking_controller_state() {
+        let mut context = context();
+        let mut runtime = FocRuntimeConfig::default();
+        let mut advanced = FocAdvancedRuntimeConfig::default();
+        let mut probe = FocAdvancedProbeInput::default();
+        let feedback = FocFeedback {
+            phase_current_a: probe.phase_current_a,
+            phase_current_b: probe.phase_current_b,
+            phase_current_c: probe.phase_current_c,
+            dc_bus_voltage: 12.3,
+            electrical_angle_rad: probe.electrical_angle_rad,
+        };
+        let input = realtime_input(feedback);
+        let mut output = FocOutput::default();
+        let mut telemetry = FocTelemetry::default();
+        let mut advanced_telemetry = FocAdvancedTelemetry::default();
+        unsafe {
+            assert_eq!(foc_rust_init(&mut context), FocStatus::Ok);
+            assert_eq!(foc_rust_default_st_config(&mut runtime), FocStatus::Ok);
+            assert_eq!(foc_rust_configure(&mut context, &runtime), FocStatus::Ok);
+            assert_eq!(
+                foc_rust_default_advanced_config(&mut context, &mut advanced),
+                FocStatus::Ok
+            );
+            advanced.algorithm.enabled_features = foc_control::ADV_FOC_DECOUPLING;
+            assert_eq!(
+                foc_rust_configure_advanced(&mut context, &advanced),
+                FocStatus::Ok
+            );
+            assert_eq!(
+                foc_rust_start_realtime(&mut context, 1, runtime.default_target_speed_rpm),
+                FocStatus::Ok
+            );
+            assert_eq!(
+                foc_rust_realtime_step_advanced_no_power(
+                    &mut context,
+                    &input,
+                    &probe,
+                    &mut output,
+                    &mut telemetry,
+                    &mut advanced_telemetry,
+                ),
+                FocStatus::Ok
+            );
+        }
+        assert!(output.duty_a.is_finite() && output.duty_a >= 0.0 && output.duty_a <= 1.0);
+        assert!(output.duty_b.is_finite() && output.duty_b >= 0.0 && output.duty_b <= 1.0);
+        assert!(output.duty_c.is_finite() && output.duty_c >= 0.0 && output.duty_c <= 1.0);
+        assert_ne!(
+            advanced_telemetry.active_features & foc_control::ADV_FOC_DECOUPLING,
+            0
+        );
+        assert_eq!(
+            advanced_telemetry.status_flags & FOC_ADVANCED_STATUS_BASIC_FALLBACK,
+            0
+        );
+        assert_eq!(unsafe { foc_rust_state(&mut context) }, FocState::Alignment);
+
+        probe.previous_vq_command_v = f32::NAN;
+        output = FocOutput {
+            duty_a: 0.2,
+            duty_b: 0.3,
+            duty_c: 0.4,
+        };
+        unsafe {
+            assert_eq!(
+                foc_rust_realtime_step_advanced_no_power(
+                    &mut context,
+                    &input,
+                    &probe,
+                    &mut output,
+                    core::ptr::null_mut(),
+                    &mut advanced_telemetry,
+                ),
+                FocStatus::InvalidArgument
+            );
+        }
+        assert_eq!(output, FocOutput::default());
     }
 
     #[test]

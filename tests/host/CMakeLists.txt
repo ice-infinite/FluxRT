@@ -474,6 +474,23 @@ endif()
 add_test(NAME foc_motion_probe_no_power_and_fault_epoch_guard
     COMMAND foc_motion_probe_tests)
 
+add_executable(foc_advanced_probe_tests
+    test_foc_advanced_probe.c
+    ../../foc/runtime/foc_advanced_probe.c
+)
+target_include_directories(foc_advanced_probe_tests PRIVATE
+    ../../foc/include
+)
+target_compile_features(foc_advanced_probe_tests PRIVATE c_std_11)
+if(MSVC)
+    target_compile_options(foc_advanced_probe_tests PRIVATE /W4 /WX /utf-8)
+else()
+    target_compile_options(foc_advanced_probe_tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
+endif()
+add_test(NAME foc_advanced_probe_no_power_and_fault_epoch_guard
+    COMMAND foc_advanced_probe_tests)
+
 add_executable(foc_motion_torque_trial_tests
     test_foc_motion_torque_trial.c
     ../../foc/runtime/foc_motion_torque_trial.c
