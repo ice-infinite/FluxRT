@@ -67,6 +67,9 @@
 #ifndef FLUXRT_RUST_OPT_LEVEL_NAME
 #define FLUXRT_RUST_OPT_LEVEL_NAME "s"
 #endif
+#ifndef FLUXRT_PRODUCT_PROFILE_NAME
+#define FLUXRT_PRODUCT_PROFILE_NAME FLUXRT_G431_PRODUCT_PROFILE_NAME
+#endif
 
 /* Rust 控制器上下文 [bytes]。内容是 Rust 私有状态，C 侧只当作不透明缓冲；
  * 容量由 FOC_RUST_CONTEXT_CAPACITY 与 foc_rust_bridge.h 的 _Static_assert 固定。
@@ -2346,6 +2349,7 @@ int main(void)
     rt_kprintf("FBOOT,p=%s,o=%s\n",
                FLUXRT_BUILD_PROFILE_NAME,
                FLUXRT_RUST_OPT_LEVEL_NAME);
+    rt_kprintf("FBOOT,fp=%s\n", FLUXRT_PRODUCT_PROFILE_NAME);
     rt_kprintf("FBOOT,pc=%08x\n",
                (unsigned int)foc_rust_product_contract_version());
     rt_kprintf("FBOOT,a=%08x,c=%u/%u,r=%u,p=%u/%u/%u\n",

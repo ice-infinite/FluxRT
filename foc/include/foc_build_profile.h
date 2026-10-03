@@ -34,6 +34,10 @@
 #define FLUXRT_BUILD_PROFILE_IMPLICIT_DIAGNOSTIC 1
 #endif
 
+/* Validate the independent G431RB Flash-composition envelope before deriving
+ * optional build capabilities from Kconfig candidates. */
+#include "foc_product_profile.h"
+
 #define FLUXRT_BUILD_CAP_RUNTIME_TUNING       (1UL << 0)
 #define FLUXRT_BUILD_CAP_REALTIME_TRACE        (1UL << 1)
 #define FLUXRT_BUILD_CAP_PHASE_VOLTAGE_CAPTURE (1UL << 2)

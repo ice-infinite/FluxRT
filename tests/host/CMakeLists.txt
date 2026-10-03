@@ -794,6 +794,8 @@ foreach(profile_name IN ITEMS diagnostic calibration identification production)
     string(TOUPPER "${profile_name}" profile_upper)
     target_compile_definitions(foc_build_profile_${profile_name}_test PRIVATE
         FLUXRT_${profile_upper}_BUILD=1
+        FLUXRT_G431_PROFILE_BASIC_DRIVE=1
+        TEST_EXPECTED_G431_PRODUCT_PROFILE_ID=1
         TEST_EXPECT_${profile_upper}=1)
     add_test(NAME foc_build_profile_${profile_name}
         COMMAND foc_build_profile_${profile_name}_test)
@@ -808,7 +810,9 @@ target_include_directories(foc_build_profile_motion_candidate_test PRIVATE
 target_compile_features(foc_build_profile_motion_candidate_test PRIVATE c_std_11)
 target_compile_definitions(foc_build_profile_motion_candidate_test PRIVATE
     FLUXRT_DIAGNOSTIC_BUILD=1
+    FLUXRT_G431_PROFILE_MOTION_LAB=1
     FOC_MOTION_CONTROL_CANDIDATE=1
+    TEST_EXPECTED_G431_PRODUCT_PROFILE_ID=3
     TEST_EXPECT_MOTION_CANDIDATE=1)
 add_test(NAME foc_build_profile_motion_candidate
     COMMAND foc_build_profile_motion_candidate_test)
@@ -822,7 +826,9 @@ target_include_directories(foc_build_profile_advanced_candidate_test PRIVATE
 target_compile_features(foc_build_profile_advanced_candidate_test PRIVATE c_std_11)
 target_compile_definitions(foc_build_profile_advanced_candidate_test PRIVATE
     FLUXRT_DIAGNOSTIC_BUILD=1
+    FLUXRT_G431_PROFILE_ADVANCED_LAB=1
     FOC_ADVANCED_CONTROL_CANDIDATE=1
+    TEST_EXPECTED_G431_PRODUCT_PROFILE_ID=2
     TEST_EXPECT_ADVANCED_CANDIDATE=1)
 add_test(NAME foc_build_profile_advanced_candidate
     COMMAND foc_build_profile_advanced_candidate_test)
@@ -836,10 +842,30 @@ target_include_directories(foc_build_profile_power_candidate_test PRIVATE
 target_compile_features(foc_build_profile_power_candidate_test PRIVATE c_std_11)
 target_compile_definitions(foc_build_profile_power_candidate_test PRIVATE
     FLUXRT_DIAGNOSTIC_BUILD=1
+    FLUXRT_G431_PROFILE_POWER_LAB=1
     FOC_POWER_MANAGEMENT_CANDIDATE=1
+    TEST_EXPECTED_G431_PRODUCT_PROFILE_ID=4
     TEST_EXPECT_POWER_CANDIDATE=1)
 add_test(NAME foc_build_profile_power_candidate
     COMMAND foc_build_profile_power_candidate_test)
+
+add_executable(foc_build_profile_connected_lab_test
+    test_foc_build_profile.c
+    ../../applications/foc_lsi_identification.c)
+target_include_directories(foc_build_profile_connected_lab_test PRIVATE
+    ../../applications
+    ../../foc/include)
+target_compile_features(foc_build_profile_connected_lab_test PRIVATE c_std_11)
+target_compile_definitions(foc_build_profile_connected_lab_test PRIVATE
+    FLUXRT_DIAGNOSTIC_BUILD=1
+    FLUXRT_G431_PROFILE_CONNECTED_LAB=1
+    FOC_EXTERNAL_IO_FRAMEWORK=1
+    FLUXRT_PROTOCOL_NATIVE=1
+    FLUXRT_INPUT_ANALOG=1
+    TEST_EXPECTED_G431_PRODUCT_PROFILE_ID=5
+    TEST_EXPECT_DIAGNOSTIC=1)
+add_test(NAME foc_build_profile_connected_lab
+    COMMAND foc_build_profile_connected_lab_test)
 
 add_executable(foc_power_management_test
     test_foc_power_management.c

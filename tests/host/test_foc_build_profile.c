@@ -3,6 +3,14 @@
 #include "foc_build_profile.h"
 #include "foc_lsi_identification.h"
 
+#if !defined(TEST_EXPECTED_G431_PRODUCT_PROFILE_ID)
+#error "Expected G431RB product-profile ID is missing"
+#endif
+
+_Static_assert(
+    FLUXRT_G431_PRODUCT_PROFILE_ID == TEST_EXPECTED_G431_PRODUCT_PROFILE_ID,
+    "G431RB product-profile ID mismatch");
+
 #if defined(TEST_EXPECT_POWER_CANDIDATE)
 #if !defined(FLUXRT_DIAGNOSTIC_BUILD) || \
     !defined(FLUXRT_POWER_CANDIDATE_BUILD) || \

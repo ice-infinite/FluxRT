@@ -1,0 +1,20 @@
+if(NOT DEFINED FLUXRT_SOURCE_DIR)
+    message(FATAL_ERROR "FLUXRT_SOURCE_DIR is required")
+endif()
+
+include("${FLUXRT_SOURCE_DIR}/cmake/FluxRTG431ProductProfile.cmake")
+
+fluxrt_validate_g431_product_profile(
+    PROFILE "${TEST_PRODUCT_PROFILE}"
+    BUILD_PROFILE "${TEST_BUILD_PROFILE}"
+    ADVANCED "${TEST_ADVANCED}"
+    MOTION "${TEST_MOTION}"
+    POWER "${TEST_POWER}"
+    EXTERNAL_IO "${TEST_EXTERNAL_IO}"
+    NATIVE "${TEST_NATIVE}"
+    PWM_PULSE "${TEST_PWM_PULSE}"
+    ANALOG "${TEST_ANALOG}"
+    STEP_DIR "${TEST_STEP_DIR}")
+
+message(STATUS
+    "validated=${FLUXRT_G431_VALIDATED_PRODUCT_PROFILE}")

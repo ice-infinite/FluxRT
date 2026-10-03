@@ -448,6 +448,11 @@
 
 /* end of FOC timing candidates */
 
+/* STM32G431RB product composition */
+
+#define FLUXRT_G431_PROFILE_BASIC_DRIVE
+/* end of STM32G431RB product composition */
+
 /* FOC advanced-control candidates */
 
 /* end of FOC advanced-control candidates */

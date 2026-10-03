@@ -84,6 +84,73 @@ set(FOC_RUST_ARCHIVE
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/rtconfig.h")
 
+# The G431RB's 128 KiB Flash cannot hold every optional subsystem. Kconfig
+# selects one mutually exclusive allow-list, while this configure-time gate
+# independently rejects stale or manually edited rtconfig.h combinations before
+# Cargo and the linker run. The same rules also live in foc_product_profile.h
+# for direct SCons builds.
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_G431_PROFILE_CONFIG_LINES
+    REGEX "^#define FLUXRT_G431_PROFILE_(BASIC_DRIVE|ADVANCED_LAB|MOTION_LAB|POWER_LAB|CONNECTED_LAB)$")
+list(LENGTH FOC_G431_PROFILE_CONFIG_LINES FOC_G431_PROFILE_CONFIG_COUNT)
+if(NOT FOC_G431_PROFILE_CONFIG_COUNT EQUAL 1)
+    message(FATAL_ERROR
+        "rtconfig.h must select exactly one FLUXRT_G431_PROFILE_*; run build.ps1 -Regenerate")
+endif()
+
+list(GET FOC_G431_PROFILE_CONFIG_LINES 0 FOC_G431_PROFILE_CONFIG_LINE)
+if(FOC_G431_PROFILE_CONFIG_LINE MATCHES "BASIC_DRIVE")
+    set(FLUXRT_G431_PRODUCT_PROFILE "basic-drive")
+elseif(FOC_G431_PROFILE_CONFIG_LINE MATCHES "ADVANCED_LAB")
+    set(FLUXRT_G431_PRODUCT_PROFILE "advanced-lab")
+elseif(FOC_G431_PROFILE_CONFIG_LINE MATCHES "MOTION_LAB")
+    set(FLUXRT_G431_PRODUCT_PROFILE "motion-lab")
+elseif(FOC_G431_PROFILE_CONFIG_LINE MATCHES "POWER_LAB")
+    set(FLUXRT_G431_PRODUCT_PROFILE "power-lab")
+else()
+    set(FLUXRT_G431_PRODUCT_PROFILE "connected-lab")
+endif()
+
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_MOTION_CONFIG_LINE
+    REGEX "^#define FOC_MOTION_CONTROL_CANDIDATE$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_ADVANCED_CONFIG_LINE
+    REGEX "^#define FOC_ADVANCED_CONTROL_CANDIDATE$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_POWER_CONFIG_LINE
+    REGEX "^#define FOC_POWER_MANAGEMENT_CANDIDATE$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_EXTERNAL_IO_CONFIG_LINE
+    REGEX "^#define FOC_EXTERNAL_IO_FRAMEWORK$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_INPUT_PWM_CONFIG_LINE
+    REGEX "^#define FLUXRT_INPUT_PWM_PULSE$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_INPUT_ANALOG_CONFIG_LINE
+    REGEX "^#define FLUXRT_INPUT_ANALOG$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_INPUT_STEP_DIR_CONFIG_LINE
+    REGEX "^#define FLUXRT_INPUT_STEP_DIR$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_NATIVE_PROTOCOL_CONFIG_LINE
+    REGEX "^#define FLUXRT_PROTOCOL_NATIVE$")
+
+foreach(feature_name IN ITEMS MOTION ADVANCED POWER EXTERNAL_IO INPUT_PWM
+                              INPUT_ANALOG INPUT_STEP_DIR NATIVE_PROTOCOL)
+    if(FOC_${feature_name}_CONFIG_LINE)
+        set(FOC_${feature_name}_ENABLED ON)
+    else()
+        set(FOC_${feature_name}_ENABLED OFF)
+    endif()
+endforeach()
+
+include("${CMAKE_SOURCE_DIR}/cmake/FluxRTG431ProductProfile.cmake")
+fluxrt_validate_g431_product_profile(
+    PROFILE "${FLUXRT_G431_PRODUCT_PROFILE}"
+    BUILD_PROFILE "${FLUXRT_BUILD_PROFILE}"
+    ADVANCED "${FOC_ADVANCED_ENABLED}"
+    MOTION "${FOC_MOTION_ENABLED}"
+    POWER "${FOC_POWER_ENABLED}"
+    EXTERNAL_IO "${FOC_EXTERNAL_IO_ENABLED}"
+    NATIVE "${FOC_NATIVE_PROTOCOL_ENABLED}"
+    PWM_PULSE "${FOC_INPUT_PWM_ENABLED}"
+    ANALOG "${FOC_INPUT_ANALOG_ENABLED}"
+    STEP_DIR "${FOC_INPUT_STEP_DIR_ENABLED}")
+message(STATUS
+    "STM32G431RB product profile: ${FLUXRT_G431_VALIDATED_PRODUCT_PROFILE}")
+
 # CORDIC 后端来自 Kconfig（FOC_MATH_BACKEND_STM32G4_CORDIC），这里读生成后的 rtconfig.h
 # 决定是否给 Rust 加 --features stm32g4-cordic。两种后端都必须能编过：CORDIC 只是加速，
 # Rust 侧对每个加速操作都有 CPU 回退，因此关掉它不会改变算法行为，只影响周期数。
@@ -127,8 +194,6 @@ endif()
 # into non-Diagnostic Rust archives. Enabling the Kconfig symbol compiles the
 # single-writer dispatcher and combined ADC-ISR branch, but the runtime route
 # remains zero until an explicit stopped-state configure call succeeds.
-file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_MOTION_CONFIG_LINE
-    REGEX "^#define FOC_MOTION_CONTROL_CANDIDATE$")
 if(FLUXRT_BUILD_PROFILE STREQUAL "diagnostic" AND FOC_MOTION_CONFIG_LINE)
     list(APPEND FOC_RUST_FEATURE_ARGS --features motion-control)
     message(STATUS "FOC motion control: Diagnostic candidate available, default runtime disabled")
@@ -149,8 +214,6 @@ endif()
 # compiling it leaves enabled_features=0, so the basic realtime path remains
 # bit-identical.  Hardware-coupled policies also require their platform
 # capability bits at the stopped-state configuration boundary.
-file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_ADVANCED_CONFIG_LINE
-    REGEX "^#define FOC_ADVANCED_CONTROL_CANDIDATE$")
 if(FLUXRT_BUILD_PROFILE STREQUAL "diagnostic" AND FOC_ADVANCED_CONFIG_LINE)
     list(APPEND FOC_RUST_FEATURE_ARGS --features advanced-foc)
     message(STATUS "FOC advanced control: Diagnostic supervisor available, default runtime disabled")
@@ -164,8 +227,6 @@ endif()
 # Compiling it adds only the versioned Rust policy ABI and the default-off C
 # owner; board sensors, a brake output and regeneration capability remain absent
 # until separately implemented and approved.
-file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_POWER_CONFIG_LINE
-    REGEX "^#define FOC_POWER_MANAGEMENT_CANDIDATE$")
 if(FLUXRT_BUILD_PROFILE STREQUAL "diagnostic" AND FOC_POWER_CONFIG_LINE)
     list(APPEND FOC_RUST_FEATURE_ARGS --features power-management)
     message(STATUS "FOC power management: Diagnostic policy available, default runtime disabled")
@@ -179,12 +240,6 @@ endif()
 # physical input remains separately default-off in Kconfig; any selected input
 # adds the shared normalization feature. Board drivers/capabilities are separate
 # gates, so this cannot make an input physically available or arm the drive.
-file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_INPUT_PWM_CONFIG_LINE
-    REGEX "^#define FLUXRT_INPUT_PWM_PULSE$")
-file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_INPUT_ANALOG_CONFIG_LINE
-    REGEX "^#define FLUXRT_INPUT_ANALOG$")
-file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_INPUT_STEP_DIR_CONFIG_LINE
-    REGEX "^#define FLUXRT_INPUT_STEP_DIR$")
 if(FOC_INPUT_PWM_CONFIG_LINE OR FOC_INPUT_ANALOG_CONFIG_LINE OR
    FOC_INPUT_STEP_DIR_CONFIG_LINE)
     list(APPEND FOC_RUST_FEATURE_ARGS --features external-inputs)
@@ -196,8 +251,6 @@ endif()
 # P2.6 FluxRT Native framing is pure no_std Rust. C transport drivers consume
 # it only through foc_native_bridge.h; selecting the codec still does not add a
 # physical UART/USB/CAN driver or make a board transport available.
-file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_NATIVE_PROTOCOL_CONFIG_LINE
-    REGEX "^#define FLUXRT_PROTOCOL_NATIVE$")
 if(FOC_NATIVE_PROTOCOL_CONFIG_LINE)
     list(APPEND FOC_RUST_FEATURE_ARGS --features native-protocol)
     message(STATUS "FluxRT Native: portable Rust framing ABI compiled, physical transport still gated")
@@ -291,6 +344,7 @@ target_compile_options(rtt_FOC PRIVATE -O3)
 # centrally instead of relying on scattered "not Production" conditions.
 target_compile_definitions(${CMAKE_PROJECT_NAME}.elf PRIVATE
     FLUXRT_BUILD_PROFILE_NAME="${FLUXRT_BUILD_PROFILE}"
+    FLUXRT_PRODUCT_PROFILE_NAME="${FLUXRT_G431_VALIDATED_PRODUCT_PROFILE}"
     FLUXRT_RUST_OPT_LEVEL_NAME="${FLUXRT_RUST_OPT_LEVEL}")
 
 if(FLUXRT_BUILD_PROFILE STREQUAL "diagnostic")

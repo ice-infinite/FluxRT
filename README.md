@@ -57,6 +57,10 @@
   mode 1最坏12,233/12,750 cycles、0 miss。源码已恢复candidate默认关闭，板上暂留输出关闭的
   候选等待一次powered S5；这些证据仍不等于真实Torque、观察器获取或仿真实机一致。
 - 已建立 Diagnostic / Calibration / Identification / Production 四个隔离构建档。Identification 的 EXP-B3 S4～S5.4硬件链通过；S5.5A/B确认LCR线对/位置差异，S5.5C又证明简单乘法比例不能把动态1.9503 mH拉入0.98～1.4103 mH诊断包络。Rust在该包络10个PC闭环工况全部完成，但现有仪器缺独立动态电流/差分PWM电压，精确 `Ld/Lq`、参数更新及再次powered run仍未授权。
+- G431RB 已建立独立于上述主构建档的五种互斥产品组合：Basic Drive、Advanced Lab、
+  Motion Lab、Power Lab、Connected Lab。只有 Basic 可配非 Diagnostic；各 Lab 仍默认关闭、
+  不自动启用运行时能力。全功能同镜像明确不受支持，非法组合由 Kconfig、CMake 和 C 头
+  三层拒绝。
 - A19 已在目标板完成 Calibration 首次下载、启动和 `foc_start` 拒绝门，并取得停机 256 拍连续原始码；当前缺可信万用表多点参考，仍未形成电压标定参数。
 - A17 已接通 PC0/PC3/PC1 三路 BEMF ADC 原始码的 12 kHz、256 拍只读固定窗；无功率实机采集通过，但尚未完成电压标定、动态相序、示波器对拍或观察器接入。
 - A22.3 已完成 adapter→V19 的硬件中立组装门：名义/无模型与质量状态联合校验、回绕 age、
@@ -191,6 +195,7 @@ TIM1/ADC、固件默认和板上镜像仍保持 12/12 kHz，详见 A7 报告。
 - [A21.0/A22.3 Diagnostic 容量归因与 V19 组装门](docs/performance/2026-09-28-A21.0-A22.3-容量归因与V19组装门.md)
 - [A21.1 严格整数 CLI、输入拒绝契约与实际容量回收](docs/performance/2026-09-28-A21.1-严格整数CLI与容量回收.md)
 - [Diagnostic / Calibration / Identification / Production 构建档与 Rust 优化等级](docs/构建档与优化等级.md)
+- [STM32G431RB五种互斥产品组合Profile与切换方法](docs/STM32G431RB产品组合Profile.md)
 - [A18 Calibration 构建档、能力隔离与标定契约](docs/performance/2026-09-24-A18-Calibration构建档与标定契约.md)
 - [A19 Calibration 板端安全门与静态原始码基线](docs/performance/2026-09-24-A19-Calibration板端安全门与静态基线.md)
 - [阶段 1.1 构建优化矩阵与 Production 候选报告](docs/performance/2026-09-23-A1构建档矩阵.md)

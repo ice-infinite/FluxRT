@@ -102,11 +102,57 @@ config FOC_PWM_24K_CONTROL_12K_CANDIDATE
 
 endmenu
 
+menu "STM32G431RB product composition"
+
+# The G431RB cannot carry every optional subsystem in one 128 KiB image.  This
+# choice is therefore an allow-list for one measured composition at a time;
+# every candidate below remains default-off and still has its runtime gate.
+choice
+    prompt "Select the mutually exclusive G431RB feature envelope"
+    depends on SOC_STM32G431RB
+    default FLUXRT_G431_PROFILE_BASIC_DRIVE
+
+config FLUXRT_G431_PROFILE_BASIC_DRIVE
+    bool "Basic Drive (release-capable core only)"
+    help
+        Build the basic FOC and mandatory safety core without the large
+        Advanced, Motion, Power or External-I/O candidates. This is the only
+        G431RB product composition allowed with non-Diagnostic build profiles.
+
+config FLUXRT_G431_PROFILE_ADVANCED_LAB
+    bool "Advanced Lab (advanced FOC candidate only)"
+    help
+        Permit the default-off MTPA/field-weakening/MTPV/decoupling and related
+        advanced supervisor in a dedicated Diagnostic measurement image.
+
+config FLUXRT_G431_PROFILE_MOTION_LAB
+    bool "Motion Lab (planner/cascade candidate only)"
+    help
+        Permit the default-off motion planner, cascaded controller and its
+        single-writer ISR route in a dedicated Diagnostic measurement image.
+
+config FLUXRT_G431_PROFILE_POWER_LAB
+    bool "Power Lab (thermal/DC-bus policy candidate only)"
+    help
+        Permit the default-off thermal, DC-bus and regeneration policy in a
+        dedicated Diagnostic image. This does not add sensors or brake hardware.
+
+config FLUXRT_G431_PROFILE_CONNECTED_LAB
+    bool "Connected Lab (Native plus at most one simple input)"
+    help
+        Permit the External-I/O framework, FluxRT Native codec and at most one
+        PWM-pulse, Analog or Step/Dir input candidate. It adds no physical
+        transport automatically and remains a Diagnostic-only lab image.
+
+endchoice
+
+endmenu
+
 menu "FOC advanced-control candidates"
 
 config FOC_ADVANCED_CONTROL_CANDIDATE
     bool "Build Diagnostic-only Rust advanced FOC supervisor"
-    depends on SOC_STM32G431RB
+    depends on SOC_STM32G431RB && FLUXRT_G431_PROFILE_ADVANCED_LAB
     default n
     help
         Build the default-off MTPA, field-weakening, MTPV, dq decoupling,
@@ -122,7 +168,7 @@ menu "FOC power-management candidates"
 
 config FOC_POWER_MANAGEMENT_CANDIDATE
     bool "Build Diagnostic-only thermal/DC-bus/regeneration supervisor"
-    depends on SOC_STM32G431RB
+    depends on SOC_STM32G431RB && FLUXRT_G431_PROFILE_POWER_LAB
     default n
     help
         Build the independent management-rate Rust supervisor and C owner for
@@ -143,7 +189,7 @@ menu "FOC motion-control candidates"
 # requires an explicit stopped-state configure/publish sequence at runtime.
 config FOC_MOTION_CONTROL_CANDIDATE
     bool "Build Diagnostic-only Rust motion planner/cascade candidate"
-    depends on SOC_STM32G431RB
+    depends on SOC_STM32G431RB && FLUXRT_G431_PROFILE_MOTION_LAB
     default n
     help
         Build the independent Rust motion configuration mapper, Torque/Velocity/
@@ -160,6 +206,7 @@ menu "FluxRT external control and communication"
 
 config FOC_EXTERNAL_IO_FRAMEWORK
     bool "Build default-off external I/O management framework"
+    depends on SOC_STM32G431RB && FLUXRT_G431_PROFILE_CONNECTED_LAB
     default n
     help
         Build the P2.4 device-side capability/configuration contract, resource
