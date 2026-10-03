@@ -17,6 +17,7 @@ use foc_control::{
 
 pub const FOC_ADVANCED_ABI_VERSION: u32 = 0x0002_0000;
 pub const FOC_ADVANCED_PROBE_INPUT_VERSION: u32 = 1;
+pub const FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION: u32 = 1;
 
 /// Hardware-coupled features require an independently proven platform
 /// capability.  Pure reference shaping and dq decoupling do not require bits.
@@ -240,6 +241,21 @@ pub struct FocAdvancedTelemetry {
     pub flying_start_speed_rad_s: f32,
 }
 
+/// Minimal cross-language snapshot for the target's bounded powered-trial
+/// owner.  Full telemetry remains available to management/trace readers; the
+/// 12 kHz ISR only needs these five decision words.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FocAdvancedPowerTrialSnapshot {
+    pub struct_size: u32,
+    pub version: u32,
+    pub state: u32,
+    pub observer_reliable: u32,
+    pub closed_loop_active: u32,
+    pub active_features: u32,
+    pub status_flags: u32,
+}
+
 impl FocAdvancedTelemetry {
     pub(crate) fn disabled() -> Self {
         Self {
@@ -379,6 +395,7 @@ pub(crate) fn default_advanced_runtime_config(
 const _: () = assert!(size_of::<AdvancedFocConfig>() == 128);
 const _: () = assert!(size_of::<FocAdvancedRuntimeConfig>() == 148);
 const _: () = assert!(size_of::<FocAdvancedTelemetry>() == 68);
+const _: () = assert!(size_of::<FocAdvancedPowerTrialSnapshot>() == 28);
 const _: () = assert!(size_of::<FocAdvancedProbeInput>() == 44);
 
 #[cfg(test)]

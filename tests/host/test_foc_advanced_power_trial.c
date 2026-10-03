@@ -39,34 +39,23 @@ static foc_advanced_runtime_config_t valid_advanced(uint32_t features)
     return config;
 }
 
-static foc_telemetry_t startup_telemetry(void)
-{
-    foc_telemetry_t telemetry;
-    (void)memset(&telemetry, 0, sizeof(telemetry));
-    telemetry.state = FOC_STATE_ALIGNMENT;
-    return telemetry;
-}
-
-static foc_telemetry_t closed_loop_telemetry(void)
-{
-    foc_telemetry_t telemetry = startup_telemetry();
-    telemetry.state = FOC_STATE_CLOSED_LOOP;
-    telemetry.closed_loop_active = 1U;
-    telemetry.observer_reliable = 1U;
-    return telemetry;
-}
-
-static foc_advanced_telemetry_t advanced_telemetry(
+static foc_advanced_power_trial_snapshot_t trial_snapshot(
+    uint32_t state,
+    uint32_t observer_reliable,
+    uint32_t closed_loop_active,
     uint32_t features,
     uint32_t flags)
 {
-    foc_advanced_telemetry_t telemetry;
-    (void)memset(&telemetry, 0, sizeof(telemetry));
-    telemetry.struct_size = sizeof(telemetry);
-    telemetry.abi_version = FOC_ADVANCED_ABI_VERSION;
-    telemetry.active_features = features;
-    telemetry.status_flags = flags;
-    return telemetry;
+    foc_advanced_power_trial_snapshot_t snapshot;
+    (void)memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.struct_size = sizeof(snapshot);
+    snapshot.version = FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION;
+    snapshot.state = state;
+    snapshot.observer_reliable = observer_reliable;
+    snapshot.closed_loop_active = closed_loop_active;
+    snapshot.active_features = features;
+    snapshot.status_flags = flags;
+    return snapshot;
 }
 
 static void prepare_and_arm(foc_advanced_power_trial_t *trial,
@@ -94,10 +83,14 @@ static void prepare_and_arm(foc_advanced_power_trial_t *trial,
 static void test_basic_and_decoupling_complete_at_exact_window(void)
 {
     foc_advanced_power_trial_t trial;
-    foc_telemetry_t startup = startup_telemetry();
-    foc_telemetry_t closed = closed_loop_telemetry();
-    foc_advanced_telemetry_t basic = advanced_telemetry(0U, 0U);
-    foc_advanced_telemetry_t decoupling = advanced_telemetry(
+    foc_advanced_power_trial_snapshot_t startup = trial_snapshot(
+        FOC_STATE_ALIGNMENT, 0U, 0U, 0U, 0U);
+    foc_advanced_power_trial_snapshot_t closed = trial_snapshot(
+        FOC_STATE_CLOSED_LOOP, 1U, 1U, 0U, 0U);
+    foc_advanced_power_trial_snapshot_t decoupling = trial_snapshot(
+        FOC_STATE_CLOSED_LOOP,
+        1U,
+        1U,
         FOC_ADVANCED_FEATURE_DECOUPLING,
         FOC_ADVANCED_STATUS_CONFIGURED);
     uint32_t index;
@@ -108,7 +101,7 @@ static void test_basic_and_decoupling_complete_at_exact_window(void)
         assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
                FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
         assert(foc_advanced_power_trial_validate_control(
-                   &trial, &startup, &basic) ==
+                   &trial, &startup) ==
                FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
     }
     for (index = 0U; index < FOC_ADVANCED_POWER_TRIAL_ACTIVE_TICKS; ++index)
@@ -116,7 +109,7 @@ static void test_basic_and_decoupling_complete_at_exact_window(void)
         assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
                FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
         assert(foc_advanced_power_trial_validate_control(
-                   &trial, &closed, &basic) ==
+                   &trial, &closed) ==
                FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
         assert(foc_advanced_power_trial_record_commit(&trial) ==
                (((index + 1U) == FOC_ADVANCED_POWER_TRIAL_ACTIVE_TICKS) ?
@@ -131,7 +124,7 @@ static void test_basic_and_decoupling_complete_at_exact_window(void)
     assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
            FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
     assert(foc_advanced_power_trial_validate_control(
-               &trial, &closed, &decoupling) ==
+               &trial, &decoupling) ==
            FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
     assert(trial.state == FOC_ADVANCED_POWER_TRIAL_ACTIVE);
     assert(trial.active_ticks == 0U);
@@ -173,8 +166,10 @@ static void test_invalid_configuration_is_rejected(void)
 static void test_fault_injections_fail_closed(void)
 {
     foc_advanced_power_trial_t trial;
-    foc_telemetry_t closed = closed_loop_telemetry();
-    foc_advanced_telemetry_t decoupling = advanced_telemetry(
+    foc_advanced_power_trial_snapshot_t decoupling = trial_snapshot(
+        FOC_STATE_CLOSED_LOOP,
+        1U,
+        1U,
         FOC_ADVANCED_FEATURE_DECOUPLING,
         FOC_ADVANCED_STATUS_CONFIGURED);
 
@@ -193,33 +188,46 @@ static void test_fault_injections_fail_closed(void)
     assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
            FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
     assert(foc_advanced_power_trial_validate_control(
-               &trial, &closed, &decoupling) ==
+               &trial, &decoupling) ==
            FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
     assert(trial.active_ticks == 0U);
     assert(foc_advanced_power_trial_record_commit(&trial) ==
            FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
-    closed.observer_reliable = 0U;
+    decoupling.observer_reliable = 0U;
     decoupling.status_flags |= FOC_ADVANCED_STATUS_BASIC_FALLBACK |
                                  FOC_ADVANCED_REASON_OBSERVER_UNRELIABLE;
     assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
            FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
     assert(foc_advanced_power_trial_validate_control(
-               &trial, &closed, &decoupling) ==
+               &trial, &decoupling) ==
            FOC_ADVANCED_POWER_TRIAL_ACTION_FAULT_STOP);
     assert(trial.result ==
            FOC_ADVANCED_POWER_TRIAL_RESULT_OBSERVER_FALLBACK);
 
     prepare_and_arm(&trial, FOC_ADVANCED_POWER_TRIAL_MODE_DECOUPLING);
-    decoupling = advanced_telemetry(
+    decoupling = trial_snapshot(
+        FOC_STATE_CLOSED_LOOP,
+        1U,
+        1U,
         FOC_ADVANCED_FEATURE_DECOUPLING,
         FOC_ADVANCED_STATUS_CONFIGURED | FOC_ADVANCED_STATUS_FAULTED);
-    closed = closed_loop_telemetry();
     assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
            FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
     assert(foc_advanced_power_trial_validate_control(
-               &trial, &closed, &decoupling) ==
+               &trial, &decoupling) ==
            FOC_ADVANCED_POWER_TRIAL_ACTION_FAULT_STOP);
     assert(trial.result == FOC_ADVANCED_POWER_TRIAL_RESULT_ADVANCED_FAULT);
+
+    prepare_and_arm(&trial, FOC_ADVANCED_POWER_TRIAL_MODE_BASIC);
+    decoupling = trial_snapshot(
+        FOC_STATE_CLOSED_LOOP, 1U, 1U, 0U, 0U);
+    decoupling.struct_size = 0U;
+    assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(foc_advanced_power_trial_validate_control(&trial, &decoupling) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_FAULT_STOP);
+    assert(trial.result ==
+           FOC_ADVANCED_POWER_TRIAL_RESULT_INVALID_ENVELOPE);
 }
 
 int main(void)

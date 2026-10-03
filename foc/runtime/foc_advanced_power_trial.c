@@ -166,8 +166,7 @@ foc_advanced_power_trial_action_t foc_advanced_power_trial_begin_tick(
 
 foc_advanced_power_trial_action_t foc_advanced_power_trial_validate_control(
     foc_advanced_power_trial_t *trial,
-    const foc_telemetry_t *telemetry,
-    const foc_advanced_telemetry_t *advanced_telemetry)
+    const foc_advanced_power_trial_snapshot_t *snapshot)
 {
     const uint32_t forbidden_status = FOC_ADVANCED_STATUS_FAULTED |
                                       FOC_ADVANCED_STATUS_CONFIG_REJECTED;
@@ -177,22 +176,28 @@ foc_advanced_power_trial_action_t foc_advanced_power_trial_validate_control(
             FOC_ADVANCED_FEATURE_DECOUPLING : 0U;
 
     if ((foc_advanced_power_trial_layout_valid(trial) == 0U) ||
-        (telemetry == 0) || (advanced_telemetry == 0) ||
         ((trial->state != FOC_ADVANCED_POWER_TRIAL_STARTUP) &&
          (trial->state != FOC_ADVANCED_POWER_TRIAL_ACTIVE)))
     {
         return FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE;
     }
-    trial->last_advanced_status_flags = advanced_telemetry->status_flags;
-    trial->last_active_features = advanced_telemetry->active_features;
-    if ((telemetry->state == FOC_STATE_FAULT) ||
-        ((advanced_telemetry->status_flags & forbidden_status) != 0U))
+    if ((snapshot == 0) ||
+        (snapshot->struct_size != sizeof(*snapshot)) ||
+        (snapshot->version != FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION))
+    {
+        return foc_advanced_power_trial_stop(
+            trial, FOC_ADVANCED_POWER_TRIAL_RESULT_INVALID_ENVELOPE);
+    }
+    trial->last_advanced_status_flags = snapshot->status_flags;
+    trial->last_active_features = snapshot->active_features;
+    if ((snapshot->state == FOC_STATE_FAULT) ||
+        ((snapshot->status_flags & forbidden_status) != 0U))
     {
         return foc_advanced_power_trial_stop(
             trial, FOC_ADVANCED_POWER_TRIAL_RESULT_ADVANCED_FAULT);
     }
-    if ((telemetry->closed_loop_active == 0U) ||
-        (telemetry->observer_reliable == 0U))
+    if ((snapshot->closed_loop_active == 0U) ||
+        (snapshot->observer_reliable == 0U))
     {
         if (trial->state == FOC_ADVANCED_POWER_TRIAL_ACTIVE)
         {
@@ -203,15 +208,15 @@ foc_advanced_power_trial_action_t foc_advanced_power_trial_validate_control(
     }
     if (expected_features == 0U)
     {
-        if ((advanced_telemetry->active_features != 0U) ||
-            (advanced_telemetry->status_flags != 0U))
+        if ((snapshot->active_features != 0U) ||
+            (snapshot->status_flags != 0U))
         {
             return foc_advanced_power_trial_stop(
                 trial, FOC_ADVANCED_POWER_TRIAL_RESULT_INVALID_ENVELOPE);
         }
     }
-    else if ((advanced_telemetry->active_features != expected_features) ||
-             ((advanced_telemetry->status_flags &
+    else if ((snapshot->active_features != expected_features) ||
+             ((snapshot->status_flags &
                (FOC_ADVANCED_STATUS_CONFIGURED |
                 FOC_ADVANCED_STATUS_BASIC_FALLBACK)) !=
               FOC_ADVANCED_STATUS_CONFIGURED))

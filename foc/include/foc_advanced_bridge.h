@@ -21,6 +21,7 @@ extern "C" {
 #define FOC_ADVANCED_ABI_VERSION       (0x00020000UL)
 #define FOC_ADVANCED_CONFIG_VERSION    (1UL)
 #define FOC_ADVANCED_PROBE_INPUT_VERSION (1UL)
+#define FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION (1UL)
 
 #define FOC_ADVANCED_FEATURE_MTPA             (1UL << 0)
 #define FOC_ADVANCED_FEATURE_FIELD_WEAKENING  (1UL << 1)
@@ -149,6 +150,21 @@ typedef struct
     float flying_start_speed_rad_s;
 } foc_advanced_telemetry_t;
 
+/* Compact, coherent status used by the bounded powered-trial owner in the ADC
+ * ISR.  It deliberately excludes all plotting/diagnostic floats so the safety
+ * owner does not copy the 100-byte base plus 68-byte Advanced telemetry on
+ * every 12 kHz tick. */
+typedef struct
+{
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t state;
+    uint32_t observer_reliable;
+    uint32_t closed_loop_active;
+    uint32_t active_features;
+    uint32_t status_flags;
+} foc_advanced_power_trial_snapshot_t;
+
 uint32_t foc_rust_advanced_abi_version(void);
 foc_status_t foc_rust_default_advanced_config(
     foc_rust_context_t *context,
@@ -159,6 +175,9 @@ foc_status_t foc_rust_configure_advanced(
 foc_status_t foc_rust_get_advanced_telemetry(
     foc_rust_context_t *context,
     foc_advanced_telemetry_t *telemetry);
+foc_status_t foc_rust_get_advanced_power_trial_snapshot(
+    foc_rust_context_t *context,
+    foc_advanced_power_trial_snapshot_t *snapshot);
 /* Executes the normal observer/startup body and the exact advanced/current-loop
  * composition in one call, but substitutes the trusted control frame above.
  * The caller must keep Gate, MOE and all phase channels physically off and must
@@ -179,6 +198,8 @@ _Static_assert(sizeof(foc_advanced_probe_input_t) == 44U,
                "advanced probe input ABI size mismatch");
 _Static_assert(sizeof(foc_advanced_telemetry_t) == 68U,
                "advanced telemetry ABI size mismatch");
+_Static_assert(sizeof(foc_advanced_power_trial_snapshot_t) == 28U,
+               "advanced power-trial snapshot ABI size mismatch");
 
 #ifdef __cplusplus
 }

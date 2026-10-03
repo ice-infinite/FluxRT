@@ -96,13 +96,13 @@ foc_advanced_power_trial_action_t foc_advanced_power_trial_begin_tick(
     foc_advanced_power_trial_t *trial,
     uint32_t fault_epoch,
     uint32_t deadline_miss_count);
-/* Validate controller/Advanced telemetry before PWM commit.  This may enter
+/* Validate the compact coherent controller/Advanced snapshot before PWM
+ * commit.  This may enter
  * ACTIVE but deliberately does not count a tick.  The platform must call
  * record_commit only after the physical output transaction is accepted. */
 foc_advanced_power_trial_action_t foc_advanced_power_trial_validate_control(
     foc_advanced_power_trial_t *trial,
-    const foc_telemetry_t *telemetry,
-    const foc_advanced_telemetry_t *advanced_telemetry);
+    const foc_advanced_power_trial_snapshot_t *snapshot);
 foc_advanced_power_trial_action_t foc_advanced_power_trial_record_commit(
     foc_advanced_power_trial_t *trial);
 void foc_advanced_power_trial_fail(

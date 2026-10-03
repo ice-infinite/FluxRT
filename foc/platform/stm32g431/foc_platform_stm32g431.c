@@ -377,6 +377,7 @@ static foc_advanced_probe_input_t g_foc_advanced_probe_input;
 /* The no-power probe and powered owner are mutually exclusive.  Sharing their
  * latest telemetry preserves the Advanced-Lab heap gate on the 32 KiB target. */
 static foc_advanced_telemetry_t g_foc_advanced_telemetry;
+static foc_advanced_power_trial_snapshot_t g_foc_advanced_power_trial_snapshot;
 static foc_advanced_power_trial_t g_foc_advanced_power_trial;
 static volatile uint32_t g_foc_advanced_probe_active;
 static float g_foc_advanced_probe_nominal_bus_voltage_v;
@@ -4202,15 +4203,9 @@ void ADC1_2_IRQHandler(void)
 #endif
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_ADVANCED_CONTROL_CANDIDATE)
-                /* The bounded owner needs a coherent base telemetry snapshot
-                 * on every candidate tick, independently of trace sampling. */
-                if ((g_foc_advanced_power_trial.state ==
-                     FOC_ADVANCED_POWER_TRIAL_STARTUP) ||
-                    (g_foc_advanced_power_trial.state ==
-                     FOC_ADVANCED_POWER_TRIAL_ACTIVE))
-                {
-                    telemetry_output = &telemetry;
-                }
+                /* The bounded owner reads its compact coherent snapshot after
+                 * the realtime step; do not copy the full 100-byte telemetry
+                 * into the ISR stack solely for this trial. */
 #endif
                 control_cycle_start = DWT->CYCCNT;
                 control_executed = 1U;
@@ -4283,16 +4278,15 @@ void ADC1_2_IRQHandler(void)
                     (control_status == FOC_STATUS_OK))
                 {
                     foc_status_t advanced_status =
-                        foc_rust_get_advanced_telemetry(
+                        foc_rust_get_advanced_power_trial_snapshot(
                             g_foc_controller,
-                            &g_foc_advanced_telemetry);
+                            &g_foc_advanced_power_trial_snapshot);
                     if (advanced_status == FOC_STATUS_OK)
                     {
                         advanced_trial_action =
                             foc_advanced_power_trial_validate_control(
                                 &g_foc_advanced_power_trial,
-                                &telemetry,
-                                &g_foc_advanced_telemetry);
+                                &g_foc_advanced_power_trial_snapshot);
                     }
                     else
                     {

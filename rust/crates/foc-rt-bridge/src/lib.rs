@@ -2667,6 +2667,36 @@ pub unsafe extern "C" fn foc_rust_get_advanced_telemetry(
     FocStatus::Ok
 }
 
+#[cfg(feature = "advanced-foc")]
+#[no_mangle]
+/// Copies only the fields required by the bounded target powered-trial owner.
+/// The caller serializes this read with the realtime step by invoking it from
+/// the same ADC ISR, so the base and Advanced fields form one coherent snapshot.
+///
+/// # Safety
+/// `context` must be initialized; `snapshot` must be exclusively writable.
+pub unsafe extern "C" fn foc_rust_get_advanced_power_trial_snapshot(
+    context: *mut FocRustContextStorage,
+    snapshot: *mut FocAdvancedPowerTrialSnapshot,
+) -> FocStatus {
+    let Some(controller) = (unsafe { controller_mut(context) }) else {
+        return FocStatus::InvalidArgument;
+    };
+    let Some(snapshot) = (unsafe { snapshot.as_mut() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    *snapshot = FocAdvancedPowerTrialSnapshot {
+        struct_size: size_of::<FocAdvancedPowerTrialSnapshot>() as u32,
+        version: FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION,
+        state: controller.telemetry.state,
+        observer_reliable: controller.telemetry.observer_reliable,
+        closed_loop_active: controller.telemetry.closed_loop_active,
+        active_features: controller.advanced_telemetry.active_features,
+        status_flags: controller.advanced_telemetry.status_flags,
+    };
+    FocStatus::Ok
+}
+
 #[no_mangle]
 /// 在调用方提供的存储中**原位构造**控制器，不做任何内存分配。
 /// Initializes caller-owned controller storage without allocating memory.
@@ -4782,6 +4812,7 @@ mod tests {
         let mut runtime = FocRuntimeConfig::default();
         let mut advanced = FocAdvancedRuntimeConfig::default();
         let mut advanced_telemetry = FocAdvancedTelemetry::default();
+        let mut power_trial_snapshot = FocAdvancedPowerTrialSnapshot::default();
         unsafe {
             assert_eq!(foc_rust_init(&mut context), FocStatus::Ok);
             assert_eq!(foc_rust_default_st_config(&mut runtime), FocStatus::Ok);
@@ -4824,6 +4855,17 @@ mod tests {
             );
             assert_eq!(advanced_telemetry.struct_size, 68);
             assert_eq!(advanced_telemetry.abi_version, FOC_ADVANCED_ABI_VERSION);
+            assert_eq!(
+                foc_rust_get_advanced_power_trial_snapshot(&mut context, &mut power_trial_snapshot,),
+                FocStatus::Ok
+            );
+            assert_eq!(power_trial_snapshot.struct_size, 28);
+            assert_eq!(
+                power_trial_snapshot.version,
+                FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION
+            );
+            assert_eq!(power_trial_snapshot.active_features, 0);
+            assert_eq!(power_trial_snapshot.status_flags, 0);
 
             let accepted = advanced;
             advanced.algorithm.enabled_features = foc_control::ADV_FOC_DECOUPLING;
