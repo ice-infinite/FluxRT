@@ -9,6 +9,11 @@ default = []
 stm32g4-cordic = []
 fast-math-benchmark = []
 fast-math-candidate = ["fast-math-benchmark"]
+motion-control = ["foc-control/motion-control"]
+advanced-foc = ["foc-control/advanced-foc"]
+power-management = []
+external-inputs = ["dep:foc-input"]
+native-protocol = ["dep:foc-protocol"]
 
 [lib]
 name = "foc_rt_bridge"
@@ -17,3 +22,5 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 foc-algorithm = { path = "../foc-algorithm" }
 foc-control = { path = "../foc-control" }
+foc-input = { path = "../foc-input", optional = true }
+foc-protocol = { path = "../foc-protocol", optional = true }

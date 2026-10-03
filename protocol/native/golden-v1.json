@@ -1,0 +1,19 @@
+{
+  "schema": "fluxrt-native-golden",
+  "schema_version": 1,
+  "vectors": [
+    {
+      "name": "broadcast-discover-request",
+      "fields": {
+        "flags": 1,
+        "message_type": 1,
+        "source_node": 42,
+        "destination_node": 65535,
+        "axis_id": 65535,
+        "payload_length": 0,
+        "sequence": 2018915346
+      },
+      "frame_hex": "46520114010001002a00ffffffff000012345678e2d63a11"
+    }
+  ]
+}

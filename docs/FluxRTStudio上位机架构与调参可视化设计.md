@@ -14,15 +14,16 @@
 - 执行受控标定、参数辨识和试运行；
 - 记录波形、事件、故障和配置版本；
 - 对比 Rust PC、MATLAB/Simulink 与实机数据；
+- 配置和监视设备已经编译/启用的UART、USB、CAN、EtherCAT及简单外部输入；
 - 后续执行固件升级和恢复。
 
 固件始终是安全和配置合法性的最终权威。FluxRT Studio 可以提出请求，但不能绕过板端
 硬限、状态机、命令租约、fault latch 或 Flash 提交规则。
 
-实施顺序约束：本文先作为设计冻结保留，不代表立即开始上位机代码。只有
-`U0～U5 + U7 + U8-S/U8-T`达到[通用FOC产品路线](FluxRT通用FOC产品架构与双仿真路线图.md)
-规定的软件、双仿真和目标关闭态完成门后，才创建正式协议、FakeDevice和FluxRT Studio
-实现。此前观察高级算法数据使用Rust PC输出和MATLAB/Simulink图表，不以GUI替代仿真证据。
+实施顺序约束：本文只作为最终P7.1的设计冻结，当前不创建上位机目录、Host SDK、页面或
+真实连接。先完成P2.4～P2.8设备端外部控制/通信，再由P2.9实现供未来上位机使用的设备消息、
+schema、golden vectors和Fake client；之后继续此前FOC细节和产品主体，最后才启动本文S0～S6。
+此前观察算法数据继续使用Rust PC输出和MATLAB/Simulink图表，不以GUI替代仿真证据。
 
 ---
 
@@ -43,7 +44,10 @@
 
 ### 2.2 后续扩展
 
-- CAN/CAN-FD 多节点；
+- CAN/CAN-FD 多节点和FluxRT Native；
+- PX4 DroneCAN、Cyphal/UDRAL、MAVLink管理和CANopen/CiA402协议映射；
+- PWM/DShot/Analog/Step-Dir外部输入配置和质量监视；
+- 具备专用从站硬件的平台上的EtherCAT管理与诊断；
 - 标定和电机辨识向导；
 - 参数扫描和自动整定助手；
 - Bootloader、固件升级、校验和回滚；
@@ -104,6 +108,7 @@ host/
       controllers/
       services/
       adapters/
+      clients/
       core/
       models/
       qml/
@@ -179,7 +184,9 @@ protocol/
 - `CalibrationController`；
 - `FaultController`；
 - `FirmwareController`；
-- `SimulationController`。
+- `SimulationController`；
+- `ExternalIoController`；
+- `CommandSourceController`。
 
 Controller 管理页面状态和错误呈现，不包含协议状态机或复杂业务逻辑。
 
@@ -194,7 +201,10 @@ Controller 管理页面状态和错误呈现，不包含协议状态机或复杂
 - `CalibrationService`：向导和步骤编排；
 - `FaultService`：故障历史与冻结帧；
 - `FirmwareService`：镜像检查、升级和恢复；
-- `SimulationService`：Rust/MATLAB/实机数据统一导入和比较。
+- `SimulationService`：Rust/MATLAB/实机数据统一导入和比较；
+- `ExternalIoService`：读取capability、配置事务、输入监视、资源冲突和链路统计；
+- `CommandSourceService`：来源健康、owner、lease、sequence和切换原因；
+- `TransportRegistry`：管理Studio可用的连接adapter，不决定设备端控制来源。
 
 ### 4.4 Adapter 层
 
@@ -213,6 +223,7 @@ statistics()
 
 - `SerialTransport`：USB CDC、ST-LINK VCP、UART；
 - `CanTransport`：USB-CAN/SocketCAN/厂商适配器；
+- `EthercatManagementTransport`：仅对具备EtherCAT管理能力的设备开放，不模拟ESC；
 - `ReplayTransport`：从录制文件重放；
 - `RustSimTransport`：连接 `foc-sim`；
 - `MatlabResultAdapter`：导入 `.mat/.csv/.json`；
@@ -307,7 +318,7 @@ trace schema/version/单位一起返回，GUI 不能依赖某个固件的固定�
 - Modulation / Compensation；
 - Limits / Protection；
 - Thermal / Regeneration；
-- Communication / App；
+- Communication / External I/O / App；
 - Calibration Data。
 
 每个参数显示：
@@ -358,6 +369,24 @@ trace schema/version/单位一起返回，GUI 不能依赖某个固件的固定�
 - 显示 RMSE、峰值、稳态误差、过冲和接管时间；
 - 标注哪些通道是真值、测量值或估算值；
 - 生成差异报告。
+
+### 5.8 外部 I/O 与命令来源
+
+该页面面向UART/USB/CAN/CAN-FD/PX4 DroneCAN/Cyphal/MAVLink管理/CANopen、PWM/DShot/Analog/
+Step-Dir和EtherCAT，但不会为每种协议复制一套页面。统一显示：
+
+- `compiled / configured / healthy`三层能力；
+- 管理链路和当前控制来源分别是什么；
+- transport实例、协议、node ID、bitrate和timeout；
+- pin/timer/ADC/DMA资源占用和冲突；
+- active/saved/draft配置差异；
+- source权限、priority、owner、lease和last sequence；
+- 原始pulse/count/ADC与规范化SI值，只读监视；
+- RX/TX、CRC、parse、drop、overflow、bus-off和watchdog统计。
+
+接口启停复用参数事务，只允许设备在合法状态下Validate/Apply/Commit。页面隐藏、Studio断开或
+切换管理transport都不能悄悄启停设备端输入。详细设备接口契约见
+[可选外部控制与通信架构](可选外部控制与通信架构.md)。
 
 ---
 
@@ -488,6 +517,8 @@ UART/USB 可以采用 COBS 或等价定界编码避免帧边界歧义；CAN 使�
 | Control | SET_MODE、SET_SETPOINT、STOP、EMERGENCY_STOP |
 | State | AXIS_STATE、FEEDBACK、LIMITS、POWER_STATE |
 | Config | READ、BEGIN、SET_BATCH、VALIDATE、APPLY、ROLLBACK、COMMIT |
+| External I/O | CAPABILITIES、CONFIG、STATUS、SOURCE_STATUS、TRANSPORT_STATISTICS、RESOURCE_CONFLICTS |
+| Input Monitor | SUBSCRIBE、SAMPLE、UNSUBSCRIBE；只读，不产生控制命令 |
 | Telemetry | CHANNEL_LIST、SUBSCRIBE、SAMPLE_BLOCK、UNSUBSCRIBE |
 | Trace | CONFIG、ARM、TRIGGER、STATUS、READ_BLOCK、STOP |
 | Fault | SUMMARY、HISTORY、FREEZE_FRAME、CLEAR |
@@ -500,6 +531,7 @@ UART/USB 可以采用 COBS 或等价定界编码避免帧边界歧义；CAN 使�
 - 响应包含明确 status code 和拒绝原因；
 - 可重试请求必须幂等；
 - 设备报告 capabilities，GUI 不显示不支持的控制项；
+- capabilities必须区分compiled、configured和healthy，管理连接不等于获得Axis控制权；
 - 未知消息和未知字段安全拒绝；
 - 协议版本不兼容时只允许 identity、诊断和升级；
 - 禁止任意内存读写和任意函数调用协议。
@@ -656,13 +688,16 @@ Host UI PASS 不能代替上述目标证据。
 
 ## 12. 实施阶段
 
+本节全部归最终任务P7.1。P2.9只提供设备端协议和Fake client，不执行以下GUI/Host工作。
+
 ### S0：协议和 UI 契约冻结
 
 - 定义 identity、capabilities、status code；
 - 定义参数 metadata 和安全等级；
 - 定义遥测 channel schema；
 - 定义连接、配置和控制状态机；
-- 建立 FakeDevice 和 golden vectors。
+- 建立 FakeDevice 和 golden vectors；
+- 增加外部I/O capability/config/status/source/statistics模型和多能力FakeDevice矩阵。
 
 完成门：没有真实设备也能运行页面原型和协议测试。
 
@@ -673,7 +708,8 @@ Host UI PASS 不能代替上述目标证据。
 - Dashboard；
 - Status/Telemetry/Trace 只读显示；
 - CSV/MAT 导出；
-- 不包含 arm 和参数修改。
+- 不包含 arm 和参数修改；
+- 外部I/O、命令来源和链路统计只读页。
 
 完成门：接入当前目标板读取状态，不改变设备配置和输出。
 
@@ -683,7 +719,8 @@ Host UI PASS 不能代替上述目标证据。
 - Read/Compare/Draft；
 - P1/P2 权限；
 - Validate/Apply Volatile/Rollback；
-- Disabled 下 Commit 和回读 CRC。
+- Disabled 下 Commit 和回读 CRC；
+- `ExternalIoConfig`草稿、资源冲突、Validate/Apply/Rollback/Commit。
 
 完成门：断线、拒绝、版本冲突和 Flash 失败均不会留下不明配置。
 
@@ -693,7 +730,8 @@ Host UI PASS 不能代替上述目标证据。
 - Torque/Velocity/Position 页面；
 - Stop/Emergency Stop；
 - 超时安全动作；
-- 低功率试运行流程。
+- 低功率试运行流程；
+- 外部输入质量监视、active source、lease和timeout可视化。
 
 完成门：关闭 GUI、拔线和停止 keepalive 后，固件按定义进入安全状态。
 
@@ -715,9 +753,11 @@ Host UI PASS 不能代替上述目标证据。
 - 比较报告；
 - scenario/profile 一致性检查。
 
-### S6：CAN、多节点和升级
+### S6：CAN、多协议、多节点和升级
 
-- CAN transport 和多节点；
+- CAN/CAN-FD transport 和多节点；
+- PX4 DroneCAN、Cyphal/UDRAL、MAVLink管理和CANopen映射管理；
+- EtherCAT管理页仅随真实ESC/平台capability启用；
 - 多 Axis；
 - Bootloader；
 - 固件 manifest、升级和回滚；
@@ -742,6 +782,9 @@ host/fluxrt-studio/
 
 protocol/
   identity-v1
+  external-io-capability-v1
+  external-io-status-v1
+  command-source-status-v1
   status-v1
   telemetry-channel-v1
   trace-block-v1

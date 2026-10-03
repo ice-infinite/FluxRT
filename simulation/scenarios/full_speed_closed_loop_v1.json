@@ -1,0 +1,14 @@
+{
+  "contract": "fluxrt-full-speed-closed-loop",
+  "version": 1,
+  "model_scope": "design-not-hardware-truth",
+  "trace_decimation": 120,
+  "cases": [
+    {"id":"forward_base", "duration_s":1.5, "target_initial_rpm":0.0, "target_step_time_s":0.05, "target_final_rpm":600.0, "load_initial_nm":0.0, "load_step_time_s":2.0, "load_final_nm":0.0, "source_initial_v":13.0, "source_step_time_s":2.0, "source_final_v":13.0, "advanced_features":8},
+    {"id":"forward_high_fw", "duration_s":2.0, "target_initial_rpm":0.0, "target_step_time_s":0.05, "target_final_rpm":1400.0, "load_initial_nm":0.0, "load_step_time_s":3.0, "load_final_nm":0.0, "source_initial_v":13.0, "source_step_time_s":3.0, "source_final_v":13.0, "advanced_features":10},
+    {"id":"reverse_base", "duration_s":1.5, "target_initial_rpm":0.0, "target_step_time_s":0.05, "target_final_rpm":-600.0, "load_initial_nm":0.0, "load_step_time_s":2.0, "load_final_nm":0.0, "source_initial_v":13.0, "source_step_time_s":2.0, "source_final_v":13.0, "advanced_features":8},
+    {"id":"load_step", "duration_s":2.0, "target_initial_rpm":0.0, "target_step_time_s":0.05, "target_final_rpm":800.0, "load_initial_nm":0.0, "load_step_time_s":1.0, "load_final_nm":0.002, "source_initial_v":13.0, "source_step_time_s":3.0, "source_final_v":13.0, "advanced_features":8},
+    {"id":"bus_sag", "duration_s":2.0, "target_initial_rpm":0.0, "target_step_time_s":0.05, "target_final_rpm":900.0, "load_initial_nm":0.0, "load_step_time_s":3.0, "load_final_nm":0.0, "source_initial_v":13.0, "source_step_time_s":1.0, "source_final_v":10.5, "advanced_features":10},
+    {"id":"regen_reversal", "duration_s":3.5, "target_initial_rpm":900.0, "target_step_time_s":1.0, "target_final_rpm":-200.0, "load_initial_nm":0.0, "load_step_time_s":4.0, "load_final_nm":0.0, "source_initial_v":13.0, "source_step_time_s":4.0, "source_final_v":13.0, "advanced_features":10}
+  ]
+}

@@ -6,15 +6,26 @@
 //! adapter may execute [`PreparedConfigWrite`] only while the Axis is safe and
 //! disabled; P3.2 will add the pending/active transaction above this layer.
 
-use crate::{CommandPermissions, CommandSourcePolicy, FeedbackMode, ProductCommandKind};
+use crate::{
+    CommandPermissions, CommandSourcePolicy, ControlMode, FeedbackMode, ProductCommandKind,
+};
 
 pub const CONFIG_STORAGE_FORMAT_VERSION: u16 = 1;
-pub const CONFIG_SCHEMA_VERSION: u16 = 1;
+pub const CONFIG_SCHEMA_VERSION: u16 = 4;
+pub const CONFIG_SCHEMA_V3_VERSION: u16 = 3;
+pub const CONFIG_SCHEMA_V2_VERSION: u16 = 2;
+pub const CONFIG_SCHEMA_V1_VERSION: u16 = 1;
 pub const CONFIG_LEGACY_SCHEMA_VERSION: u16 = 0;
 pub const CONFIG_GROUP_VERSION: u32 = 1;
 pub const CONFIG_SLOT_COUNT: usize = 2;
-pub const CONFIG_SLOT_SIZE: usize = 512;
+pub const CONFIG_SLOT_SIZE: usize = 768;
 pub const CONFIG_MAX_COMMAND_SOURCES: usize = 4;
+pub const EXTERNAL_IO_LINK_COUNT: usize = 4;
+pub const EXTERNAL_IO_INPUT_COUNT: usize = 4;
+pub const EXTERNAL_IO_CONFIG_VERSION: u32 = 2;
+pub const EXTERNAL_IO_CONFIG_SIZE: u32 = 384;
+pub const SIMPLE_INPUT_CONFIG_VERSION: u32 = 1;
+pub const SIMPLE_INPUT_CONFIG_SIZE: u32 = 88;
 
 pub const COMMAND_SOURCE_PERMISSION_RELEASE: u32 = 1 << ProductCommandKind::Release as u32;
 pub const COMMAND_SOURCE_PERMISSION_AXIS_REQUEST: u32 = 1 << ProductCommandKind::AxisRequest as u32;
@@ -33,7 +44,12 @@ const CONFIG_COMMIT_MAGIC: u32 = 0x434D_4954; // "CMIT" in little endian.
 const CONFIG_HEADER_SIZE: usize = 40;
 const CONFIG_PAYLOAD_OFFSET: usize = CONFIG_HEADER_SIZE;
 const CONFIG_COMMIT_OFFSET: usize = CONFIG_SLOT_SIZE - 4;
+const CONFIG_LEGACY_SLOT_SIZE: usize = 512;
+const CONFIG_LEGACY_COMMIT_OFFSET: usize = CONFIG_LEGACY_SLOT_SIZE - 4;
 const CONFIG_MAX_PAYLOAD_SIZE: usize = CONFIG_COMMIT_OFFSET - CONFIG_PAYLOAD_OFFSET;
+const CONFIG_PAYLOAD_V4_SIZE: usize = 724;
+const CONFIG_PAYLOAD_V3_SIZE: usize = 636;
+const CONFIG_PAYLOAD_V2_SIZE: usize = 340;
 const CONFIG_PAYLOAD_V1_SIZE: usize = 316;
 const CONFIG_PAYLOAD_V0_SIZE: usize = 284;
 const WRAPPING_HALF_RANGE: u32 = 0x8000_0000;
@@ -70,6 +86,39 @@ pub const CALIBRATION_KNOWN_MASK: u32 = CALIBRATION_CURRENT_OFFSETS_VALID
     | CALIBRATION_PHASE_VOLTAGE_VALID
     | CALIBRATION_ENCODER_VALID
     | CALIBRATION_HALL_VALID;
+
+pub const EXTERNAL_TRANSPORT_UART: u32 = 1 << 0;
+pub const EXTERNAL_TRANSPORT_USB_CDC: u32 = 1 << 1;
+pub const EXTERNAL_TRANSPORT_CAN_CLASSIC: u32 = 1 << 2;
+pub const EXTERNAL_TRANSPORT_CAN_FD: u32 = 1 << 3;
+pub const EXTERNAL_TRANSPORT_ETHERCAT: u32 = 1 << 4;
+pub const EXTERNAL_TRANSPORT_KNOWN_MASK: u32 = EXTERNAL_TRANSPORT_UART
+    | EXTERNAL_TRANSPORT_USB_CDC
+    | EXTERNAL_TRANSPORT_CAN_CLASSIC
+    | EXTERNAL_TRANSPORT_CAN_FD
+    | EXTERNAL_TRANSPORT_ETHERCAT;
+
+pub const EXTERNAL_INPUT_PWM_PULSE: u32 = 1 << 0;
+pub const EXTERNAL_INPUT_DSHOT: u32 = 1 << 1;
+pub const EXTERNAL_INPUT_ANALOG: u32 = 1 << 2;
+pub const EXTERNAL_INPUT_STEP_DIR: u32 = 1 << 3;
+pub const EXTERNAL_INPUT_KNOWN_MASK: u32 = EXTERNAL_INPUT_PWM_PULSE
+    | EXTERNAL_INPUT_DSHOT
+    | EXTERNAL_INPUT_ANALOG
+    | EXTERNAL_INPUT_STEP_DIR;
+
+pub const EXTERNAL_PROTOCOL_DISABLED: u32 = 0;
+pub const EXTERNAL_PROTOCOL_FLUXRT_NATIVE: u32 = 1;
+pub const EXTERNAL_PROTOCOL_DRONECAN: u32 = 2;
+pub const EXTERNAL_PROTOCOL_VESC_CAN: u32 = 3;
+pub const EXTERNAL_PROTOCOL_CANOPEN_CIA402: u32 = 4;
+pub const EXTERNAL_PROTOCOL_ETHERCAT_COE_CIA402: u32 = 5;
+
+pub const EXTERNAL_FAILURE_RELEASE: u32 = 0;
+pub const EXTERNAL_FAILURE_CONTROLLED_STOP: u32 = 1;
+pub const EXTERNAL_FAILURE_HOLD: u32 = 2;
+const EXTERNAL_SIMPLE_INPUT_PERMISSIONS: u32 =
+    COMMAND_SOURCE_PERMISSION_RELEASE | COMMAND_SOURCE_PERMISSION_SETPOINT;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BoardConfig {
@@ -123,6 +172,14 @@ pub struct AxisConfig {
     pub position_kp: f32,
     pub soft_limit_min_rad: f32,
     pub soft_limit_max_rad: f32,
+    /// Zero keeps the P4.2 motion layer unavailable. One enables mapping this
+    /// configuration into the motion planner and cascaded controller.
+    pub motion_control_enabled: u32,
+    pub torque_ramp_rate_nm_s: f32,
+    pub velocity_ramp_rate_rad_s2: f32,
+    pub position_filter_bandwidth_rad_s: f32,
+    pub trajectory_acceleration_rad_s2: f32,
+    pub trajectory_deceleration_rad_s2: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -176,6 +233,224 @@ pub struct AppConfig {
     pub command_sources: [CommandSourceConfig; CONFIG_MAX_COMMAND_SOURCES],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ExternalSourcePolicy {
+    pub source_id: u32,
+    pub priority: u32,
+    pub permissions: u32,
+    pub lease_ms: u32,
+    pub command_timeout_ms: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ExternalLinkConfig {
+    pub protocol: u32,
+    pub node_id: u32,
+    pub nominal_bitrate: u32,
+    pub data_bitrate: u32,
+    pub heartbeat_ms: u32,
+    pub source: ExternalSourcePolicy,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ExternalInputConfig {
+    pub control_mode: u32,
+    pub failure_action: u32,
+    pub source: ExternalSourcePolicy,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CenteredInputCalibrationConfig {
+    pub raw_min: i32,
+    pub raw_neutral: i32,
+    pub raw_max: i32,
+    pub deadband: u32,
+    pub negative_limit_si: f32,
+    pub positive_limit_si: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct StepDirCalibrationConfig {
+    pub full_steps_per_revolution: u32,
+    pub microsteps: u32,
+    pub gear_numerator: u32,
+    pub gear_denominator: u32,
+    pub direction: i32,
+    pub zero_count: i32,
+    pub zero_position_rad: f32,
+    pub maximum_step_rate_hz: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SimpleInputConfig {
+    pub struct_size: u32,
+    pub version: u32,
+    pub pwm: CenteredInputCalibrationConfig,
+    pub analog: CenteredInputCalibrationConfig,
+    pub step_dir: StepDirCalibrationConfig,
+}
+
+impl Default for SimpleInputConfig {
+    fn default() -> Self {
+        Self {
+            struct_size: SIMPLE_INPUT_CONFIG_SIZE,
+            version: SIMPLE_INPUT_CONFIG_VERSION,
+            pwm: CenteredInputCalibrationConfig::default(),
+            analog: CenteredInputCalibrationConfig::default(),
+            step_dir: StepDirCalibrationConfig::default(),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExternalIoConfig {
+    pub struct_size: u32,
+    pub version: u32,
+    pub revision: u32,
+    pub transport_enable_mask: u32,
+    pub input_enable_mask: u32,
+    pub reserved: u32,
+    pub links: [ExternalLinkConfig; EXTERNAL_IO_LINK_COUNT],
+    pub inputs: [ExternalInputConfig; EXTERNAL_IO_INPUT_COUNT],
+    pub simple_inputs: SimpleInputConfig,
+}
+
+impl Default for ExternalIoConfig {
+    fn default() -> Self {
+        Self {
+            struct_size: EXTERNAL_IO_CONFIG_SIZE,
+            version: EXTERNAL_IO_CONFIG_VERSION,
+            revision: 1,
+            transport_enable_mask: 0,
+            input_enable_mask: 0,
+            reserved: 0,
+            links: [ExternalLinkConfig::default(); EXTERNAL_IO_LINK_COUNT],
+            inputs: [ExternalInputConfig::default(); EXTERNAL_IO_INPUT_COUNT],
+            simple_inputs: SimpleInputConfig::default(),
+        }
+    }
+}
+
+impl ExternalIoConfig {
+    pub const fn is_default_off(&self) -> bool {
+        self.transport_enable_mask == 0 && self.input_enable_mask == 0
+    }
+
+    fn validate(&self) -> Result<(), ConfigValidationError> {
+        if self.struct_size != EXTERNAL_IO_CONFIG_SIZE
+            || self.version != EXTERNAL_IO_CONFIG_VERSION
+            || self.revision == 0
+            || self.reserved != 0
+            || self.simple_inputs.struct_size != SIMPLE_INPUT_CONFIG_SIZE
+            || self.simple_inputs.version != SIMPLE_INPUT_CONFIG_VERSION
+            || self.transport_enable_mask & !EXTERNAL_TRANSPORT_KNOWN_MASK != 0
+            || self.input_enable_mask & !EXTERNAL_INPUT_KNOWN_MASK != 0
+            || self.transport_enable_mask
+                & (EXTERNAL_TRANSPORT_CAN_CLASSIC | EXTERNAL_TRANSPORT_CAN_FD)
+                == (EXTERNAL_TRANSPORT_CAN_CLASSIC | EXTERNAL_TRANSPORT_CAN_FD)
+        {
+            return Err(ConfigValidationError::ExternalIo);
+        }
+
+        let mut source_ids = [0_u32; EXTERNAL_IO_LINK_COUNT + EXTERNAL_IO_INPUT_COUNT];
+        let mut source_count = 0_usize;
+        for (index, link) in self.links.iter().enumerate() {
+            if !external_link_enabled(index, self.transport_enable_mask) {
+                continue;
+            }
+            if !external_protocol_allowed(index, link.protocol)
+                || (index == 0 && link.nominal_bitrate == 0)
+                || (index == 2
+                    && (link.nominal_bitrate == 0
+                        || (self.transport_enable_mask & EXTERNAL_TRANSPORT_CAN_FD != 0
+                            && link.data_bitrate == 0)
+                        || (self.transport_enable_mask & EXTERNAL_TRANSPORT_CAN_CLASSIC != 0
+                            && link.data_bitrate != 0)))
+                || (index == 3 && link.heartbeat_ms == 0)
+                || !external_policy_valid(link.source, COMMAND_SOURCE_PERMISSION_KNOWN_MASK, true)
+            {
+                return Err(ConfigValidationError::ExternalIo);
+            }
+            if link.source.source_id != 0 {
+                insert_external_source(&mut source_ids, &mut source_count, link.source.source_id)?;
+            }
+        }
+        let input_bits = [
+            EXTERNAL_INPUT_PWM_PULSE,
+            EXTERNAL_INPUT_DSHOT,
+            EXTERNAL_INPUT_ANALOG,
+            EXTERNAL_INPUT_STEP_DIR,
+        ];
+        for (index, input) in self.inputs.iter().enumerate() {
+            if self.input_enable_mask & input_bits[index] == 0 {
+                continue;
+            }
+            let mode = ControlMode::try_from(input.control_mode)
+                .map_err(|_| ConfigValidationError::ExternalIo)?;
+            if !matches!(
+                mode,
+                ControlMode::Torque | ControlMode::Velocity | ControlMode::Position
+            ) || !external_policy_valid(input.source, EXTERNAL_SIMPLE_INPUT_PERMISSIONS, false)
+                || !matches!(
+                    input.failure_action,
+                    EXTERNAL_FAILURE_RELEASE | EXTERNAL_FAILURE_CONTROLLED_STOP
+                ) && !(index == 3 && input.failure_action == EXTERNAL_FAILURE_HOLD)
+            {
+                return Err(ConfigValidationError::ExternalIo);
+            }
+            if (index == 0 && !centered_input_calibration_valid(self.simple_inputs.pwm))
+                || (index == 2 && !centered_input_calibration_valid(self.simple_inputs.analog))
+                || (index == 3
+                    && (mode != ControlMode::Position
+                        || !step_dir_calibration_valid(self.simple_inputs.step_dir)))
+            {
+                return Err(ConfigValidationError::ExternalIo);
+            }
+            insert_external_source(&mut source_ids, &mut source_count, input.source.source_id)?;
+        }
+        Ok(())
+    }
+}
+
+const _: () = assert!(core::mem::size_of::<ExternalSourcePolicy>() == 20);
+const _: () = assert!(core::mem::size_of::<ExternalLinkConfig>() == 40);
+const _: () = assert!(core::mem::size_of::<ExternalInputConfig>() == 28);
+const _: () = assert!(core::mem::size_of::<CenteredInputCalibrationConfig>() == 24);
+const _: () = assert!(core::mem::size_of::<StepDirCalibrationConfig>() == 32);
+const _: () =
+    assert!(core::mem::size_of::<SimpleInputConfig>() == SIMPLE_INPUT_CONFIG_SIZE as usize);
+const _: () = assert!(core::mem::size_of::<ExternalIoConfig>() == EXTERNAL_IO_CONFIG_SIZE as usize);
+
+fn centered_input_calibration_valid(config: CenteredInputCalibrationConfig) -> bool {
+    let negative_span = i64::from(config.raw_neutral) - i64::from(config.raw_min);
+    let positive_span = i64::from(config.raw_max) - i64::from(config.raw_neutral);
+    negative_span > 0
+        && positive_span > 0
+        && i64::from(config.deadband) < negative_span
+        && i64::from(config.deadband) < positive_span
+        && config.negative_limit_si.is_finite()
+        && config.negative_limit_si > 0.0
+        && config.positive_limit_si.is_finite()
+        && config.positive_limit_si > 0.0
+}
+
+fn step_dir_calibration_valid(config: StepDirCalibrationConfig) -> bool {
+    config.full_steps_per_revolution != 0
+        && config.microsteps != 0
+        && config.gear_numerator != 0
+        && config.gear_denominator != 0
+        && matches!(config.direction, -1 | 1)
+        && config.zero_position_rad.is_finite()
+        && config.maximum_step_rate_hz != 0
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CalibrationData {
     pub version: u32,
@@ -200,6 +475,7 @@ pub struct ConfigBundle {
     pub inverter: InverterConfig,
     pub axis: AxisConfig,
     pub app: AppConfig,
+    pub external_io: ExternalIoConfig,
     pub calibration: CalibrationData,
 }
 
@@ -221,6 +497,7 @@ pub enum ConfigValidationError {
     CommandSourcePermissions,
     CommandSourceTime,
     NonCanonicalUnusedSource,
+    ExternalIo,
     CalibrationFlags,
     CalibrationIdentity,
     CalibrationValue,
@@ -295,6 +572,7 @@ impl ConfigBundle {
         }
         self.validate_axis()?;
         self.validate_app()?;
+        self.external_io.validate()?;
         self.validate_calibration()?;
         Ok(())
     }
@@ -342,6 +620,24 @@ impl ConfigBundle {
             || !self.axis.soft_limit_min_rad.is_finite()
             || !self.axis.soft_limit_max_rad.is_finite()
             || self.axis.soft_limit_min_rad >= self.axis.soft_limit_max_rad
+            || self.axis.motion_control_enabled > 1
+        {
+            return Err(ConfigValidationError::Axis);
+        }
+        let motion_values = [
+            self.axis.torque_ramp_rate_nm_s,
+            self.axis.velocity_ramp_rate_rad_s2,
+            self.axis.position_filter_bandwidth_rad_s,
+            self.axis.trajectory_acceleration_rad_s2,
+            self.axis.trajectory_deceleration_rad_s2,
+        ];
+        if self.axis.motion_control_enabled == 0 {
+            if motion_values != [0.0; 5] {
+                return Err(ConfigValidationError::Axis);
+            }
+        } else if motion_values.iter().any(|value| !finite_positive(*value))
+            || self.axis.position_kp <= 0.0
+            || (self.axis.velocity_kp == 0.0 && self.axis.velocity_ki == 0.0)
         {
             return Err(ConfigValidationError::Axis);
         }
@@ -560,6 +856,7 @@ pub struct PreparedConfigWrite {
     pub sequence: u32,
     image: ConfigSlot,
     prefix_len: usize,
+    commit_offset: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -581,7 +878,7 @@ impl PreparedConfigWrite {
         let offset = if step < self.prefix_len {
             step
         } else if step < self.write_step_count() {
-            CONFIG_COMMIT_OFFSET + step - self.prefix_len
+            self.commit_offset + step - self.prefix_len
         } else {
             return None;
         };
@@ -611,9 +908,6 @@ pub fn decode_config_slot(slot: &ConfigSlot) -> Result<DecodedConfigRecord, Conf
     if slot.is_erased() {
         return Err(ConfigRecordError::Erased);
     }
-    if read_u32(&slot.bytes, CONFIG_COMMIT_OFFSET) != CONFIG_COMMIT_MAGIC {
-        return Err(ConfigRecordError::CommitMissing);
-    }
     if read_u32(&slot.bytes, HEADER_MAGIC_OFFSET) != CONFIG_RECORD_MAGIC
         || read_u16(&slot.bytes, HEADER_SIZE_OFFSET) as usize != CONFIG_HEADER_SIZE
         || read_u32(&slot.bytes, HEADER_RESERVED_OFFSET) != 0
@@ -624,11 +918,17 @@ pub fn decode_config_slot(slot: &ConfigSlot) -> Result<DecodedConfigRecord, Conf
         return Err(ConfigRecordError::UnsupportedStorageVersion);
     }
     let schema_version = read_u16(&slot.bytes, HEADER_SCHEMA_VERSION_OFFSET);
-    let expected_payload_size = match schema_version {
-        CONFIG_SCHEMA_VERSION => CONFIG_PAYLOAD_V1_SIZE,
-        CONFIG_LEGACY_SCHEMA_VERSION => CONFIG_PAYLOAD_V0_SIZE,
+    let (expected_payload_size, commit_offset) = match schema_version {
+        CONFIG_SCHEMA_VERSION => (CONFIG_PAYLOAD_V4_SIZE, CONFIG_COMMIT_OFFSET),
+        CONFIG_SCHEMA_V3_VERSION => (CONFIG_PAYLOAD_V3_SIZE, CONFIG_COMMIT_OFFSET),
+        CONFIG_SCHEMA_V2_VERSION => (CONFIG_PAYLOAD_V2_SIZE, CONFIG_LEGACY_COMMIT_OFFSET),
+        CONFIG_SCHEMA_V1_VERSION => (CONFIG_PAYLOAD_V1_SIZE, CONFIG_LEGACY_COMMIT_OFFSET),
+        CONFIG_LEGACY_SCHEMA_VERSION => (CONFIG_PAYLOAD_V0_SIZE, CONFIG_LEGACY_COMMIT_OFFSET),
         _ => return Err(ConfigRecordError::UnsupportedSchemaVersion),
     };
+    if read_u32(&slot.bytes, commit_offset) != CONFIG_COMMIT_MAGIC {
+        return Err(ConfigRecordError::CommitMissing);
+    }
     let payload_size = read_u16(&slot.bytes, HEADER_PAYLOAD_SIZE_OFFSET) as usize;
     if payload_size != expected_payload_size || payload_size > CONFIG_MAX_PAYLOAD_SIZE {
         return Err(ConfigRecordError::PayloadLength);
@@ -778,10 +1078,15 @@ fn encode_record(
     schema_version: u16,
 ) -> Result<PreparedConfigWrite, ConfigWriteError> {
     let mut image = ConfigSlot::erased();
+    let commit_offset = if schema_version >= CONFIG_SCHEMA_V3_VERSION {
+        CONFIG_COMMIT_OFFSET
+    } else {
+        CONFIG_LEGACY_COMMIT_OFFSET
+    };
     let payload_size = encode_payload(
         &config,
         schema_version,
-        &mut image.bytes[CONFIG_PAYLOAD_OFFSET..CONFIG_COMMIT_OFFSET],
+        &mut image.bytes[CONFIG_PAYLOAD_OFFSET..commit_offset],
     );
     write_u32(&mut image.bytes, HEADER_MAGIC_OFFSET, CONFIG_RECORD_MAGIC);
     write_u16(
@@ -823,18 +1128,19 @@ fn encode_record(
     write_u32(&mut image.bytes, HEADER_RESERVED_OFFSET, 0);
     let record_crc = record_crc32(&image.bytes, CONFIG_PAYLOAD_OFFSET + payload_size);
     write_u32(&mut image.bytes, HEADER_RECORD_CRC_OFFSET, record_crc);
-    write_u32(&mut image.bytes, CONFIG_COMMIT_OFFSET, CONFIG_COMMIT_MAGIC);
+    write_u32(&mut image.bytes, commit_offset, CONFIG_COMMIT_MAGIC);
     Ok(PreparedConfigWrite {
         target_slot,
         sequence,
         image,
         prefix_len: CONFIG_PAYLOAD_OFFSET + payload_size,
+        commit_offset,
     })
 }
 
 fn encode_payload(config: &ConfigBundle, schema: u16, output: &mut [u8]) -> usize {
     let mut writer = PayloadWriter::new(output);
-    if schema == CONFIG_SCHEMA_VERSION {
+    if schema != CONFIG_LEGACY_SCHEMA_VERSION {
         writer.u32(config.bundle_revision);
         writer.u32(config.generated_by_version);
         writer.u32(config.board.version);
@@ -847,7 +1153,7 @@ fn encode_payload(config: &ConfigBundle, schema: u16, output: &mut [u8]) -> usiz
     writer.f32(config.board.current_gain_a_per_count);
     writer.f32(config.board.bus_voltage_v_per_count);
 
-    if schema == CONFIG_SCHEMA_VERSION {
+    if schema != CONFIG_LEGACY_SCHEMA_VERSION {
         writer.u32(config.motor.version);
     }
     writer.u32(config.motor.motor_id);
@@ -859,7 +1165,7 @@ fn encode_payload(config: &ConfigBundle, schema: u16, output: &mut [u8]) -> usiz
     writer.f32(config.motor.continuous_current_a);
     writer.f32(config.motor.maximum_speed_rad_s);
 
-    if schema == CONFIG_SCHEMA_VERSION {
+    if schema != CONFIG_LEGACY_SCHEMA_VERSION {
         writer.u32(config.inverter.version);
     }
     writer.u32(config.inverter.inverter_id);
@@ -871,7 +1177,7 @@ fn encode_payload(config: &ConfigBundle, schema: u16, output: &mut [u8]) -> usiz
     writer.f32(config.inverter.brake_resistance_ohm);
     writer.f32(config.inverter.maximum_duty);
 
-    if schema == CONFIG_SCHEMA_VERSION {
+    if schema != CONFIG_LEGACY_SCHEMA_VERSION {
         writer.u32(config.axis.version);
     }
     writer.u32(config.axis.axis_id);
@@ -884,8 +1190,16 @@ fn encode_payload(config: &ConfigBundle, schema: u16, output: &mut [u8]) -> usiz
     writer.f32(config.axis.position_kp);
     writer.f32(config.axis.soft_limit_min_rad);
     writer.f32(config.axis.soft_limit_max_rad);
+    if schema >= CONFIG_SCHEMA_V2_VERSION {
+        writer.u32(config.axis.motion_control_enabled);
+        writer.f32(config.axis.torque_ramp_rate_nm_s);
+        writer.f32(config.axis.velocity_ramp_rate_rad_s2);
+        writer.f32(config.axis.position_filter_bandwidth_rad_s);
+        writer.f32(config.axis.trajectory_acceleration_rad_s2);
+        writer.f32(config.axis.trajectory_deceleration_rad_s2);
+    }
 
-    if schema == CONFIG_SCHEMA_VERSION {
+    if schema != CONFIG_LEGACY_SCHEMA_VERSION {
         writer.u32(config.app.version);
     }
     writer.u32(config.app.can_node_id);
@@ -899,7 +1213,11 @@ fn encode_payload(config: &ConfigBundle, schema: u16, output: &mut [u8]) -> usiz
         writer.u32(source.command_timeout_ms);
     }
 
-    if schema == CONFIG_SCHEMA_VERSION {
+    if schema >= CONFIG_SCHEMA_V3_VERSION {
+        encode_external_io(&config.external_io, schema, &mut writer);
+    }
+
+    if schema != CONFIG_LEGACY_SCHEMA_VERSION {
         writer.u32(config.calibration.version);
     }
     writer.u32(config.calibration.board_id);
@@ -920,10 +1238,165 @@ fn encode_payload(config: &ConfigBundle, schema: u16, output: &mut [u8]) -> usiz
     writer.position
 }
 
+fn encode_external_policy(policy: ExternalSourcePolicy, writer: &mut PayloadWriter<'_>) {
+    writer.u32(policy.source_id);
+    writer.u32(policy.priority);
+    writer.u32(policy.permissions);
+    writer.u32(policy.lease_ms);
+    writer.u32(policy.command_timeout_ms);
+}
+
+fn encode_external_io(config: &ExternalIoConfig, schema: u16, writer: &mut PayloadWriter<'_>) {
+    if schema >= CONFIG_SCHEMA_VERSION {
+        writer.u32(config.struct_size);
+        writer.u32(config.version);
+    } else {
+        writer.u32(296);
+        writer.u32(1);
+    }
+    writer.u32(config.revision);
+    writer.u32(config.transport_enable_mask);
+    writer.u32(config.input_enable_mask);
+    writer.u32(config.reserved);
+    for link in config.links {
+        writer.u32(link.protocol);
+        writer.u32(link.node_id);
+        writer.u32(link.nominal_bitrate);
+        writer.u32(link.data_bitrate);
+        writer.u32(link.heartbeat_ms);
+        encode_external_policy(link.source, writer);
+    }
+    for input in config.inputs {
+        writer.u32(input.control_mode);
+        writer.u32(input.failure_action);
+        encode_external_policy(input.source, writer);
+    }
+    if schema >= CONFIG_SCHEMA_VERSION {
+        writer.u32(config.simple_inputs.struct_size);
+        writer.u32(config.simple_inputs.version);
+        encode_centered_input(config.simple_inputs.pwm, writer);
+        encode_centered_input(config.simple_inputs.analog, writer);
+        writer.u32(config.simple_inputs.step_dir.full_steps_per_revolution);
+        writer.u32(config.simple_inputs.step_dir.microsteps);
+        writer.u32(config.simple_inputs.step_dir.gear_numerator);
+        writer.u32(config.simple_inputs.step_dir.gear_denominator);
+        writer.u32(config.simple_inputs.step_dir.direction as u32);
+        writer.u32(config.simple_inputs.step_dir.zero_count as u32);
+        writer.f32(config.simple_inputs.step_dir.zero_position_rad);
+        writer.u32(config.simple_inputs.step_dir.maximum_step_rate_hz);
+    }
+}
+
+fn encode_centered_input(config: CenteredInputCalibrationConfig, writer: &mut PayloadWriter<'_>) {
+    writer.u32(config.raw_min as u32);
+    writer.u32(config.raw_neutral as u32);
+    writer.u32(config.raw_max as u32);
+    writer.u32(config.deadband);
+    writer.f32(config.negative_limit_si);
+    writer.f32(config.positive_limit_si);
+}
+
+fn decode_external_policy(
+    reader: &mut PayloadReader<'_>,
+) -> Result<ExternalSourcePolicy, ConfigRecordError> {
+    Ok(ExternalSourcePolicy {
+        source_id: reader.u32()?,
+        priority: reader.u32()?,
+        permissions: reader.u32()?,
+        lease_ms: reader.u32()?,
+        command_timeout_ms: reader.u32()?,
+    })
+}
+
+fn decode_external_io(
+    reader: &mut PayloadReader<'_>,
+    schema: u16,
+) -> Result<ExternalIoConfig, ConfigRecordError> {
+    let struct_size = reader.u32()?;
+    let version = reader.u32()?;
+    let revision = reader.u32()?;
+    let transport_enable_mask = reader.u32()?;
+    let mut input_enable_mask = reader.u32()?;
+    let reserved = reader.u32()?;
+    let mut links = [ExternalLinkConfig::default(); EXTERNAL_IO_LINK_COUNT];
+    for link in &mut links {
+        *link = ExternalLinkConfig {
+            protocol: reader.u32()?,
+            node_id: reader.u32()?,
+            nominal_bitrate: reader.u32()?,
+            data_bitrate: reader.u32()?,
+            heartbeat_ms: reader.u32()?,
+            source: decode_external_policy(reader)?,
+        };
+    }
+    let mut inputs = [ExternalInputConfig::default(); EXTERNAL_IO_INPUT_COUNT];
+    for input in &mut inputs {
+        *input = ExternalInputConfig {
+            control_mode: reader.u32()?,
+            failure_action: reader.u32()?,
+            source: decode_external_policy(reader)?,
+        };
+    }
+    let simple_inputs = if schema >= CONFIG_SCHEMA_VERSION {
+        SimpleInputConfig {
+            struct_size: reader.u32()?,
+            version: reader.u32()?,
+            pwm: decode_centered_input(reader)?,
+            analog: decode_centered_input(reader)?,
+            step_dir: StepDirCalibrationConfig {
+                full_steps_per_revolution: reader.u32()?,
+                microsteps: reader.u32()?,
+                gear_numerator: reader.u32()?,
+                gear_denominator: reader.u32()?,
+                direction: reader.u32()? as i32,
+                zero_count: reader.u32()? as i32,
+                zero_position_rad: reader.f32()?,
+                maximum_step_rate_hz: reader.u32()?,
+            },
+        }
+    } else {
+        input_enable_mask = 0;
+        inputs = [ExternalInputConfig::default(); EXTERNAL_IO_INPUT_COUNT];
+        SimpleInputConfig::default()
+    };
+    Ok(ExternalIoConfig {
+        struct_size: if schema >= CONFIG_SCHEMA_VERSION {
+            struct_size
+        } else {
+            EXTERNAL_IO_CONFIG_SIZE
+        },
+        version: if schema >= CONFIG_SCHEMA_VERSION {
+            version
+        } else {
+            EXTERNAL_IO_CONFIG_VERSION
+        },
+        revision,
+        transport_enable_mask,
+        input_enable_mask,
+        reserved,
+        links,
+        inputs,
+        simple_inputs,
+    })
+}
+
+fn decode_centered_input(
+    reader: &mut PayloadReader<'_>,
+) -> Result<CenteredInputCalibrationConfig, ConfigRecordError> {
+    Ok(CenteredInputCalibrationConfig {
+        raw_min: reader.u32()? as i32,
+        raw_neutral: reader.u32()? as i32,
+        raw_max: reader.u32()? as i32,
+        deadband: reader.u32()?,
+        negative_limit_si: reader.f32()?,
+        positive_limit_si: reader.f32()?,
+    })
+}
+
 fn decode_payload(payload: &[u8], schema: u16) -> Result<ConfigBundle, ConfigRecordError> {
     let mut reader = PayloadReader::new(payload);
-    let (bundle_revision, generated_by_version, board_version) = if schema == CONFIG_SCHEMA_VERSION
-    {
+    let versioned = schema != CONFIG_LEGACY_SCHEMA_VERSION;
+    let (bundle_revision, generated_by_version, board_version) = if versioned {
         (reader.u32()?, reader.u32()?, reader.u32()?)
     } else {
         (1, 1, CONFIG_GROUP_VERSION)
@@ -939,7 +1412,7 @@ fn decode_payload(payload: &[u8], schema: u16) -> Result<ConfigBundle, ConfigRec
         bus_voltage_v_per_count: reader.f32()?,
     };
     let motor = MotorConfig {
-        version: if schema == CONFIG_SCHEMA_VERSION {
+        version: if versioned {
             reader.u32()?
         } else {
             CONFIG_GROUP_VERSION
@@ -954,7 +1427,7 @@ fn decode_payload(payload: &[u8], schema: u16) -> Result<ConfigBundle, ConfigRec
         maximum_speed_rad_s: reader.f32()?,
     };
     let inverter = InverterConfig {
-        version: if schema == CONFIG_SCHEMA_VERSION {
+        version: if versioned {
             reader.u32()?
         } else {
             CONFIG_GROUP_VERSION
@@ -968,24 +1441,60 @@ fn decode_payload(payload: &[u8], schema: u16) -> Result<ConfigBundle, ConfigRec
         brake_resistance_ohm: reader.f32()?,
         maximum_duty: reader.f32()?,
     };
-    let axis = AxisConfig {
-        version: if schema == CONFIG_SCHEMA_VERSION {
-            reader.u32()?
-        } else {
-            CONFIG_GROUP_VERSION
-        },
-        axis_id: reader.u32()?,
-        feedback_mode: reader.u32()?,
-        direction: reader.u32()? as i32,
-        current_kp: reader.f32()?,
-        current_ki: reader.f32()?,
-        velocity_kp: reader.f32()?,
-        velocity_ki: reader.f32()?,
-        position_kp: reader.f32()?,
-        soft_limit_min_rad: reader.f32()?,
-        soft_limit_max_rad: reader.f32()?,
+    let axis_version = if versioned {
+        reader.u32()?
+    } else {
+        CONFIG_GROUP_VERSION
     };
-    let app_version = if schema == CONFIG_SCHEMA_VERSION {
+    let axis_id = reader.u32()?;
+    let feedback_mode = reader.u32()?;
+    let direction = reader.u32()? as i32;
+    let current_kp = reader.f32()?;
+    let current_ki = reader.f32()?;
+    let velocity_kp = reader.f32()?;
+    let velocity_ki = reader.f32()?;
+    let position_kp = reader.f32()?;
+    let soft_limit_min_rad = reader.f32()?;
+    let soft_limit_max_rad = reader.f32()?;
+    let (
+        motion_control_enabled,
+        torque_ramp_rate_nm_s,
+        velocity_ramp_rate_rad_s2,
+        position_filter_bandwidth_rad_s,
+        trajectory_acceleration_rad_s2,
+        trajectory_deceleration_rad_s2,
+    ) = if schema >= CONFIG_SCHEMA_V2_VERSION {
+        (
+            reader.u32()?,
+            reader.f32()?,
+            reader.f32()?,
+            reader.f32()?,
+            reader.f32()?,
+            reader.f32()?,
+        )
+    } else {
+        (0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    };
+    let axis = AxisConfig {
+        version: axis_version,
+        axis_id,
+        feedback_mode,
+        direction,
+        current_kp,
+        current_ki,
+        velocity_kp,
+        velocity_ki,
+        position_kp,
+        soft_limit_min_rad,
+        soft_limit_max_rad,
+        motion_control_enabled,
+        torque_ramp_rate_nm_s,
+        velocity_ramp_rate_rad_s2,
+        position_filter_bandwidth_rad_s,
+        trajectory_acceleration_rad_s2,
+        trajectory_deceleration_rad_s2,
+    };
+    let app_version = if versioned {
         reader.u32()?
     } else {
         CONFIG_GROUP_VERSION
@@ -1003,7 +1512,12 @@ fn decode_payload(payload: &[u8], schema: u16) -> Result<ConfigBundle, ConfigRec
             command_timeout_ms: reader.u32()?,
         };
     }
-    let calibration_version = if schema == CONFIG_SCHEMA_VERSION {
+    let external_io = if schema >= CONFIG_SCHEMA_V3_VERSION {
+        decode_external_io(&mut reader, schema)?
+    } else {
+        ExternalIoConfig::default()
+    };
+    let calibration_version = if versioned {
         reader.u32()?
     } else {
         CONFIG_GROUP_VERSION
@@ -1031,6 +1545,7 @@ fn decode_payload(payload: &[u8], schema: u16) -> Result<ConfigBundle, ConfigRec
             command_source_count,
             command_sources,
         },
+        external_io,
         calibration: CalibrationData {
             version: calibration_version,
             board_id: calibration_board_id,
@@ -1134,6 +1649,61 @@ fn map_recovery_write_error(error: ConfigRecoveryError) -> ConfigWriteError {
     }
 }
 
+fn external_link_enabled(index: usize, mask: u32) -> bool {
+    match index {
+        0 => mask & EXTERNAL_TRANSPORT_UART != 0,
+        1 => mask & EXTERNAL_TRANSPORT_USB_CDC != 0,
+        2 => mask & (EXTERNAL_TRANSPORT_CAN_CLASSIC | EXTERNAL_TRANSPORT_CAN_FD) != 0,
+        3 => mask & EXTERNAL_TRANSPORT_ETHERCAT != 0,
+        _ => false,
+    }
+}
+
+fn external_protocol_allowed(index: usize, protocol: u32) -> bool {
+    match index {
+        0 | 1 => protocol == EXTERNAL_PROTOCOL_FLUXRT_NATIVE,
+        2 => matches!(
+            protocol,
+            EXTERNAL_PROTOCOL_FLUXRT_NATIVE
+                | EXTERNAL_PROTOCOL_DRONECAN
+                | EXTERNAL_PROTOCOL_VESC_CAN
+                | EXTERNAL_PROTOCOL_CANOPEN_CIA402
+        ),
+        3 => protocol == EXTERNAL_PROTOCOL_ETHERCAT_COE_CIA402,
+        _ => false,
+    }
+}
+
+fn external_policy_valid(
+    policy: ExternalSourcePolicy,
+    allowed_permissions: u32,
+    optional: bool,
+) -> bool {
+    if policy.source_id == 0 {
+        return optional && policy == ExternalSourcePolicy::default();
+    }
+    policy.priority <= u32::from(u8::MAX)
+        && policy.permissions != 0
+        && policy.permissions & !allowed_permissions == 0
+        && policy.lease_ms != 0
+        && policy.command_timeout_ms != 0
+        && policy.lease_ms <= policy.command_timeout_ms
+        && policy.command_timeout_ms < WRAPPING_HALF_RANGE
+}
+
+fn insert_external_source(
+    source_ids: &mut [u32; EXTERNAL_IO_LINK_COUNT + EXTERNAL_IO_INPUT_COUNT],
+    source_count: &mut usize,
+    source_id: u32,
+) -> Result<(), ConfigValidationError> {
+    if source_ids[..*source_count].contains(&source_id) {
+        return Err(ConfigValidationError::ExternalIo);
+    }
+    source_ids[*source_count] = source_id;
+    *source_count += 1;
+    Ok(())
+}
+
 fn finite_positive(value: f32) -> bool {
     value.is_finite() && value > 0.0
 }
@@ -1146,7 +1716,7 @@ fn all_finite(values: &[f32]) -> bool {
     values.iter().all(|value| value.is_finite())
 }
 
-fn hall_sequence_is_valid(packed: u32) -> bool {
+pub(crate) fn hall_sequence_is_valid(packed: u32) -> bool {
     let mut seen = 0_u32;
     for index in 0..6 {
         let sector = (packed >> (index * 4)) & 0xF;
@@ -1354,6 +1924,12 @@ mod tests {
                 position_kp: 1.0,
                 soft_limit_min_rad: -100.0,
                 soft_limit_max_rad: 100.0,
+                motion_control_enabled: 0,
+                torque_ramp_rate_nm_s: 0.0,
+                velocity_ramp_rate_rad_s2: 0.0,
+                position_filter_bandwidth_rad_s: 0.0,
+                trajectory_acceleration_rad_s2: 0.0,
+                trajectory_deceleration_rad_s2: 0.0,
             },
             app: AppConfig {
                 version: CONFIG_GROUP_VERSION,
@@ -1373,6 +1949,7 @@ mod tests {
                     CommandSourceConfig::default(),
                 ],
             },
+            external_io: ExternalIoConfig::default(),
             calibration: CalibrationData {
                 version: CONFIG_GROUP_VERSION,
                 board_id: BOARD_ID,
@@ -1438,11 +2015,28 @@ mod tests {
             config.validate(),
             Err(ConfigValidationError::CalibrationValue)
         );
+
+        let mut config = bundle(1);
+        config.axis.motion_control_enabled = 1;
+        assert_eq!(config.validate(), Err(ConfigValidationError::Axis));
+        config.axis.torque_ramp_rate_nm_s = 1.0;
+        config.axis.velocity_ramp_rate_rad_s2 = 20.0;
+        config.axis.position_filter_bandwidth_rad_s = 40.0;
+        config.axis.trajectory_acceleration_rad_s2 = 30.0;
+        config.axis.trajectory_deceleration_rad_s2 = 35.0;
+        assert_eq!(config.validate(), Ok(()));
+
+        let mut config = bundle(1);
+        config.axis.torque_ramp_rate_nm_s = 1.0;
+        assert_eq!(config.validate(), Err(ConfigValidationError::Axis));
     }
 
     #[test]
     fn record_round_trip_and_crc_corruption_are_deterministic() {
-        let config = bundle(7);
+        let mut config = bundle(7);
+        config.external_io.transport_enable_mask = EXTERNAL_TRANSPORT_UART;
+        config.external_io.links[0].protocol = EXTERNAL_PROTOCOL_FLUXRT_NATIVE;
+        config.external_io.links[0].nominal_bitrate = 115_200;
         let slot = committed(42, ConfigApproval::Approved, config);
         let decoded = decode_config_slot(&slot).unwrap();
         assert_eq!(decoded.sequence, 42);
@@ -1640,6 +2234,188 @@ mod tests {
         assert_eq!(decoded.config.board.version, CONFIG_GROUP_VERSION);
         assert_eq!(decoded.config.board.board_id, config.board.board_id);
         assert_eq!(decoded.config.motor, config.motor);
+        assert_eq!(decoded.config.axis.motion_control_enabled, 0);
+        assert_eq!(decoded.config.axis.torque_ramp_rate_nm_s, 0.0);
+    }
+
+    #[test]
+    fn schema_v1_record_migrates_with_motion_control_disabled() {
+        let config = bundle(7);
+        let slot = encode_record(
+            0,
+            10,
+            ConfigApproval::Approved,
+            config,
+            CONFIG_SCHEMA_V1_VERSION,
+        )
+        .unwrap()
+        .image;
+        let decoded = decode_config_slot(&slot).unwrap();
+        assert!(decoded.migrated);
+        assert_eq!(decoded.schema_version, CONFIG_SCHEMA_V1_VERSION);
+        assert_eq!(decoded.config.bundle_revision, config.bundle_revision);
+        assert_eq!(decoded.config.axis.motion_control_enabled, 0);
+        assert_eq!(decoded.config.axis.torque_ramp_rate_nm_s, 0.0);
+        assert_eq!(decoded.config.axis.velocity_ramp_rate_rad_s2, 0.0);
+        assert!(decoded.config.external_io.is_default_off());
+    }
+
+    #[test]
+    fn schema_v2_record_keeps_motion_and_migrates_external_io_disabled() {
+        let mut config = bundle(7);
+        config.axis.motion_control_enabled = 1;
+        config.axis.torque_ramp_rate_nm_s = 1.0;
+        config.axis.velocity_ramp_rate_rad_s2 = 20.0;
+        config.axis.position_filter_bandwidth_rad_s = 40.0;
+        config.axis.trajectory_acceleration_rad_s2 = 30.0;
+        config.axis.trajectory_deceleration_rad_s2 = 35.0;
+        config.external_io.transport_enable_mask = EXTERNAL_TRANSPORT_UART;
+        let slot = encode_record(
+            0,
+            11,
+            ConfigApproval::Approved,
+            config,
+            CONFIG_SCHEMA_V2_VERSION,
+        )
+        .unwrap()
+        .image;
+        assert_eq!(
+            read_u32(&slot.bytes, CONFIG_LEGACY_COMMIT_OFFSET),
+            CONFIG_COMMIT_MAGIC
+        );
+        assert_eq!(slot.bytes[CONFIG_COMMIT_OFFSET], 0xFF);
+        let decoded = decode_config_slot(&slot).unwrap();
+        assert!(decoded.migrated);
+        assert_eq!(decoded.schema_version, CONFIG_SCHEMA_V2_VERSION);
+        assert_eq!(decoded.config.axis.motion_control_enabled, 1);
+        assert!(decoded.config.external_io.is_default_off());
+        assert_eq!(decoded.config.external_io, ExternalIoConfig::default());
+    }
+
+    #[test]
+    fn schema_v3_record_keeps_transports_but_disables_unconfigured_simple_inputs() {
+        let mut config = bundle(7);
+        config.external_io.transport_enable_mask = EXTERNAL_TRANSPORT_UART;
+        config.external_io.links[0] = ExternalLinkConfig {
+            protocol: EXTERNAL_PROTOCOL_FLUXRT_NATIVE,
+            node_id: 1,
+            nominal_bitrate: 115_200,
+            data_bitrate: 0,
+            heartbeat_ms: 100,
+            source: ExternalSourcePolicy {
+                source_id: 40,
+                priority: 20,
+                permissions: COMMAND_SOURCE_PERMISSION_RELEASE | COMMAND_SOURCE_PERMISSION_SETPOINT,
+                lease_ms: 50,
+                command_timeout_ms: 100,
+            },
+        };
+        config.external_io.input_enable_mask = EXTERNAL_INPUT_PWM_PULSE;
+        config.external_io.inputs[0] = ExternalInputConfig {
+            control_mode: ControlMode::Velocity as u32,
+            failure_action: EXTERNAL_FAILURE_RELEASE,
+            source: ExternalSourcePolicy {
+                source_id: 50,
+                priority: 10,
+                permissions: COMMAND_SOURCE_PERMISSION_RELEASE | COMMAND_SOURCE_PERMISSION_SETPOINT,
+                lease_ms: 20,
+                command_timeout_ms: 50,
+            },
+        };
+        let slot = encode_record(
+            0,
+            12,
+            ConfigApproval::Approved,
+            config,
+            CONFIG_SCHEMA_V3_VERSION,
+        )
+        .unwrap()
+        .image;
+        assert_eq!(
+            read_u32(&slot.bytes, CONFIG_COMMIT_OFFSET),
+            CONFIG_COMMIT_MAGIC
+        );
+        assert_ne!(
+            read_u32(&slot.bytes, CONFIG_LEGACY_COMMIT_OFFSET),
+            CONFIG_COMMIT_MAGIC
+        );
+
+        let decoded = decode_config_slot(&slot).unwrap();
+        assert!(decoded.migrated);
+        assert_eq!(decoded.schema_version, CONFIG_SCHEMA_V3_VERSION);
+        assert_eq!(
+            decoded.config.external_io.transport_enable_mask,
+            EXTERNAL_TRANSPORT_UART
+        );
+        assert_eq!(
+            decoded.config.external_io.links[0],
+            config.external_io.links[0]
+        );
+        assert_eq!(decoded.config.external_io.input_enable_mask, 0);
+        assert_eq!(
+            decoded.config.external_io.inputs,
+            [ExternalInputConfig::default(); EXTERNAL_IO_INPUT_COUNT]
+        );
+        assert_eq!(
+            decoded.config.external_io.simple_inputs,
+            SimpleInputConfig::default()
+        );
+        assert_eq!(
+            decoded.config.external_io.struct_size,
+            EXTERNAL_IO_CONFIG_SIZE
+        );
+        assert_eq!(
+            decoded.config.external_io.version,
+            EXTERNAL_IO_CONFIG_VERSION
+        );
+        assert_eq!(decoded.config.validate(), Ok(()));
+    }
+
+    #[test]
+    fn external_io_structural_policy_fails_closed() {
+        let mut config = bundle(1);
+        config.external_io.input_enable_mask = EXTERNAL_INPUT_PWM_PULSE;
+        config.external_io.inputs[0].control_mode = ControlMode::Velocity as u32;
+        config.external_io.inputs[0].source = ExternalSourcePolicy {
+            source_id: 50,
+            priority: 10,
+            permissions: COMMAND_SOURCE_PERMISSION_SETPOINT
+                | COMMAND_SOURCE_PERMISSION_AXIS_REQUEST,
+            lease_ms: 20,
+            command_timeout_ms: 50,
+        };
+        assert_eq!(config.validate(), Err(ConfigValidationError::ExternalIo));
+        config.external_io.inputs[0].source.permissions =
+            COMMAND_SOURCE_PERMISSION_RELEASE | COMMAND_SOURCE_PERMISSION_SETPOINT;
+        config.external_io.simple_inputs.pwm = CenteredInputCalibrationConfig {
+            raw_min: 1_000,
+            raw_neutral: 1_500,
+            raw_max: 2_000,
+            deadband: 20,
+            negative_limit_si: 100.0,
+            positive_limit_si: 100.0,
+        };
+        assert_eq!(config.validate(), Ok(()));
+
+        config.external_io.simple_inputs.pwm.raw_neutral = 1_000;
+        assert_eq!(config.validate(), Err(ConfigValidationError::ExternalIo));
+
+        config.external_io.input_enable_mask = EXTERNAL_INPUT_STEP_DIR;
+        config.external_io.inputs[3] = config.external_io.inputs[0];
+        config.external_io.inputs[3].source.source_id = 51;
+        config.external_io.simple_inputs.step_dir = StepDirCalibrationConfig {
+            full_steps_per_revolution: 200,
+            microsteps: 16,
+            gear_numerator: 1,
+            gear_denominator: 1,
+            direction: 1,
+            zero_count: 0,
+            zero_position_rad: 0.0,
+            maximum_step_rate_hz: 100_000,
+        };
+        assert_eq!(config.validate(), Err(ConfigValidationError::ExternalIo));
+        config.external_io.inputs[3].control_mode = ControlMode::Position as u32;
+        assert_eq!(config.validate(), Ok(()));
     }
 
     #[test]

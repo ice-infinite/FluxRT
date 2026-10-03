@@ -8,6 +8,11 @@ publish = false
 name = "foc_control"
 crate-type = ["rlib"]
 
+[features]
+default = []
+motion-control = []
+advanced-foc = []
+
 [dependencies]
 foc-algorithm = { path = "../foc-algorithm" }
 libm = { version = "0.2", default-features = false }

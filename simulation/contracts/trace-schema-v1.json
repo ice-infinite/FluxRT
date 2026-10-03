@@ -51,6 +51,19 @@
     {"name":"fault_flags","unit":"bitset","kind":"safety"},
     {"name":"derating_ratio","unit":"1","kind":"safety"},
     {"name":"command_timeout","unit":"bool","kind":"safety"},
-    {"name":"output_enabled","unit":"bool","kind":"safety"}
+    {"name":"output_enabled","unit":"bool","kind":"safety"},
+    {"name":"feedback_primary_available","unit":"bool","kind":"state"},
+    {"name":"feedback_backup_available","unit":"bool","kind":"state"},
+    {"name":"feedback_route_state","unit":"enum","kind":"state"},
+    {"name":"feedback_active_mode","unit":"enum","kind":"state"},
+    {"name":"feedback_valid_flags","unit":"bitset","kind":"state"},
+    {"name":"feedback_quality_flags","unit":"bitset","kind":"state"},
+    {"name":"feedback_event","unit":"enum","kind":"state"},
+    {"name":"feedback_encoder_position_rad","unit":"rad","kind":"angle"},
+    {"name":"feedback_hall_electrical_angle_rad","unit":"rad","kind":"angle"},
+    {"name":"feedback_selected_position_rad","unit":"rad","kind":"angle"},
+    {"name":"feedback_selected_velocity_rad_s","unit":"rad/s","kind":"velocity"},
+    {"name":"feedback_selected_electrical_angle_rad","unit":"rad","kind":"angle"},
+    {"name":"feedback_sample_age_s","unit":"s","kind":"time"}
   ]
 }

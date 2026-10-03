@@ -139,6 +139,9 @@ enum
     /* Synchronous runtime Vbus left the configured window. Sticky until an
      * explicit platform fault-clear preflight succeeds. */
     FOC_PLATFORM_DIAG_BUS_VOLTAGE_TRIP = (1UL << 26),
+    /* ADC1 regular 被外部输入占用时，安全监控已从同一 PA0/ADC12_IN1
+     * 经 ADC2 取得新鲜 Vbus；这是历史证据位，不参与 arm 禁止条件。 */
+    FOC_PLATFORM_DIAG_ADC2_VBUS_FALLBACK_USED = (1UL << 27),
 };
 
 /*

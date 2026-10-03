@@ -4,13 +4,14 @@
  *
  * 职责 / Responsibility:
  *   - 配置 TIM1 中心对齐 PWM、ADC1/ADC2 注入同步采样、栅极使能与硬件关断；
- *   - 实现快环 ISR（ADC1_2_IRQHandler），在其中有且只有一次
- *     `foc_rust_realtime_step()` 调用；
+ *   - 实现快环 ISR（ADC1_2_IRQHandler），在其中有且只有一次 Rust realtime
+ *     调用（默认旧入口，P4.2E1 候选为 combined motion 入口）；
  *   - 持有并发布诊断、遥测、时序统计和 trace 缓冲。
  *     Configures TIM1 centre-aligned PWM, ADC1/ADC2 injected synchronous
  *     sampling, gate enables and the hardware shutdown path; implements the
- *     fast-loop ISR with exactly one `foc_rust_realtime_step()` call; and owns
- *     the diagnostics, telemetry, timing statistics and trace buffer.
+ *     fast-loop ISR with exactly one Rust realtime call (the legacy entry by
+ *     default, or the P4.2E1 combined motion candidate); and owns diagnostics,
+ *     telemetry, timing statistics and the trace buffer.
  *
  * 边界 / Boundary:
  *   - 不实现任何 FOC 算法。Clarke/Park/PI/SVPWM/观测器全部在 Rust 侧。
@@ -50,8 +51,13 @@
 #endif
 #include "foc_lsi_preload_sink_internal.h"
 #include "foc_math_accel.h"
+#include "foc_monitor_sampling.h"
+#include "foc_platform_motion_candidate.h"
 #include "foc_power_safety.h"
 #include "foc_pwm_timing.h"
+#if defined(FOC_EXTERNAL_IO_FRAMEWORK)
+#include "foc_external_input_platform.h"
+#endif
 
 /* 平台级可调参数：母线窗口、软件过流阈值、占空比窗口、ISR 截止周期。
  * 字段顺序必须与 foc_platform.h 中的 foc_platform_config_t 一致。
@@ -114,6 +120,10 @@ static foc_realtime_timing_stats_t g_foc_timing_stats;
 #if defined(FOC_TARGET_STM32G431)
 #include "rtconfig.h"
 #include "stm32g4xx_hal.h"
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+#include "rtthread.h"
+#endif
 
 #include <string.h>
 
@@ -231,17 +241,30 @@ static const foc_pwm_timing_plan_t g_foc_pwm_timing_plan =
                                            FOC_CURRENT_AMPLIFIER_GAIN) / \
                                           FOC_ADC_REFERENCE_VOLTAGE)
 #if defined(FLUXRT_TRACE_BUILD)
-/* trace 缓冲只在 Diagnostic 档编译。Production 档裁掉它可以回收约 3 KB
- * Flash（缓冲本身）及其 ISR/输出代码。
- * The trace buffer is compiled only in the Diagnostic profile. Production
- * drops it, recovering about 3 KB of Flash plus its ISR and output code. */
+/* trace 缓冲只在 Diagnostic 档编译。E1B motion probe 和外部 I/O 无功率
+ * 探针镜像都还要从堆中创建 4 KiB main 与 4 KiB Finsh 线程；若仍
+ * 保留 64 项原始 trace，静态 BSS 会让线程创建失败。这两种镜像都不依赖
+ * 长 trace 记录，因此缩为 16 项；普通 Diagnostic 仍保持 64 项。
+ * The trace ring is Diagnostic-only.  Both the E1B motion probe and the
+ * no-power external-I/O probe still need heap for the 4 KiB main and Finsh
+ * threads.  A 64-entry raw ring exhausts that heap, while neither probe relies
+ * on a long trace capture, so those dedicated images use 16 entries and normal
+ * Diagnostic images retain 64. */
+#if defined(FOC_MOTION_CONTROL_CANDIDATE) || \
+    defined(FOC_EXTERNAL_IO_FRAMEWORK)
+#define FOC_TRACE_CAPACITY               (16U)
+#else
 #define FOC_TRACE_CAPACITY               (64U)
+#endif
 /* 最小分频 = 120 -> 12 kHz 下最高 100 Hz 采样。
  * Minimum divider 120 gives at most 100 Hz sampling at 12 kHz. */
 #define FOC_TRACE_MIN_DIVIDER            (120U)
 #endif
-#if defined(FOC_ISR_TIMING_PROBE) || defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+#if defined(FOC_ISR_TIMING_PROBE) || \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD) || \
+    defined(FOC_EXTERNAL_IO_FRAMEWORK)
 /* Identification 的无功率门必须能量化增加同步 Vbus rank 后的 ISR 开销，
+ * 外部 I/O 无功率探针同样需要对比 ADC1 regular 占用前后的间隔和包络，
  * 因此即使没有占用 PA5 的物理探针，也保留 DWT 周期统计。 */
 #define FOC_MONITOR_DWT_TIMING            (1U)
 static uint32_t g_foc_sync_previous_cycle;
@@ -337,6 +360,125 @@ static volatile uint16_t g_foc_bus_max_raw;
 /* 绑定的 Rust 控制器上下文；由 foc_platform_bind_controller() 设置一次。
  * Bound Rust controller context; set once by foc_platform_bind_controller(). */
 static foc_rust_context_t *g_foc_controller;
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+/* P4.2E1 ownership: these objects are private to this platform translation
+ * unit.  Management can publish only through the fixed dispatcher API; once
+ * the route is committed, the ADC ISR is the sole Rust-state writer. */
+static foc_motion_context_t g_foc_motion_context;
+static foc_motion_dispatcher_t g_foc_motion_dispatcher;
+static foc_motion_realtime_request_t g_foc_motion_realtime_request;
+static foc_motion_output_t g_foc_motion_realtime_output;
+static foc_motion_probe_t g_foc_motion_probe;
+static foc_motion_torque_trial_t g_foc_motion_torque_trial;
+static volatile uint32_t g_foc_motion_runtime_enabled;
+static volatile uint32_t g_foc_motion_command_ready;
+static volatile uint32_t g_foc_motion_probe_execute_motion;
+static float g_foc_motion_probe_nominal_bus_voltage_v;
+#define FOC_MOTION_PROBE_WARMUP_TICKS       (12U)
+
+static foc_status_t foc_platform_control_start_internal(
+    float target_speed_rpm,
+    uint32_t allow_motion_candidate);
+
+/* Mask only the consuming ADC IRQ.  The priority-0 timer Break interrupt stays
+ * deliverable, and the timer's asynchronous Break action is never masked. */
+static uint32_t foc_platform_motion_enter_critical(void *context)
+{
+    uint32_t was_enabled;
+
+    (void)context;
+    was_enabled = (NVIC_GetEnableIRQ(ADC1_2_IRQn) != 0U) ? 1U : 0U;
+    NVIC_DisableIRQ(ADC1_2_IRQn);
+    __DMB();
+    return was_enabled;
+}
+
+static void foc_platform_motion_exit_critical(void *context, uint32_t key)
+{
+    (void)context;
+    __DMB();
+    if (key != 0U)
+    {
+        NVIC_EnableIRQ(ADC1_2_IRQn);
+    }
+}
+
+static foc_status_t foc_platform_motion_status_to_foc(
+    foc_motion_status_t status)
+{
+    switch (status)
+    {
+    case FOC_MOTION_STATUS_OK:
+        return FOC_STATUS_OK;
+    case FOC_MOTION_STATUS_INVALID_ARGUMENT:
+    case FOC_MOTION_STATUS_INVALID_CONFIG:
+    case FOC_MOTION_STATUS_INVALID_COMMAND:
+    case FOC_MOTION_STATUS_INVALID_FEEDBACK:
+        return FOC_STATUS_INVALID_ARGUMENT;
+    case FOC_MOTION_STATUS_NOT_INITIALIZED:
+    case FOC_MOTION_STATUS_NOT_CONFIGURED:
+        return FOC_STATUS_NOT_CONFIGURED;
+    case FOC_MOTION_STATUS_DISABLED:
+    case FOC_MOTION_STATUS_TRANSITION_REQUIRED:
+    case FOC_MOTION_STATUS_INVALID_STATE:
+        return FOC_STATUS_DISABLED;
+    case FOC_MOTION_STATUS_CONTROL_FAILURE:
+    default:
+        return FOC_STATUS_HARDWARE_FAULT;
+    }
+}
+
+static foc_status_t foc_platform_motion_dispatch_result_to_foc(
+    foc_motion_dispatcher_result_t result)
+{
+    if (result == FOC_MOTION_DISPATCHER_OK)
+    {
+        return FOC_STATUS_OK;
+    }
+    if (result == FOC_MOTION_DISPATCHER_INVALID_ARGUMENT)
+    {
+        return FOC_STATUS_INVALID_ARGUMENT;
+    }
+    return FOC_STATUS_NOT_CONFIGURED;
+}
+
+/* The motion bundle and the already configured base FOC context must be one
+ * transaction.  Exact equality is deliberate: this is an enable gate, not a
+ * tolerant estimator comparison, and any independently rounded or stale copy
+ * must be reconciled before the route can own power output. */
+static uint32_t foc_platform_motion_config_matches_base(
+    const foc_config_bundle_t *config,
+    const foc_runtime_config_t *base,
+    uint32_t active_bundle_revision)
+{
+    if ((config == 0) || (base == 0) || (active_bundle_revision == 0U) ||
+        (config->struct_size != (uint32_t)sizeof(*config)) ||
+        (config->abi_version != FOC_CONFIG_ABI_VERSION) ||
+        (config->bundle_revision != active_bundle_revision) ||
+        (base->struct_size != (uint32_t)sizeof(*base)) ||
+        (base->config_version != FOC_RUST_CONFIG_VERSION) ||
+        (config->board.pwm_frequency_hz != FOC_PWM_FREQUENCY_HZ) ||
+        (config->board.control_frequency_hz != FOC_CONTROL_FREQUENCY_HZ) ||
+        (base->pwm_frequency_hz != FOC_CONTROL_FREQUENCY_HZ) ||
+        (config->motor.pole_pairs != base->pole_pairs) ||
+        (config->motor.phase_resistance_ohm != base->stator_resistance_ohm) ||
+        (config->motor.d_inductance_h != base->stator_inductance_h) ||
+        (config->motor.q_inductance_h != base->stator_inductance_h) ||
+        (config->motor.flux_linkage_v_s != base->flux_linkage_wb) ||
+        (config->motor.continuous_current_a != base->rated_current_a) ||
+        (config->axis.current_kp != base->id_pi.kp) ||
+        (config->axis.current_kp != base->iq_pi.kp) ||
+        (config->axis.current_ki != base->id_pi.ki) ||
+        (config->axis.current_ki != base->iq_pi.ki) ||
+        (base->id_pi.ts != (1.0f / (float)FOC_CONTROL_FREQUENCY_HZ)) ||
+        (base->iq_pi.ts != (1.0f / (float)FOC_CONTROL_FREQUENCY_HZ)))
+    {
+        return 0U;
+    }
+    return 1U;
+}
+#endif
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
 /* S4.9 keeps the physical capability private and exposes only the bounded
  * platform start operation.  The ADC ISR is the sole active-session caller. */
@@ -691,6 +833,17 @@ static __attribute__((noinline)) void foc_platform_latch_fault_fast(
     foc_power_safety_latch_fault(&g_foc_power_safety, platform_fault);
     g_foc_diagnostics.power_fault_epoch = g_foc_power_safety.fault_epoch;
     g_foc_pending_rust_faults |= rust_fault;
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    foc_motion_torque_trial_fail(
+        &g_foc_motion_torque_trial,
+        FOC_MOTION_TORQUE_TRIAL_RESULT_PLATFORM_FAULT,
+        g_foc_power_safety.fault_epoch);
+    /* A fault revokes the candidate route immediately.  This also closes the
+     * configure-vs-Break race without ever masking the priority-0 Break IRQ. */
+    g_foc_motion_runtime_enabled = 0U;
+    g_foc_motion_command_ready = 0U;
+#endif
     foc_platform_disable_power_fast();
 }
 
@@ -810,6 +963,235 @@ static uint32_t foc_platform_driver_faulted(void)
     /* IHM16M1 driver-protection input is active low and has a pull-up. */
     return ((FOC_DRIVER_PROTECTION_PORT->IDR & FOC_DRIVER_PROTECTION_PIN) == 0U) ? 1U : 0U;
 }
+
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+/* One coherent register fact set for the E1B no-power guard.  The snapshot is
+ * deliberately built from physical registers, not from the route flag. */
+static void foc_platform_motion_probe_snapshot(
+    foc_motion_probe_register_snapshot_t *snapshot)
+{
+    const uint32_t channel_mask = TIM_CCER_CC1E |
+                                  TIM_CCER_CC2E |
+                                  TIM_CCER_CC3E;
+
+    (void)memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->control_armed = g_foc_control_armed;
+    snapshot->power_safety_state = g_foc_power_safety.state;
+    snapshot->fault_epoch = g_foc_power_safety.fault_epoch;
+    snapshot->break_latched =
+        ((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U) ? 1U : 0U;
+    snapshot->driver_faulted = foc_platform_driver_faulted();
+    snapshot->gate_is_low = foc_platform_gate_is_low();
+    snapshot->moe_enabled =
+        ((TIM1->BDTR & TIM_BDTR_MOE) != 0U) ? 1U : 0U;
+    snapshot->phase_channels_enabled =
+        ((TIM1->CCER & channel_mask) != 0U) ? 1U : 0U;
+}
+
+static uint32_t foc_platform_motion_probe_inject_isr(
+    foc_motion_probe_injection_point_t point)
+{
+    if (foc_motion_probe_take_injection(&g_foc_motion_probe, point) == 0U)
+    {
+        return 0U;
+    }
+    foc_platform_latch_fault_fast(FOC_POWER_FAULT_BREAK,
+                                  FOC_RUST_FAULT_PLATFORM_INPUT);
+    return 1U;
+}
+
+/* Write preload registers while every physical enable remains off, then prove
+ * that the output path and fault epoch stayed unchanged.  AFTER_COMMIT is
+ * injected after the three CCR stores but before the post-write snapshot, so
+ * the same check covers the final race window. */
+static foc_motion_probe_result_t foc_platform_motion_probe_commit_isr(
+    const foc_output_t *output)
+{
+    foc_motion_probe_register_snapshot_t before;
+    foc_motion_probe_register_snapshot_t after;
+
+    foc_platform_motion_probe_snapshot(&before);
+    TIM1->CCR1 = (uint32_t)(output->duty_a *
+                            (float)FOC_PWM_PERIOD_TICKS + 0.5f);
+    TIM1->CCR2 = (uint32_t)(output->duty_b *
+                            (float)FOC_PWM_PERIOD_TICKS + 0.5f);
+    TIM1->CCR3 = (uint32_t)(output->duty_c *
+                            (float)FOC_PWM_PERIOD_TICKS + 0.5f);
+    __DSB();
+    (void)foc_platform_motion_probe_inject_isr(
+        FOC_MOTION_PROBE_INJECT_AFTER_COMMIT);
+    foc_platform_motion_probe_snapshot(&after);
+    return foc_motion_probe_complete_commit(&g_foc_motion_probe,
+                                            &before,
+                                            &after);
+}
+
+static foc_status_t foc_platform_motion_probe_step_isr(
+    int32_t current_u_counts,
+    int32_t current_v_counts,
+    int32_t current_w_counts)
+{
+    foc_motion_probe_register_snapshot_t snapshot;
+    foc_motion_dispatcher_result_t dispatch_result;
+    foc_motion_probe_result_t probe_result;
+    foc_feedback_t feedback;
+    foc_realtime_input_t input;
+    foc_output_t output;
+    foc_status_t control_status = FOC_STATUS_NOT_CONFIGURED;
+    uint32_t fault_was_latched = 0U;
+
+    (void)memset(&output, 0, sizeof(output));
+    foc_platform_motion_probe_snapshot(&snapshot);
+    probe_result = foc_motion_probe_begin_tick(&g_foc_motion_probe,
+                                               &snapshot);
+    if (probe_result != FOC_MOTION_PROBE_RESULT_OK)
+    {
+        control_status = FOC_STATUS_HARDWARE_FAULT;
+        goto fail_closed;
+    }
+    if (foc_platform_motion_probe_inject_isr(
+            FOC_MOTION_PROBE_INJECT_BEFORE_COMBINED) != 0U)
+    {
+        fault_was_latched = 1U;
+        control_status = FOC_STATUS_HARDWARE_FAULT;
+        goto fail_closed;
+    }
+
+    dispatch_result = foc_motion_dispatcher_consume_isr(
+        &g_foc_motion_dispatcher,
+        (uint32_t)rt_tick_get_millisecond(),
+        &g_foc_motion_realtime_request);
+    if (dispatch_result != FOC_MOTION_DISPATCHER_OK)
+    {
+        control_status = FOC_STATUS_NOT_CONFIGURED;
+        goto fail_closed;
+    }
+
+    feedback.phase_current_a = (float)current_u_counts /
+                               FOC_CURRENT_COUNTS_PER_AMP;
+    feedback.phase_current_b = (float)current_v_counts /
+                               FOC_CURRENT_COUNTS_PER_AMP;
+    feedback.phase_current_c = (float)current_w_counts /
+                               FOC_CURRENT_COUNTS_PER_AMP;
+    /* E1B is a no-power execution probe: the physical bus is deliberately 0 V,
+     * but the numerical controller requires a positive bus voltage for SVPWM
+     * normalisation.  Use the configured nominal voltage only as an algorithm
+     * input.  The probe's hardware snapshots still prove Gate/MOE/CCER are off,
+     * and this path never commits the calculated duty to TIM1. */
+    feedback.dc_bus_voltage = g_foc_motion_probe_nominal_bus_voltage_v;
+    feedback.electrical_angle_rad = 0.0f;
+    foc_realtime_input_from_legacy(&feedback,
+                                   g_foc_control_sequence,
+                                   1.0f /
+                                       (float)FOC_CONTROL_FREQUENCY_HZ,
+                                   &input);
+    /* The powered route cannot execute a motion reference during Alignment.
+     * Give the controller one real outer-loop period on the normal combined
+     * path before the diagnostic entry forces ClosedLoop motion.  This avoids
+     * an impossible cold-start + outer-loop coincidence while the same hard
+     * 12,750-cycle deadline still covers every warm motion/observer overlap. */
+    if ((g_foc_motion_probe_execute_motion != 0U) &&
+        (g_foc_motion_probe.executed_ticks >=
+         FOC_MOTION_PROBE_WARMUP_TICKS))
+    {
+        control_status = foc_rust_realtime_step_with_motion_no_power(
+            g_foc_controller,
+            &g_foc_motion_context,
+            &input,
+            &g_foc_motion_realtime_request,
+            &output,
+            0,
+            &g_foc_motion_realtime_output);
+    }
+    else
+    {
+        /* Same combined ABI and platform path, but normal Alignment semantics
+         * skip motion reference generation.  The delta to mode 1 is the
+         * isolated target estimate used by the E1B timing gate. */
+        control_status = foc_rust_realtime_step_with_motion(
+            g_foc_controller,
+            &g_foc_motion_context,
+            &input,
+            &g_foc_motion_realtime_request,
+            &output,
+            0,
+            &g_foc_motion_realtime_output);
+    }
+    ++g_foc_control_sequence;
+
+    if (foc_platform_motion_probe_inject_isr(
+            FOC_MOTION_PROBE_INJECT_DURING_COMBINED) != 0U)
+    {
+        fault_was_latched = 1U;
+    }
+    foc_platform_motion_probe_snapshot(&snapshot);
+    probe_result = foc_motion_probe_complete_combined(
+        &g_foc_motion_probe, control_status, &snapshot);
+    if ((probe_result != FOC_MOTION_PROBE_RESULT_OK) ||
+        (control_status != FOC_STATUS_OK))
+    {
+        goto fail_closed;
+    }
+    if (!(output.duty_a >= g_foc_platform_config.minimum_duty &&
+          output.duty_a <= g_foc_platform_config.maximum_duty) ||
+        !(output.duty_b >= g_foc_platform_config.minimum_duty &&
+          output.duty_b <= g_foc_platform_config.maximum_duty) ||
+        !(output.duty_c >= g_foc_platform_config.minimum_duty &&
+          output.duty_c <= g_foc_platform_config.maximum_duty))
+    {
+        probe_result = foc_motion_probe_fail(
+            &g_foc_motion_probe,
+            FOC_MOTION_PROBE_RESULT_CONTROL_FAILURE,
+            g_foc_power_safety.fault_epoch);
+        (void)probe_result;
+        control_status = FOC_STATUS_INVALID_ARGUMENT;
+        goto fail_closed;
+    }
+    if (foc_platform_motion_probe_inject_isr(
+            FOC_MOTION_PROBE_INJECT_BEFORE_COMMIT) != 0U)
+    {
+        fault_was_latched = 1U;
+        control_status = FOC_STATUS_HARDWARE_FAULT;
+        goto fail_closed;
+    }
+
+    probe_result = foc_platform_motion_probe_commit_isr(&output);
+    if ((probe_result == FOC_MOTION_PROBE_RESULT_OK) ||
+        (probe_result == FOC_MOTION_PROBE_RESULT_COMPLETE))
+    {
+        ++g_foc_diagnostics.realtime_step_count;
+        g_foc_diagnostics.last_control_status = FOC_STATUS_OK;
+        return FOC_STATUS_OK;
+    }
+    fault_was_latched =
+        (g_foc_power_safety.state == FOC_POWER_SAFETY_FAULT_LATCHED) ?
+            1U : fault_was_latched;
+    control_status = FOC_STATUS_HARDWARE_FAULT;
+
+fail_closed:
+    foc_platform_motion_probe_snapshot(&snapshot);
+    if (g_foc_motion_probe.state == FOC_MOTION_PROBE_RUNNING)
+    {
+        (void)foc_motion_probe_fail(
+            &g_foc_motion_probe,
+            (snapshot.fault_epoch !=
+             g_foc_motion_probe.expected_fault_epoch) ?
+                FOC_MOTION_PROBE_RESULT_FAULT_EPOCH_CHANGED :
+                FOC_MOTION_PROBE_RESULT_CONTROL_FAILURE,
+            snapshot.fault_epoch);
+    }
+    ++g_foc_diagnostics.realtime_error_count;
+    g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_CONTROL_ERROR;
+    g_foc_diagnostics.last_control_status = control_status;
+    if (fault_was_latched == 0U)
+    {
+        foc_platform_latch_fault_fast(FOC_POWER_FAULT_CONTROL,
+                                      FOC_RUST_FAULT_MOTION_CONTROL);
+    }
+    return control_status;
+}
+#endif
 
 #if defined(FOC_TARGET_STM32G431) && \
     defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
@@ -1363,8 +1745,19 @@ static uint32_t foc_platform_read_adc(ADC_HandleTypeDef *adc,
 static uint32_t foc_platform_sample_monitor_inputs(void)
 {
     uint32_t ok = 1U;
+    uint32_t sync_running =
+        ((g_foc_diagnostics.flags & FOC_PLATFORM_DIAG_SYNC_RUNNING) != 0U) ?
+            1U : 0U;
+#if defined(FOC_EXTERNAL_IO_FRAMEWORK)
+    uint32_t adc1_regular_owned =
+        foc_external_input_platform_regular_adc_owned();
+#else
+    uint32_t adc1_regular_owned = 0U;
+#endif
+    foc_monitor_sampling_plan_t plan = foc_monitor_sampling_plan(
+        sync_running, adc1_regular_owned);
 
-    if ((g_foc_diagnostics.flags & FOC_PLATFORM_DIAG_SYNC_RUNNING) == 0U)
+    if ((plan & FOC_MONITOR_SAMPLE_PHASE_CURRENTS) != 0U)
     {
         ok &= foc_platform_read_adc(&g_foc_adc1, ADC_CHANNEL_2,
                                     &g_foc_diagnostics.phase_u_raw);
@@ -1373,12 +1766,33 @@ static uint32_t foc_platform_sample_monitor_inputs(void)
         ok &= foc_platform_read_adc(&g_foc_adc2, ADC_CHANNEL_4,
                                     &g_foc_diagnostics.phase_w_raw);
     }
-    ok &= foc_platform_read_adc(&g_foc_adc1, ADC_CHANNEL_1,
-                                &g_foc_diagnostics.bus_voltage_raw);
-    ok &= foc_platform_read_adc(&g_foc_adc2, ADC_CHANNEL_5,
-                                &g_foc_diagnostics.temperature_raw);
-    ok &= foc_platform_read_adc(&g_foc_adc1, ADC_CHANNEL_8,
-                                &g_foc_diagnostics.potentiometer_raw);
+    if ((plan & FOC_MONITOR_SAMPLE_VBUS_ADC1) != 0U)
+    {
+        ok &= foc_platform_read_adc(&g_foc_adc1, ADC_CHANNEL_1,
+                                    &g_foc_diagnostics.bus_voltage_raw);
+    }
+    if ((plan & FOC_MONITOR_SAMPLE_VBUS_ADC2) != 0U)
+    {
+        /* PA0 is ADC12_IN1. When PC2 owns ADC1 regular, use the same physical
+         * Vbus divider through ADC2 instead of stealing ADC1 SQR1/ADSTART. */
+        ok &= foc_platform_read_adc(&g_foc_adc2, ADC_CHANNEL_1,
+                                    &g_foc_diagnostics.bus_voltage_raw);
+        if (ok != 0U)
+        {
+            g_foc_diagnostics.flags |=
+                FOC_PLATFORM_DIAG_ADC2_VBUS_FALLBACK_USED;
+        }
+    }
+    if ((plan & FOC_MONITOR_SAMPLE_TEMPERATURE_ADC2) != 0U)
+    {
+        ok &= foc_platform_read_adc(&g_foc_adc2, ADC_CHANNEL_5,
+                                    &g_foc_diagnostics.temperature_raw);
+    }
+    if ((plan & FOC_MONITOR_SAMPLE_POTENTIOMETER_ADC1) != 0U)
+    {
+        ok &= foc_platform_read_adc(&g_foc_adc1, ADC_CHANNEL_8,
+                                    &g_foc_diagnostics.potentiometer_raw);
+    }
     if (ok == 0U)
     {
         g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_ADC_READ_ERROR;
@@ -1987,6 +2401,11 @@ foc_status_t foc_platform_init(void)
         foc_platform_emergency_stop();
         return FOC_STATUS_HARDWARE_FAULT;
     }
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    (void)foc_motion_probe_init(&g_foc_motion_probe);
+    (void)foc_motion_torque_trial_init(&g_foc_motion_torque_trial);
+#endif
     g_foc_bus_min_raw = foc_platform_bus_voltage_to_raw(
         g_foc_platform_config.minimum_bus_voltage_v);
     g_foc_bus_max_raw = foc_platform_bus_voltage_to_raw(
@@ -2140,6 +2559,495 @@ foc_status_t foc_platform_bind_controller(foc_rust_context_t *context)
 #endif
 }
 
+foc_status_t foc_platform_motion_candidate_configure(
+    const foc_config_bundle_t *config,
+    const foc_runtime_config_t *active_realtime_config,
+    uint32_t active_bundle_revision,
+    uint32_t outer_loop_divider)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    const foc_motion_dispatcher_ops_t dispatcher_ops = {
+        sizeof(foc_motion_dispatcher_ops_t),
+        FOC_MOTION_DISPATCHER_VERSION,
+        foc_platform_motion_enter_critical,
+        foc_platform_motion_exit_critical,
+        0,
+    };
+    foc_motion_status_t motion_status;
+    foc_motion_dispatcher_result_t dispatcher_result;
+    uint32_t expected_fault_epoch;
+    uint32_t key;
+
+    if ((g_foc_motion_probe.struct_size != sizeof(g_foc_motion_probe)) ||
+        (g_foc_motion_probe.version != FOC_MOTION_PROBE_VERSION))
+    {
+        (void)foc_motion_probe_init(&g_foc_motion_probe);
+    }
+    if ((g_foc_motion_torque_trial.struct_size !=
+         sizeof(g_foc_motion_torque_trial)) ||
+        (g_foc_motion_torque_trial.version !=
+         FOC_MOTION_TORQUE_TRIAL_VERSION))
+    {
+        (void)foc_motion_torque_trial_init(&g_foc_motion_torque_trial);
+    }
+    if ((outer_loop_divider == 0U) ||
+        (foc_platform_motion_config_matches_base(
+             config,
+             active_realtime_config,
+             active_bundle_revision) == 0U))
+    {
+        return FOC_STATUS_INVALID_ARGUMENT;
+    }
+    if ((g_foc_control_armed != 0U) ||
+        (g_foc_motion_runtime_enabled != 0U) ||
+        (g_foc_power_safety.state != FOC_POWER_SAFETY_DISABLED))
+    {
+        return FOC_STATUS_DISABLED;
+    }
+    expected_fault_epoch = g_foc_power_safety.fault_epoch;
+    if ((foc_rust_motion_abi_version() != FOC_MOTION_ABI_VERSION) ||
+        (foc_rust_motion_context_required_size() >
+         sizeof(g_foc_motion_context)) ||
+        (foc_rust_motion_context_required_align() >
+         _Alignof(foc_motion_context_t)))
+    {
+        return FOC_STATUS_NOT_CONFIGURED;
+    }
+
+    motion_status = foc_rust_motion_init(&g_foc_motion_context);
+    if (motion_status == FOC_MOTION_STATUS_OK)
+    {
+        motion_status = foc_rust_motion_configure_realtime(
+            &g_foc_motion_context, config, outer_loop_divider);
+    }
+    if (motion_status == FOC_MOTION_STATUS_OK)
+    {
+        motion_status = foc_rust_motion_enable(&g_foc_motion_context);
+    }
+    if (motion_status != FOC_MOTION_STATUS_OK)
+    {
+        (void)foc_rust_motion_disable(&g_foc_motion_context);
+        return foc_platform_motion_status_to_foc(motion_status);
+    }
+
+    dispatcher_result = foc_motion_dispatcher_init(
+        &g_foc_motion_dispatcher, &dispatcher_ops);
+    if (dispatcher_result != FOC_MOTION_DISPATCHER_OK)
+    {
+        (void)foc_rust_motion_disable(&g_foc_motion_context);
+        return foc_platform_motion_dispatch_result_to_foc(dispatcher_result);
+    }
+    (void)memset(&g_foc_motion_realtime_request,
+                 0,
+                 sizeof(g_foc_motion_realtime_request));
+    (void)memset(&g_foc_motion_realtime_output,
+                 0,
+                 sizeof(g_foc_motion_realtime_output));
+    g_foc_motion_command_ready = 0U;
+    g_foc_motion_probe_nominal_bus_voltage_v =
+        active_realtime_config->nominal_bus_voltage_v;
+
+    (void)foc_platform_motion_probe_inject_isr(
+        FOC_MOTION_PROBE_INJECT_CONFIGURE_BEFORE_ROUTE);
+
+    /* Publish ownership last.  Once this word becomes one, only the ADC ISR
+     * may mutate the Rust motion context until stopped-state shutdown removes
+     * the route again. */
+    key = foc_platform_motion_enter_critical(0);
+    if ((g_foc_control_armed == 0U) &&
+        (g_foc_power_safety.state == FOC_POWER_SAFETY_DISABLED) &&
+        (g_foc_power_safety.fault_epoch == expected_fault_epoch))
+    {
+        g_foc_motion_runtime_enabled = 1U;
+    }
+    foc_platform_motion_exit_critical(0, key);
+    (void)foc_platform_motion_probe_inject_isr(
+        FOC_MOTION_PROBE_INJECT_CONFIGURE_AFTER_ROUTE);
+    /* Break remains preemptible inside the ADC-only critical section.  It may
+     * therefore arrive after the pre-commit check but before the route store;
+     * this post-commit epoch/state check closes that exact interleaving. */
+    if ((g_foc_motion_runtime_enabled == 0U) ||
+        (g_foc_power_safety.state != FOC_POWER_SAFETY_DISABLED) ||
+        (g_foc_power_safety.fault_epoch != expected_fault_epoch))
+    {
+        key = foc_platform_motion_enter_critical(0);
+        g_foc_motion_runtime_enabled = 0U;
+        g_foc_motion_command_ready = 0U;
+        foc_platform_motion_exit_critical(0, key);
+        (void)foc_rust_motion_disable(&g_foc_motion_context);
+        (void)foc_motion_dispatcher_reset_stopped(&g_foc_motion_dispatcher);
+        return FOC_STATUS_HARDWARE_FAULT;
+    }
+    if (foc_motion_probe_configure(&g_foc_motion_probe,
+                                   expected_fault_epoch) !=
+        FOC_MOTION_PROBE_RESULT_OK)
+    {
+        key = foc_platform_motion_enter_critical(0);
+        g_foc_motion_runtime_enabled = 0U;
+        g_foc_motion_command_ready = 0U;
+        foc_platform_motion_exit_critical(0, key);
+        (void)foc_rust_motion_disable(&g_foc_motion_context);
+        (void)foc_motion_dispatcher_reset_stopped(&g_foc_motion_dispatcher);
+        return FOC_STATUS_NOT_CONFIGURED;
+    }
+    return FOC_STATUS_OK;
+#else
+    (void)config;
+    (void)active_realtime_config;
+    (void)active_bundle_revision;
+    (void)outer_loop_divider;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_motion_candidate_publish(
+    const foc_product_command_t *command,
+    uint32_t position_valid,
+    float mechanical_position_rad,
+    uint32_t position_sampled_at_ms)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    if (g_foc_motion_runtime_enabled == 0U)
+    {
+        return FOC_STATUS_NOT_CONFIGURED;
+    }
+    {
+        foc_motion_dispatcher_result_t result =
+            foc_motion_dispatcher_publish(&g_foc_motion_dispatcher,
+                                          command,
+                                          position_valid,
+                                          mechanical_position_rad,
+                                          position_sampled_at_ms);
+        if (result == FOC_MOTION_DISPATCHER_OK)
+        {
+            g_foc_motion_command_ready = 1U;
+        }
+        return foc_platform_motion_dispatch_result_to_foc(result);
+    }
+#else
+    (void)command;
+    (void)position_valid;
+    (void)mechanical_position_rad;
+    (void)position_sampled_at_ms;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_motion_candidate_request_stop(void)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    if (g_foc_motion_runtime_enabled == 0U)
+    {
+        return FOC_STATUS_NOT_CONFIGURED;
+    }
+    g_foc_motion_command_ready = 0U;
+    return foc_platform_motion_dispatch_result_to_foc(
+        foc_motion_dispatcher_request_stop(&g_foc_motion_dispatcher));
+#else
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_motion_candidate_request_fault(uint32_t fault_detail)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    if (g_foc_motion_runtime_enabled == 0U)
+    {
+        return FOC_STATUS_NOT_CONFIGURED;
+    }
+    g_foc_motion_command_ready = 0U;
+    return foc_platform_motion_dispatch_result_to_foc(
+        foc_motion_dispatcher_request_fault(&g_foc_motion_dispatcher,
+                                            fault_detail));
+#else
+    (void)fault_detail;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_motion_candidate_shutdown(void)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    foc_motion_status_t motion_status;
+    foc_motion_dispatcher_result_t dispatcher_result;
+    uint32_t key;
+
+    if (g_foc_control_armed != 0U)
+    {
+        return FOC_STATUS_DISABLED;
+    }
+
+    /* Revoke ISR ownership before touching either state machine.  Because the
+     * caller runs in task context on a single Cortex-M core, no ADC handler is
+     * active at this point; masking the IRQ prevents the next one from starting
+     * during the handoff. */
+    key = foc_platform_motion_enter_critical(0);
+    g_foc_motion_runtime_enabled = 0U;
+    g_foc_motion_command_ready = 0U;
+    g_foc_motion_probe_execute_motion = 0U;
+    g_foc_motion_probe_nominal_bus_voltage_v = 0.0f;
+    foc_platform_motion_exit_critical(0, key);
+
+    motion_status = foc_rust_motion_disable(&g_foc_motion_context);
+    dispatcher_result = foc_motion_dispatcher_reset_stopped(
+        &g_foc_motion_dispatcher);
+    (void)foc_motion_probe_init(&g_foc_motion_probe);
+    (void)foc_motion_torque_trial_init(&g_foc_motion_torque_trial);
+    if (dispatcher_result != FOC_MOTION_DISPATCHER_OK)
+    {
+        return foc_platform_motion_dispatch_result_to_foc(dispatcher_result);
+    }
+    return foc_platform_motion_status_to_foc(motion_status);
+#else
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+uint32_t foc_platform_motion_candidate_is_enabled(void)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    return (g_foc_motion_runtime_enabled != 0U) ? 1U : 0U;
+#else
+    return 0U;
+#endif
+}
+
+foc_status_t foc_platform_motion_candidate_probe_start(
+    uint32_t requested_ticks,
+    float target_speed_rpm,
+    uint32_t execute_motion)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    foc_motion_probe_register_snapshot_t snapshot;
+    foc_motion_probe_result_t probe_result;
+    foc_status_t status;
+    uint32_t key;
+
+    if ((execute_motion > 1U) ||
+        (g_foc_controller == 0) ||
+        (g_foc_motion_runtime_enabled == 0U) ||
+        (g_foc_motion_command_ready == 0U))
+    {
+        return FOC_STATUS_NOT_CONFIGURED;
+    }
+    if ((g_foc_control_armed != 0U) ||
+        (g_foc_power_safety.state != FOC_POWER_SAFETY_DISABLED))
+    {
+        return FOC_STATUS_DISABLED;
+    }
+
+    key = foc_platform_motion_enter_critical(0);
+    foc_platform_disable_power_fast();
+    TIM1->CCR1 = 0U;
+    TIM1->CCR2 = 0U;
+    TIM1->CCR3 = 0U;
+    foc_platform_motion_probe_snapshot(&snapshot);
+    status = foc_rust_start_realtime(g_foc_controller,
+                                     1U,
+                                     target_speed_rpm);
+    if (status == FOC_STATUS_OK)
+    {
+        probe_result = foc_motion_probe_start(&g_foc_motion_probe,
+                                              requested_ticks,
+                                              &snapshot);
+        if (probe_result != FOC_MOTION_PROBE_RESULT_OK)
+        {
+            status = FOC_STATUS_NOT_CONFIGURED;
+        }
+    }
+    if (status == FOC_STATUS_OK)
+    {
+        g_foc_motion_probe_execute_motion = execute_motion;
+        g_foc_control_sequence = 0U;
+        g_foc_diagnostics.realtime_step_count = 0U;
+        g_foc_diagnostics.realtime_error_count = 0U;
+        g_foc_diagnostics.deadline_miss_count = 0U;
+        g_foc_diagnostics.maximum_isr_cycles = 0U;
+        g_foc_diagnostics.maximum_precontrol_cycles = 0U;
+        g_foc_diagnostics.maximum_control_cycles = 0U;
+        g_foc_diagnostics.maximum_postcontrol_cycles = 0U;
+        g_foc_diagnostics.last_control_status = FOC_STATUS_OK;
+        foc_realtime_timing_reset(&g_foc_timing_stats);
+    }
+    else
+    {
+        foc_rust_stop(g_foc_controller);
+    }
+    foc_platform_motion_exit_critical(0, key);
+    return status;
+#else
+    (void)requested_ticks;
+    (void)target_speed_rpm;
+    (void)execute_motion;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_motion_candidate_probe_get_status(
+    foc_motion_probe_status_t *status)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    foc_motion_probe_result_t result;
+    uint32_t key;
+
+    if (status == 0)
+    {
+        return FOC_STATUS_INVALID_ARGUMENT;
+    }
+    key = foc_platform_motion_enter_critical(0);
+    result = foc_motion_probe_get_status(&g_foc_motion_probe, status);
+    foc_platform_motion_exit_critical(0, key);
+    return (result == FOC_MOTION_PROBE_RESULT_OK) ?
+        FOC_STATUS_OK : FOC_STATUS_NOT_CONFIGURED;
+#else
+    (void)status;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_motion_candidate_probe_finish(void)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    uint32_t key = foc_platform_motion_enter_critical(0);
+
+    foc_platform_disable_power_fast();
+    TIM1->CCR1 = 0U;
+    TIM1->CCR2 = 0U;
+    TIM1->CCR3 = 0U;
+    g_foc_motion_probe_execute_motion = 0U;
+    foc_rust_stop(g_foc_controller);
+    foc_platform_motion_exit_critical(0, key);
+    return FOC_STATUS_OK;
+#else
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_motion_candidate_probe_inject_once(
+    foc_motion_probe_injection_point_t point)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    foc_motion_probe_result_t result;
+    uint32_t key;
+
+    if ((g_foc_motion_probe.struct_size != sizeof(g_foc_motion_probe)) ||
+        (g_foc_motion_probe.version != FOC_MOTION_PROBE_VERSION))
+    {
+        (void)foc_motion_probe_init(&g_foc_motion_probe);
+    }
+    key = foc_platform_motion_enter_critical(0);
+    result = foc_motion_probe_set_injection(&g_foc_motion_probe, point);
+    foc_platform_motion_exit_critical(0, key);
+    return (result == FOC_MOTION_PROBE_RESULT_OK) ?
+        FOC_STATUS_OK : FOC_STATUS_DISABLED;
+#else
+    (void)point;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_motion_candidate_torque_trial_start(
+    const foc_product_command_t *command,
+    const foc_runtime_config_t *active_realtime_config,
+    float startup_target_speed_rpm)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    foc_motion_torque_trial_result_t trial_result;
+    foc_status_t status;
+
+    if ((g_foc_controller == 0) ||
+        (g_foc_motion_runtime_enabled == 0U) ||
+        (g_foc_motion_command_ready != 0U) ||
+        (g_foc_control_armed != 0U) ||
+        (g_foc_power_safety.state != FOC_POWER_SAFETY_DISABLED))
+    {
+        return FOC_STATUS_DISABLED;
+    }
+    trial_result = foc_motion_torque_trial_prepare(
+        &g_foc_motion_torque_trial, command, active_realtime_config);
+    if (trial_result != FOC_MOTION_TORQUE_TRIAL_RESULT_OK)
+    {
+        return FOC_STATUS_INVALID_ARGUMENT;
+    }
+    status = foc_platform_motion_candidate_publish(command, 0U, 0.0f, 0U);
+    if (status != FOC_STATUS_OK)
+    {
+        foc_motion_torque_trial_fail(
+            &g_foc_motion_torque_trial,
+            FOC_MOTION_TORQUE_TRIAL_RESULT_INVALID_ENVELOPE,
+            g_foc_power_safety.fault_epoch);
+        return status;
+    }
+    trial_result = foc_motion_torque_trial_mark_armed(
+        &g_foc_motion_torque_trial);
+    if (trial_result != FOC_MOTION_TORQUE_TRIAL_RESULT_OK)
+    {
+        return FOC_STATUS_NOT_CONFIGURED;
+    }
+    status = foc_platform_control_start_internal(startup_target_speed_rpm, 1U);
+    if (status != FOC_STATUS_OK)
+    {
+        foc_motion_torque_trial_fail(
+            &g_foc_motion_torque_trial,
+            FOC_MOTION_TORQUE_TRIAL_RESULT_PLATFORM_FAULT,
+            g_foc_power_safety.fault_epoch);
+    }
+    return status;
+#else
+    (void)command;
+    (void)active_realtime_config;
+    (void)startup_target_speed_rpm;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_motion_candidate_torque_trial_get_status(
+    foc_motion_torque_trial_status_t *status)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    foc_motion_torque_trial_result_t result;
+    uint32_t key;
+
+    if (status == 0)
+    {
+        return FOC_STATUS_INVALID_ARGUMENT;
+    }
+    key = foc_platform_motion_enter_critical(0);
+    result = foc_motion_torque_trial_get_status(
+        &g_foc_motion_torque_trial, status);
+    foc_platform_motion_exit_critical(0, key);
+    return (result == FOC_MOTION_TORQUE_TRIAL_RESULT_OK) ?
+        FOC_STATUS_OK : FOC_STATUS_NOT_CONFIGURED;
+#else
+    (void)status;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
 /*
  * 全量紧急关断：栅极、定时器输出、同步时基、诊断位。
  * Full emergency stop: gates, timer outputs, sync time base and diagnostics.
@@ -2206,7 +3114,8 @@ void foc_platform_emergency_stop(void)
         TIM2->CR1 &= ~TIM_CR1_CEN;
     }
 #endif
-    g_foc_diagnostics.flags &= ~FOC_PLATFORM_DIAG_SYNC_RUNNING;
+    g_foc_diagnostics.flags &= ~(FOC_PLATFORM_DIAG_SYNC_RUNNING |
+                                 FOC_PLATFORM_DIAG_SYNC_SAMPLES_VALID);
 #if defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD)
     foc_phase_voltage_capture_stop(&g_foc_phase_voltage_capture);
     if ((RCC->AHB2ENR & RCC_AHB2ENR_GPIOCEN) != 0U)
@@ -2364,6 +3273,11 @@ void ADC1_2_IRQHandler(void)
     uint16_t delta_w;
     uint16_t peak;
     uint16_t trip_counts;
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    foc_motion_torque_trial_action_t torque_trial_action =
+        FOC_MOTION_TORQUE_TRIAL_ACTION_CONTINUE;
+#endif
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
     foc_lsi_raw_sample_t lsi_raw_sample = {0};
     foc_lsi_capture_record_result_t lsi_capture_result =
@@ -2503,6 +3417,12 @@ void ADC1_2_IRQHandler(void)
         g_foc_diagnostics.phase_w_raw = (uint16_t)phase_w_raw;
         ++g_foc_diagnostics.sync_sample_count;
         g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_SYNC_SAMPLES_VALID;
+#if defined(FOC_EXTERNAL_IO_FRAMEWORK)
+        /* P2.5 raw input scheduler is a constant-time no-op while disabled.
+         * It may only read/start the ADC regular group; injected current data,
+         * control state and motor PWM remain outside its reach. */
+        foc_external_input_platform_control_tick();
+#endif
         delta_u = (uint16_t)((current_u_counts < 0) ?
             -current_u_counts : current_u_counts);
         delta_v = (uint16_t)((current_v_counts < 0) ?
@@ -2531,6 +3451,18 @@ void ADC1_2_IRQHandler(void)
             foc_platform_latch_fault_fast(FOC_POWER_FAULT_BUS_VOLTAGE,
                                           FOC_RUST_FAULT_PLATFORM_INPUT);
         }
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+        if ((g_foc_control_armed != 0U) &&
+            (foc_motion_torque_trial_begin_tick(
+                 &g_foc_motion_torque_trial) ==
+             FOC_MOTION_TORQUE_TRIAL_ACTION_FAULT_STOP))
+        {
+            foc_platform_latch_fault_fast(
+                FOC_POWER_FAULT_CONTROL,
+                FOC_RUST_FAULT_MOTION_CONTROL);
+        }
+#endif
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
         if (peak > trip_counts)
         {
@@ -2584,6 +3516,12 @@ void ADC1_2_IRQHandler(void)
             foc_feedback_t feedback;
             foc_realtime_input_t input;
             foc_output_t output;
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+            uint32_t motion_call_used = 0U;
+            uint32_t motion_fault_requested = 0U;
+            uint32_t motion_stop_requested = 0U;
+#endif
 #if defined(FLUXRT_TRACE_BUILD)
             foc_telemetry_t telemetry;
 #endif
@@ -2676,13 +3614,108 @@ void ADC1_2_IRQHandler(void)
 #endif
                 control_cycle_start = DWT->CYCCNT;
                 control_executed = 1U;
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+                if (g_foc_motion_runtime_enabled != 0U)
+                {
+                    foc_motion_dispatcher_result_t dispatch_result;
+
+                    dispatch_result = foc_motion_dispatcher_consume_isr(
+                        &g_foc_motion_dispatcher,
+                        (uint32_t)rt_tick_get_millisecond(),
+                        &g_foc_motion_realtime_request);
+                    if (dispatch_result == FOC_MOTION_DISPATCHER_OK)
+                    {
+                        motion_call_used = 1U;
+                        motion_fault_requested =
+                            ((g_foc_motion_realtime_request.request_flags &
+                              FOC_MOTION_REALTIME_REQUEST_FAULT) != 0U) ?
+                                1U : 0U;
+                        motion_stop_requested =
+                            ((g_foc_motion_realtime_request.request_flags &
+                              FOC_MOTION_REALTIME_REQUEST_STOP) != 0U) ?
+                                1U : 0U;
+                        control_status = foc_rust_realtime_step_with_motion(
+                            g_foc_controller,
+                            &g_foc_motion_context,
+                            &input,
+                            &g_foc_motion_realtime_request,
+                            &output,
+                            telemetry_output,
+                            &g_foc_motion_realtime_output);
+                    }
+                    else if (dispatch_result ==
+                             FOC_MOTION_DISPATCHER_NO_COMMAND)
+                    {
+                        /* A selected motion route may never fall through to the
+                         * legacy speed controller.  Missing ownership data is a
+                         * configuration failure and must cut power. */
+                        (void)memset(&output, 0, sizeof(output));
+                        motion_call_used = 1U;
+                        motion_fault_requested = 1U;
+                        control_status = FOC_STATUS_NOT_CONFIGURED;
+                    }
+                    else
+                    {
+                        (void)memset(&output, 0, sizeof(output));
+                        motion_call_used = 1U;
+                        motion_fault_requested = 1U;
+                        control_status = FOC_STATUS_NOT_CONFIGURED;
+                    }
+                }
+                else
+#endif
+                {
                 control_status = foc_rust_realtime_step(g_foc_controller,
                                                         &input,
                                                         &output,
                                                         telemetry_output);
+                }
                 ++g_foc_control_sequence;
                 control_cycle_end = DWT->CYCCNT;
                 g_foc_diagnostics.last_control_status = control_status;
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+                if ((motion_call_used != 0U) &&
+                    (control_status == FOC_STATUS_OK))
+                {
+                    torque_trial_action =
+                        foc_motion_torque_trial_record_commit(
+                            &g_foc_motion_torque_trial,
+                            &g_foc_motion_realtime_output);
+                }
+                if (motion_fault_requested != 0U)
+                {
+                    g_foc_diagnostics.control_fault_flags =
+                        foc_rust_fault_flags(g_foc_controller);
+                    ++g_foc_diagnostics.realtime_error_count;
+                    g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_CONTROL_ERROR;
+                    foc_platform_latch_fault_fast(
+                        FOC_POWER_FAULT_CONTROL,
+                        FOC_RUST_FAULT_MOTION_CONTROL);
+                }
+                else if ((motion_stop_requested != 0U) &&
+                    ((control_status == FOC_STATUS_OK) ||
+                     (control_status == FOC_STATUS_DISABLED)))
+                {
+                    /* A requested stop is a normal state transition, not a
+                     * sticky control failure.  The combined Rust entry has
+                     * already reset motion state; C owns the physical cut. */
+                    g_foc_motion_runtime_enabled = 0U;
+                    g_foc_motion_command_ready = 0U;
+                    foc_platform_disable_power_fast();
+                }
+                else if (torque_trial_action ==
+                         FOC_MOTION_TORQUE_TRIAL_ACTION_FAULT_STOP)
+                {
+                    ++g_foc_diagnostics.realtime_error_count;
+                    g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_CONTROL_ERROR;
+                    foc_platform_latch_fault_fast(
+                        FOC_POWER_FAULT_CONTROL,
+                        FOC_RUST_FAULT_MOTION_CONTROL);
+                }
+                else
+#endif
                 if (control_status != FOC_STATUS_OK)
                 {
                     g_foc_diagnostics.control_fault_flags =
@@ -2697,6 +3730,12 @@ void ADC1_2_IRQHandler(void)
                     g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_CONTROL_ERROR;
                     foc_platform_latch_fault_fast(
                         FOC_POWER_FAULT_CONTROL,
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+                        ((motion_call_used != 0U) ||
+                         (motion_fault_requested != 0U)) ?
+                            FOC_RUST_FAULT_MOTION_CONTROL :
+#endif
                         FOC_RUST_FAULT_ALGORITHM_OUTPUT);
                 }
                 else if (!(output.duty_a >= g_foc_platform_config.minimum_duty &&
@@ -2726,9 +3765,25 @@ void ADC1_2_IRQHandler(void)
                             &output, control_fault_epoch) != 0U)
                     {
                         ++g_foc_diagnostics.realtime_step_count;
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+                        if (torque_trial_action ==
+                            FOC_MOTION_TORQUE_TRIAL_ACTION_COMPLETE_STOP)
+                        {
+                            /* The 1,200th accepted Torque tick is committed, then
+                             * Gate/MOE/CCER are cut in the same ADC ISR. Shell
+                             * scheduling cannot extend the 100 ms window. */
+                            g_foc_motion_runtime_enabled = 0U;
+                            g_foc_motion_command_ready = 0U;
+                            foc_platform_disable_power_fast();
+                        }
+#endif
 #if defined(FLUXRT_TRACE_BUILD)
-                        trace_sampled = foc_platform_trace_capture(
-                            &feedback, &output, &telemetry);
+                        if (g_foc_control_armed != 0U)
+                        {
+                            trace_sampled = foc_platform_trace_capture(
+                                &feedback, &output, &telemetry);
+                        }
 #endif
                     }
                 }
@@ -2739,6 +3794,22 @@ void ADC1_2_IRQHandler(void)
                 control_cycle_end = control_cycle_start;
             }
         }
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+        else if (g_foc_motion_probe.state == FOC_MOTION_PROBE_RUNNING)
+        {
+            /* No-power E1B evidence path.  It is intentionally outside the
+             * armed branch and the platform start gate rejects arm while this
+             * route exists.  Only CCR preload registers may change. */
+            timing_active = 1U;
+            control_executed = 1U;
+            control_cycle_start = DWT->CYCCNT;
+            (void)foc_platform_motion_probe_step_isr(current_u_counts,
+                                                     current_v_counts,
+                                                     current_w_counts);
+            control_cycle_end = DWT->CYCCNT;
+        }
+#endif
         /* The steady-state path has no pending mirror. Avoid entering a second
          * PRIMASK critical section on every 12 kHz tick; a Break that arrives
          * after this volatile read is still cut off in hardware immediately
@@ -2794,6 +3865,19 @@ void ADC1_2_IRQHandler(void)
             {
                 ++g_foc_diagnostics.deadline_miss_count;
                 g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_DEADLINE_MISSED;
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+                if ((g_foc_motion_probe.state ==
+                     FOC_MOTION_PROBE_RUNNING) ||
+                    (g_foc_motion_probe.state ==
+                     FOC_MOTION_PROBE_COMPLETE))
+                {
+                    (void)foc_motion_probe_fail(
+                        &g_foc_motion_probe,
+                        FOC_MOTION_PROBE_RESULT_CONTROL_FAILURE,
+                        g_foc_power_safety.fault_epoch);
+                }
+#endif
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
                 if (g_foc_lsi_session_running != 0U)
                 {
@@ -2871,7 +3955,8 @@ void TIM1_BRK_TIM15_IRQHandler(void)
 #if FOC_ADC_TRIGGER_USES_TIM2_DIVIDER
         TIM2->CR1 &= ~TIM_CR1_CEN;
 #endif
-        g_foc_diagnostics.flags &= ~FOC_PLATFORM_DIAG_SYNC_RUNNING;
+        g_foc_diagnostics.flags &= ~(FOC_PLATFORM_DIAG_SYNC_RUNNING |
+                                     FOC_PLATFORM_DIAG_SYNC_SAMPLES_VALID);
     }
 }
 #endif
@@ -3061,12 +4146,15 @@ foc_status_t foc_platform_apply_output(const foc_output_t *output)
  * target_speed_rpm is the closed-loop target in rpm; the open-loop phase does
  * not use it, but Rust validates it first.
  */
-foc_status_t foc_platform_control_start(float target_speed_rpm)
+static foc_status_t foc_platform_control_start_internal(
+    float target_speed_rpm,
+    uint32_t allow_motion_candidate)
 {
 #if defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD)
     /* Calibration/Identification 都在编译期禁用普通 arm。即使应用层或未来脚本
      * 误调用 start，平台层仍先执行硬关断再拒绝，保证不存在绕过 Shell 的路径。 */
     (void)target_speed_rpm;
+    (void)allow_motion_candidate;
     foc_platform_emergency_stop();
     return FOC_STATUS_DISABLED;
 #elif defined(FOC_TARGET_STM32G431)
@@ -3089,6 +4177,24 @@ foc_status_t foc_platform_control_start(float target_speed_rpm)
     {
         return FOC_STATUS_NOT_CONFIGURED;
     }
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    /* This dedicated image has exactly one arm authority: the fixed-envelope
+     * Torque coordinator.  Generic foc_start is rejected even before a motion
+     * route exists, so no Shell/API ordering can bypass the bounded trial. */
+    if (allow_motion_candidate == 0U)
+    {
+        return FOC_STATUS_DISABLED;
+    }
+    if ((g_foc_motion_runtime_enabled == 0U) ||
+        (g_foc_motion_torque_trial.state !=
+         FOC_MOTION_TORQUE_TRIAL_STARTUP))
+    {
+        return FOC_STATUS_NOT_CONFIGURED;
+    }
+#else
+    (void)allow_motion_candidate;
+#endif
     status = foc_platform_read_feedback(&feedback);
     if (status != FOC_STATUS_OK)
     {
@@ -3209,8 +4315,14 @@ foc_status_t foc_platform_control_start(float target_speed_rpm)
     return FOC_STATUS_OK;
 #else
     (void)target_speed_rpm;
+    (void)allow_motion_candidate;
     return FOC_STATUS_NOT_CONFIGURED;
 #endif
+}
+
+foc_status_t foc_platform_control_start(float target_speed_rpm)
+{
+    return foc_platform_control_start_internal(target_speed_rpm, 0U);
 }
 
 void foc_platform_control_stop(void)
@@ -3219,6 +4331,10 @@ void foc_platform_control_stop(void)
     uint32_t primask = __get_PRIMASK();
     uint32_t pending_faults;
     __disable_irq();
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    foc_motion_torque_trial_abort(&g_foc_motion_torque_trial);
+#endif
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
     if (g_foc_lsi_session_running != 0U)
     {

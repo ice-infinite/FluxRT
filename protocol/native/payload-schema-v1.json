@@ -1,0 +1,161 @@
+{
+  "schema": "fluxrt-native-payloads",
+  "schema_version": 1,
+  "byte_order": "little-endian",
+  "rules": {
+    "integer_width_bits": 32,
+    "float_format": "IEEE-754-binary32",
+    "reserved_fields_must_be_zero": true,
+    "struct_memory_copy_forbidden": true
+  },
+  "payloads": {
+    "identity": {
+      "message_type": 2,
+      "size": 48,
+      "fields": [
+        "schema_version",
+        "product_contract_version",
+        "firmware_abi_version",
+        "config_abi_version",
+        "board_id",
+        "motor_id",
+        "inverter_id",
+        "profile_revision",
+        "firmware_revision",
+        "build_id_crc32c",
+        "axis_count",
+        "node_id"
+      ]
+    },
+    "capabilities": {
+      "message_type": 18,
+      "size": 64,
+      "fields": [
+        "schema_version",
+        "axis_count",
+        "axis_request_mask",
+        "control_mode_mask",
+        "input_mode_mask",
+        "feedback_mode_mask",
+        "command_kind_mask",
+        "compiled_transport_mask",
+        "board_transport_mask",
+        "compiled_protocol_mask",
+        "compiled_input_mask",
+        "board_input_mask",
+        "telemetry_valid_mask",
+        "maximum_payload_size",
+        "minimum_status_period_ms",
+        "reserved"
+      ]
+    },
+    "status": {
+      "message_type": 34,
+      "size": 64,
+      "fields": [
+        "schema_version",
+        "device_flags",
+        "uptime_ms",
+        "config_revision",
+        "axis_id",
+        "axis_state",
+        "control_mode",
+        "input_mode",
+        "feedback_mode",
+        "active_source_id",
+        "fault_flags",
+        "telemetry_valid_flags",
+        "dc_bus_voltage_v",
+        "mechanical_velocity_rad_s",
+        "current_q_a",
+        "motor_temperature_c"
+      ]
+    },
+    "command_result": {
+      "message_type": 50,
+      "size": 32,
+      "fields": [
+        "schema_version",
+        "request_sequence",
+        "source_id",
+        "axis_id",
+        "result",
+        "detail",
+        "accepted_sequence",
+        "reserved"
+      ],
+      "result_values": {
+        "accepted": 0,
+        "malformed": 1,
+        "unsupported": 2,
+        "unauthorized": 3,
+        "expired": 4,
+        "busy": 5,
+        "rejected": 6,
+        "internal": 7,
+        "read_only": 8
+      }
+    },
+    "product_command": {
+      "message_type": 49,
+      "size": 104,
+      "source_contract": "foc_product_command_t-v1",
+      "encoding": "field-by-field-u32-and-f32",
+      "fields": [
+        "struct_size",
+        "version",
+        "axis_id",
+        "source_id",
+        "sequence",
+        "created_at_ms",
+        "valid_until_ms",
+        "command_kind",
+        "axis_request",
+        "control_mode",
+        "input_mode",
+        "feedback_mode",
+        "flags",
+        "duty_ref",
+        "voltage_d_ref_v",
+        "voltage_q_ref_v",
+        "current_d_ref_a",
+        "current_q_ref_a",
+        "torque_ref_nm",
+        "velocity_ref_rad_s",
+        "position_ref_rad",
+        "velocity_feedforward_rad_s",
+        "torque_feedforward_nm",
+        "current_limit_a",
+        "torque_limit_nm",
+        "velocity_limit_rad_s"
+      ]
+    },
+    "parameter_get_request": {
+      "message_type": 65,
+      "size": 32,
+      "chunk_data_size": 224,
+      "fields": ["schema_version", "request_id", "scope", "transaction_token", "group_mask", "offset", "length", "reserved"]
+    },
+    "parameter_get_response": {
+      "message_type": 66,
+      "size": 256,
+      "fields": ["schema_version", "request_id", "result", "detail", "revision", "total_length", "chunk_offset", "chunk_length", "data[224]"]
+    },
+    "parameter_set_request": {
+      "message_type": 67,
+      "size": 256,
+      "fields": ["schema_version", "request_id", "transaction_token", "group", "offset", "total_length", "chunk_length", "flags", "data[224]"]
+    },
+    "parameter_transaction_response": {
+      "message_types": [68, 70],
+      "size": 32,
+      "fields": ["schema_version", "request_id", "result", "detail", "transaction_token", "changed_groups", "transaction_state", "active_revision"]
+    },
+    "parameter_commit_request": {
+      "message_type": 69,
+      "size": 32,
+      "actions": {"begin": 0, "validate": 1, "apply": 2, "commit": 3, "rollback": 4},
+      "fields": ["schema_version", "request_id", "transaction_token", "action", "expected_revision", "flags", "reserved0", "reserved1"]
+    }
+  }
+}

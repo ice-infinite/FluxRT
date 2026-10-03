@@ -47,28 +47,46 @@
 //   contract   产品层 Axis/模式/命令/反馈/遥测/故障的稳定公共契约
 //   command    固定容量 mailbox、来源优先级、lease 与命令仲裁
 //   config     产品配置分组、确定性记录、双槽恢复、迁移与回滚计划
+//   config_transaction 设备端pending/apply/rollback/commit事务与安全门
+//   feedback   统一反馈快照、质量门、回退选择与标定生命周期
+//   motion     Torque/Velocity/Position参考规划、InputMode、限制与切换预置
+//   motion_cascade Position P、Velocity PI、Torque/Iq转换与最终抗饱和
+//   motion_config 持久化ConfigBundle到motion运行时配置的唯一SI单位映射
 //   math       可替换的数学后端 trait（sin/cos、幅值、atan2）
 //   params     被控对象与 PI 参数集，含来源标注与"未辨识"警告
 //   ports      反馈 / 功率级 / 安全 三个硬件端口 trait
 //   controller 电流环、速度环与串级控制器（MCSDK 参考拓扑）
 //   identification EXP-B3 Ls(I) 状态请求到 PWM 的纯计划层（不拥有硬件）
+//   advanced_foc MTPA/弱磁/MTPV、解耦、调制、HFI与飞车捕获的统一监督器
 //   observer   SMO+PLL 与浮点反电势观测器，含可靠性门控
 //   voltage    观察器电压来源策略；当前默认/唯一批准路径为 CommandModel
+//   power_supervisor 热降额、母线窗口、source/sink与再生/制动安全策略
 //   startup    开环预启动时序与无感切换的角度渐变
 //   runtime    端口 + 控制器的有状态"一拍"外壳（PC 仿真主用）
 //   `types` holds the plain data contract, `math` the replaceable math backend,
 //   `params` the plant and PI sets, `ports` the three hardware traits,
 //   `controller` the cascaded loops, `observer` the sensorless estimators,
 //   `startup` the rev-up sequencer and `runtime` the stateful one-tick shell.
+#[cfg(any(test, feature = "advanced-foc"))]
+pub mod advanced_foc;
 pub mod command;
 pub mod config;
+pub mod config_transaction;
 pub mod contract;
 pub mod controller;
+pub mod feedback;
 pub mod identification;
 pub mod math;
+#[cfg(any(test, feature = "motion-control"))]
+pub mod motion;
+#[cfg(any(test, feature = "motion-control"))]
+pub mod motion_cascade;
+#[cfg(any(test, feature = "motion-control"))]
+pub mod motion_config;
 pub mod observer;
 pub mod params;
 pub mod ports;
+pub mod power_supervisor;
 pub mod runtime;
 pub mod startup;
 pub mod types;
@@ -78,15 +96,26 @@ pub mod voltage;
 // `foc-rt-bridge` 与 `foc-sim` 都依赖这个扁平命名空间。
 // Flat re-exports so callers write `foc_control::Xxx`; `foc-rt-bridge` and
 // `foc-sim` both rely on this namespace.
+#[cfg(any(test, feature = "advanced-foc"))]
+pub use advanced_foc::*;
 pub use command::*;
 pub use config::*;
+pub use config_transaction::*;
 pub use contract::*;
 pub use controller::*;
+pub use feedback::*;
 pub use identification::*;
 pub use math::*;
+#[cfg(any(test, feature = "motion-control"))]
+pub use motion::*;
+#[cfg(any(test, feature = "motion-control"))]
+pub use motion_cascade::*;
+#[cfg(any(test, feature = "motion-control"))]
+pub use motion_config::*;
 pub use observer::*;
 pub use params::*;
 pub use ports::*;
+pub use power_supervisor::*;
 pub use runtime::*;
 pub use startup::*;
 pub use types::*;

@@ -10,6 +10,8 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::{MultiRateTimingConfig, SimulationConfig};
 
+pub mod feedback_sensor;
+
 pub const BUNDLE_RELATIVE_PATH: &str = "simulation/contracts/legacy_speed_start.bundle.json";
 const CONTRACT_VERSION: u32 = 1;
 const PRODUCT_TARGET_RPM: f64 = 524.0;
@@ -797,7 +799,7 @@ fn expect_si(
     Ok(())
 }
 
-fn exact_keys(
+pub(crate) fn exact_keys(
     object: &BTreeMap<String, JsonValue>,
     expected: &[&str],
     label: &str,
@@ -814,7 +816,7 @@ fn exact_keys(
     Ok(())
 }
 
-fn required<'a>(
+pub(crate) fn required<'a>(
     object: &'a BTreeMap<String, JsonValue>,
     key: &str,
 ) -> Result<&'a JsonValue, SimulationContractError> {
@@ -823,7 +825,7 @@ fn required<'a>(
         .ok_or_else(|| SimulationContractError::Invalid(format!("missing field: {key}")))
 }
 
-fn string<'a>(
+pub(crate) fn string<'a>(
     object: &'a BTreeMap<String, JsonValue>,
     key: &str,
 ) -> Result<&'a str, SimulationContractError> {
@@ -833,7 +835,7 @@ fn string<'a>(
     }
 }
 
-fn finite_number(
+pub(crate) fn finite_number(
     object: &BTreeMap<String, JsonValue>,
     key: &str,
 ) -> Result<f64, SimulationContractError> {
@@ -843,7 +845,7 @@ fn finite_number(
     }
 }
 
-fn unsigned(
+pub(crate) fn unsigned(
     object: &BTreeMap<String, JsonValue>,
     key: &str,
 ) -> Result<u64, SimulationContractError> {
@@ -854,7 +856,7 @@ fn unsigned(
     Ok(value as u64)
 }
 
-fn boolean(
+pub(crate) fn boolean(
     object: &BTreeMap<String, JsonValue>,
     key: &str,
 ) -> Result<bool, SimulationContractError> {
@@ -864,7 +866,7 @@ fn boolean(
     }
 }
 
-fn object<'a>(
+pub(crate) fn object<'a>(
     value: &'a JsonValue,
     label: &str,
 ) -> Result<&'a BTreeMap<String, JsonValue>, SimulationContractError> {
@@ -874,7 +876,7 @@ fn object<'a>(
     }
 }
 
-fn array<'a>(
+pub(crate) fn array<'a>(
     value: &'a JsonValue,
     label: &str,
 ) -> Result<&'a [JsonValue], SimulationContractError> {
@@ -913,13 +915,13 @@ fn safe_relative_path(value: &str) -> Result<PathBuf, SimulationContractError> {
     Ok(path.to_path_buf())
 }
 
-fn read_bytes(path: &Path) -> Result<Vec<u8>, SimulationContractError> {
+pub(crate) fn read_bytes(path: &Path) -> Result<Vec<u8>, SimulationContractError> {
     fs::read(path).map_err(|error| {
         SimulationContractError::Io(format!("cannot read {}: {error}", path.display()))
     })
 }
 
-fn invalid<T>(message: String) -> Result<T, SimulationContractError> {
+pub(crate) fn invalid<T>(message: String) -> Result<T, SimulationContractError> {
     Err(SimulationContractError::Invalid(message))
 }
 
@@ -939,7 +941,7 @@ fn is_crc32(value: &str) -> bool {
 }
 
 #[derive(Clone, Debug)]
-enum JsonValue {
+pub(crate) enum JsonValue {
     Null,
     Bool(bool),
     Number(f64),
@@ -948,7 +950,7 @@ enum JsonValue {
     Object(BTreeMap<String, JsonValue>),
 }
 
-fn parse_json_bytes(bytes: &[u8]) -> Result<JsonValue, SimulationContractError> {
+pub(crate) fn parse_json_bytes(bytes: &[u8]) -> Result<JsonValue, SimulationContractError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|error| SimulationContractError::Json(format!("not UTF-8: {error}")))?;
     let mut parser = JsonParser {
@@ -1461,6 +1463,7 @@ const COMPARISON_KEYS: &[&str] = &[
     "d1_exact",
     "d1_event_tick_tolerance",
     "numeric_tolerances",
+    "motion_numeric_tolerances",
 ];
 const TOLERANCE_KEYS: &[&str] = &["channel", "absolute", "relative"];
 const D0_EXACT: &[&str] = &[

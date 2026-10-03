@@ -6,6 +6,8 @@
 #include <string.h>
 
 #include "foc_product_contract.h"
+#include "foc_advanced_bridge.h"
+#include "foc_power_bridge.h"
 #include "foc_rust_bridge.h"
 
 static foc_product_command_t legacy_speed_setpoint(float target_rpm)
@@ -26,11 +28,19 @@ static foc_product_command_t legacy_speed_setpoint(float target_rpm)
 
 int main(void)
 {
+    assert(FOC_ADVANCED_ABI_VERSION == 0x00010000UL);
+    assert(sizeof(foc_advanced_algorithm_config_t) == 128U);
+    assert(sizeof(foc_advanced_runtime_config_t) == 144U);
+    assert(sizeof(foc_advanced_telemetry_t) == 68U);
+    assert(FOC_POWER_ABI_VERSION == 0x00010000UL);
+    assert(sizeof(foc_power_runtime_config_t) == 80U);
+    assert(sizeof(foc_power_input_t) == 36U);
+    assert(sizeof(foc_power_output_t) == 76U);
     foc_product_command_t command = legacy_speed_setpoint(524.0f);
     foc_product_command_t start;
     float recovered_rpm;
 
-    assert(FOC_RUST_ABI_VERSION == 0x00140000UL);
+    assert(FOC_RUST_ABI_VERSION == 0x00150000UL);
     assert(FOC_PRODUCT_CONTRACT_VERSION == 0x00010000UL);
     assert(FOC_AXIS_STATE_FAULT_LATCHED == 6);
     assert(FOC_AXIS_REQUEST_CLOSED_LOOP_CONTROL == 9);

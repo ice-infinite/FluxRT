@@ -9,7 +9,7 @@
   "inverter_id": "stspin830-3shunt",
   "runtime_config_crc32": "0x9835ee59",
   "product_contract_version": "0x00010000",
-  "bridge_abi_version": "0x00140000",
+  "bridge_abi_version": "0x00150000",
   "source_revision": "fluxrt.simulation-contract.p1.3.v1",
   "model_revision": "fluxrt.lifecycle.minimum.v1",
   "pole_pairs": 7,

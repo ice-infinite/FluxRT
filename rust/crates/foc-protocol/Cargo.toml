@@ -1,0 +1,10 @@
+[package]
+name = "foc-protocol"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "foc_protocol"
+
+[dependencies]

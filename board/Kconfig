@@ -102,6 +102,122 @@ config FOC_PWM_24K_CONTROL_12K_CANDIDATE
 
 endmenu
 
+menu "FOC advanced-control candidates"
+
+config FOC_ADVANCED_CONTROL_CANDIDATE
+    bool "Build Diagnostic-only Rust advanced FOC supervisor"
+    depends on SOC_STM32G431RB
+    default n
+    help
+        Build the default-off MTPA, field-weakening, MTPV, dq decoupling,
+        DPWM/overmodulation policy, HFI candidate and passive flying-start
+        supervisor. Runtime configuration is a separate versioned ABI and is
+        accepted only while stopped and fault-free. Hardware-coupled policies
+        still require explicit platform capability bits. Production ignores
+        this candidate even if an old .config retains the symbol.
+
+endmenu
+
+menu "FOC power-management candidates"
+
+config FOC_POWER_MANAGEMENT_CANDIDATE
+    bool "Build Diagnostic-only thermal/DC-bus/regeneration supervisor"
+    depends on SOC_STM32G431RB
+    default n
+    help
+        Build the independent management-rate Rust supervisor and C owner for
+        thermal derating, DC-bus limits, regenerative-current policy and an
+        optional brake-resistor request. The generated configuration is fully
+        disabled. Selecting this option adds no sensor or brake driver and
+        never enables regeneration; calibrated board capabilities and a safe
+        stopped-state configuration transaction remain mandatory.
+
+endmenu
+
+menu "FOC motion-control candidates"
+
+# P4.2 motion planner/cascade is structurally complete but is not yet allowed to
+# own the production setpoint path. The candidate exposes the independent ABI,
+# single-writer dispatcher and combined ADC-ISR route in Diagnostic builds for
+# target integration and WCET measurement. It remains disabled in .config and
+# requires an explicit stopped-state configure/publish sequence at runtime.
+config FOC_MOTION_CONTROL_CANDIDATE
+    bool "Build Diagnostic-only Rust motion planner/cascade candidate"
+    depends on SOC_STM32G431RB
+    default n
+    help
+        Build the independent Rust motion configuration mapper, Torque/Velocity/
+        Position reference planner and Position P -> Velocity PI -> Torque/Iq
+        cascade, C dispatcher and the single-FFI ADC ISR candidate route.
+        Configuration, command publication and enable remain explicit; merely
+        selecting this option neither activates the runtime route nor arms the
+        power stage. Non-Diagnostic profiles compile fail-closed C stubs and
+        never forward the Rust motion-control feature.
+
+endmenu
+
+menu "FluxRT external control and communication"
+
+config FOC_EXTERNAL_IO_FRAMEWORK
+    bool "Build default-off external I/O management framework"
+    default n
+    help
+        Build the P2.4 device-side capability/configuration contract, resource
+        conflict validator, bounded transport queues, normalized input status
+        owner and sole adapter-to-CommandArbiter gateway.  This option does not
+        compile a UART/CAN/EtherCAT protocol driver, does not enable an input,
+        does not create a host GUI and can never arm the power stage by itself.
+        Physical transports, protocols and PWM/DShot/Analog/Step-Dir adapters
+        receive separate default-off options only when their implementations
+        and tests are added in P2.5 and later.
+
+if FOC_EXTERNAL_IO_FRAMEWORK
+
+config FLUXRT_PROTOCOL_NATIVE
+    bool "Build target-neutral FluxRT Native framing candidate"
+    default n
+    help
+        Build the allocation-free V1 frame encoder/decoder and bounded byte-
+        stream resynchronizer. This option adds no UART/USB/CAN driver, keeps
+        every board transport capability closed, does not dispatch a product
+        command and can never arm the power stage by itself.
+
+config FLUXRT_INPUT_PWM_PULSE
+    bool "Build PWM-pulse normalization candidate"
+    default n
+    help
+        Build only the MCU-independent PWM pulse-width normalization and C ABI.
+        No timer/pin driver is selected, the STM32G431 board capability remains
+        unavailable, runtime configuration defaults off and no input can arm.
+
+config FLUXRT_INPUT_ANALOG
+    bool "Build PC2 analog-input raw capture and normalization candidate"
+    default n
+    help
+        Build the MCU-independent centered ADC normalization/C ABI plus the
+        STM32G431 PC2/ADC1_IN8 non-blocking regular-conversion capture driver.
+        It shares ADC1 through a one-conversion pipeline triggered by the
+        existing control IRQ; it never polls there.  The board product
+        capability and runtime start remain closed. P2.5A4-HW2 completed the
+        no-power raw/owner/ADC2-fallback/timing gate. Known multi-point input,
+        endpoint/disconnect hysteresis and formal config apply remain open.
+
+config FLUXRT_INPUT_STEP_DIR
+    bool "Build Step/Dir position conversion candidate"
+    default n
+    help
+        Build only the MCU-independent accumulated-count to output-position
+        conversion and C ABI. No timer/GPIO driver is selected and the board
+        capability remains unavailable.
+
+# DShot is deliberately absent here. P2.5B must first select and review a
+# reusable official/standard-maintained upstream implementation; FluxRT will
+# not introduce a home-grown DShot wire decoder.
+
+endif
+
+endmenu
+
 menu "FOC diagnostics"
 
 # 时序探针会在 ISR 入口拉高 PA5（NUCLEO 的 LD2/D13），用于把 DWT 计数与示波器实测对拍。

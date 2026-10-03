@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 foc-algorithm = { path = "../foc-algorithm" }
-foc-control = { path = "../foc-control" }
+foc-control = { path = "../foc-control", features = ["motion-control", "advanced-foc"] }
 foc-rt-bridge = { path = "../foc-rt-bridge" }
 
 [lib]
@@ -24,3 +24,19 @@ path = "src/bringup_main.rs"
 [[bin]]
 name = "foc-contract-check"
 path = "src/contract_main.rs"
+
+[[bin]]
+name = "foc-feedback-contract-check"
+path = "src/feedback_contract_main.rs"
+
+[[bin]]
+name = "foc-motion-contract-check"
+path = "src/motion_contract_main.rs"
+
+[[bin]]
+name = "foc-advanced-contract-check"
+path = "src/advanced_contract_main.rs"
+
+[[bin]]
+name = "foc-full-speed-contract-check"
+path = "src/full_speed_contract_main.rs"

@@ -67,6 +67,11 @@ use foc_control::{
     MotorParameters, PhaseCurrents, PwmCommand, PwmPort, RotorFeedback, SafetyPort,
 };
 
+pub mod advanced_contract;
+pub mod dynamic_plant;
+pub mod full_speed;
+pub mod full_speed_contract;
+pub mod motion_contract;
 pub mod phase_voltage_path;
 pub mod phase_voltage_sensor;
 pub mod scheduler;

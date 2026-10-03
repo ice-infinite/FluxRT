@@ -14,9 +14,59 @@
 from building import *
 
 cwd = GetCurrentDir()
+src = Glob('*.c')
+
+# P4.2 motion management is part of the same Diagnostic-only candidate as the
+# C adapter/Rust feature.  Keep the source out of generated default/profile
+# builds altogether so a newly added application file cannot create hidden
+# adapter references while the Kconfig option is off.
+if not GetDepend('FOC_MOTION_CONTROL_CANDIDATE'):
+    src = [unit for unit in src
+           if str(unit).replace('\\', '/').split('/')[-1] !=
+           'foc_motion_management.c']
+
+if not GetDepend('FOC_POWER_MANAGEMENT_CANDIDATE'):
+    src = [unit for unit in src
+           if str(unit).replace('\\', '/').split('/')[-1] !=
+           'foc_power_management.c']
+
+# P2.4 external I/O is a real, default-off framework rather than a collection
+# of empty driver switches.  Keep every service out of the target image until
+# the framework master option is selected; physical transport/input features
+# are added only together with their implementations in P2.5+.
+if not GetDepend('FOC_EXTERNAL_IO_FRAMEWORK'):
+    external_io_sources = {
+        'foc_transport_service.c',
+        'foc_input_service.c',
+        'foc_command_service.c',
+        'foc_command_rust_adapter.c',
+        'foc_external_command_owner.c',
+        'foc_external_io_management.c',
+        'foc_external_input_owner.c',
+        'foc_native_fake_driver.c',
+    }
+    src = [unit for unit in src
+           if str(unit).replace('\\', '/').split('/')[-1] not in
+           external_io_sources]
+
+simple_input_features = (
+    GetDepend('FLUXRT_INPUT_PWM_PULSE') or
+    GetDepend('FLUXRT_INPUT_ANALOG') or
+    GetDepend('FLUXRT_INPUT_STEP_DIR')
+)
+if not simple_input_features:
+    src = [unit for unit in src
+           if str(unit).replace('\\', '/').split('/')[-1] !=
+           'foc_simple_input_adapter.c']
+
+if not GetDepend('FLUXRT_PROTOCOL_NATIVE'):
+    src = [unit for unit in src
+           if str(unit).replace('\\', '/').split('/')[-1] !=
+           'foc_native_fake_driver.c']
+
 group = DefineGroup(
     'Applications',
-    Glob('*.c'),
+    src,
     depend=[''],
     CPPPATH=[cwd],
 )

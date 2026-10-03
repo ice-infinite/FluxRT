@@ -132,6 +132,24 @@ pub trait RotorEstimator {
         self.reset(initial_electrical_angle_rad);
     }
 
+    /// Seeds the first observable sample after an alignment interval that began
+    /// with [`RotorEstimator::reset`] and during which the estimator was never
+    /// advanced.
+    ///
+    /// This is deliberately separate from [`RotorEstimator::prepare_acquisition`]:
+    /// the latter is a full recovery operation and may clear large statistical
+    /// windows.  Repeating that reset in the first open-loop ISR is both redundant
+    /// and a source of transition-only WCET spikes.  Backends with current models
+    /// override this method to seed only the state that depends on the measured
+    /// alignment current.  The default keeps the conservative full-reset behavior.
+    fn seed_after_alignment(
+        &mut self,
+        initial_electrical_angle_rad: f32,
+        current_alpha_beta: AlphaBeta,
+    ) {
+        self.prepare_acquisition(initial_electrical_angle_rad, current_alpha_beta);
+    }
+
     /// 在已知强拖速度处重新捕获，并用该电角速度预置 PLL 的速度前馈 `[rad/s]`。
     /// Reacquires at a known forced speed and presets the PLL speed feed-forward
     /// with that electrical angular speed `[rad/s]`.
@@ -886,6 +904,18 @@ impl RotorEstimator for SmoPllEstimator {
         self.state.smo.current_est = current_alpha_beta;
     }
 
+    fn seed_after_alignment(
+        &mut self,
+        _initial_electrical_angle_rad: f32,
+        current_alpha_beta: AlphaBeta,
+    ) {
+        // `foc_rust_start_realtime()` already performed the full reset and the
+        // SMO is intentionally not advanced during Alignment.  Only the current
+        // model depends on the measured end-of-alignment sample.  In particular,
+        // do not clear the two 64-sample reliability FIFOs again in this ISR.
+        self.state.smo.current_est = current_alpha_beta;
+    }
+
     fn prepare_acquisition_at_speed(
         &mut self,
         initial_electrical_angle_rad: f32,
@@ -1230,6 +1260,17 @@ impl RotorEstimator for BemfPllEstimator {
         self.state.bemf.initialized = 1;
     }
 
+    fn seed_after_alignment(
+        &mut self,
+        _initial_electrical_angle_rad: f32,
+        current_alpha_beta: AlphaBeta,
+    ) {
+        // As for the SMO path, reset happened before Alignment and this backend
+        // has not run since.  Seed only the backward-difference history.
+        self.state.bemf.last_current = current_alpha_beta;
+        self.state.bemf.initialized = 1;
+    }
+
     fn set_acquisition_direction(&mut self, direction: i8) {
         self.acquisition_direction = direction.signum();
     }
@@ -1431,6 +1472,21 @@ impl RotorEstimator for ConfigurableObserver {
         }
     }
 
+    fn seed_after_alignment(
+        &mut self,
+        initial_electrical_angle_rad: f32,
+        current_alpha_beta: AlphaBeta,
+    ) {
+        match self.backend {
+            ObserverBackend::SmoPll => self
+                .smo
+                .seed_after_alignment(initial_electrical_angle_rad, current_alpha_beta),
+            ObserverBackend::StStoPll | ObserverBackend::FloatBemfPll => self
+                .bemf
+                .seed_after_alignment(initial_electrical_angle_rad, current_alpha_beta),
+        }
+    }
+
     #[inline(always)]
     fn set_acquisition_direction(&mut self, direction: i8) {
         match self.backend {
@@ -1624,7 +1680,16 @@ mod tests {
             alpha: 0.8,
             beta: -0.2,
         };
-        estimator.prepare_acquisition(0.0, current);
+        // The target path performs the full reset before Alignment, then uses the
+        // lightweight seed on the first observable tick.  Exercise that exact
+        // lifecycle here so a later refactor cannot reintroduce the duplicate
+        // 128-float reliability-window clear into the ISR boundary.
+        estimator.reset(0.0);
+        estimator.seed_after_alignment(0.0, current);
+        assert_eq!(estimator.valid_samples, 0);
+        assert_eq!(estimator.reliable_samples, 0);
+        assert_eq!(estimator.speed_fifo, [0.0; 64]);
+        assert_eq!(estimator.phase_abs_fifo, [0.0; 64]);
         let feedback = FeedbackSnapshot {
             currents: PhaseCurrents::default(),
             dc_bus_voltage: control.motor.nominal_bus_voltage_v,

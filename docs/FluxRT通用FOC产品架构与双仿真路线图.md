@@ -34,9 +34,10 @@ FluxRT 不应变成“把 VESC 和 ODrive 源码拼在一起”的工程，而�
   上位机、CLI、配置向导、Rust PC 仿真、MATLAB/Simulink 仿真、HIL 和板卡包
 ```
 
-当前工程在第一层已经有较好基础，在第二层只有部分安全、配置和 Shell 骨架，在第三层
-已有双仿真原型但尚未形成统一产品契约。下一阶段的重点应当是先建立第二层，而不是继续
-孤立增加高级算法。
+当前工程在第一层已经有较好基础，在第二层已有安全、配置、反馈和运动控制骨架，在第三层
+已有版本化双仿真共同契约。2026-10-01按新的执行优先级，高级算法不再孤立堆放：已经统一
+收敛到`AdvancedFocSupervisor`、独立配置ABI和默认关闭目标候选；仍按本路线的能力门、设备层
+所有权和证据分级继续，不能让单个算法绕过统一架构。
 
 ---
 
@@ -536,11 +537,12 @@ profile。
 
 ### 13.1 协议优先级
 
-1. CAN 经典帧：控制、状态、心跳、参数和故障；
+1. CAN 经典帧：FluxRT Native控制/状态，以及PX4 DroneCAN ESC；
 2. UART/USB 二进制协议：配置、遥测和升级；
 3. PWM/ADC/Step-Dir：简单设备输入；
-4. 后续按产品需要选择 CAN-FD、CANopen CiA 402 或 DroneCAN；
-5. Shell 始终只作为开发诊断接口。
+4. 后续按产品需要选择 Cyphal/UDRAL、CAN-FD、CANopen CiA 402；
+5. MAVLink只承担PX4/GCS管理、诊断和遥测，不替代实时电机命令；
+6. Shell 始终只作为开发诊断接口。
 
 第一版不要同时实现所有工业协议。先冻结 FluxRT 自有协议语义，再做映射层。
 
@@ -572,6 +574,34 @@ profile。
 上位机正式命名为 **FluxRT Studio**。其 PySide6/QML 分层、参数事务、实时 Scope、
 控制租约、二进制协议、仿真接入和实施阶段见
 [FluxRT Studio 上位机架构与调参可视化设计](FluxRTStudio上位机架构与调参可视化设计.md)。
+该应用现在只保留架构，不与设备通信代码同步开发；P2.9先完成未来上位机需要的设备端接口，
+真正Host SDK和页面统一放到最终P7.1。
+
+### 13.4 可选 transport、协议与外部输入
+
+通信与简单外部输入采用两级选择：Kconfig决定代码是否编入并形成
+`compiled_capabilities`，版本化运行配置再决定启用项、协议、映射、权限、优先级、lease和
+timeout。编译某个驱动不能自动启用它，所有运行时默认关闭。
+
+规划范围包括UART/USB、经典CAN/CAN-FD、FluxRT Native、PX4 DroneCAN、Cyphal/UDRAL、
+MAVLink管理、CANopen/CiA402、PWM脉宽、DShot、Analog、Step/Dir和EtherCAT。第一版同一CAN控制器只选
+一种控制协议；多来源可以同时启用，但只能由统一`CommandArbiter`选出一个Axis owner。
+EtherCAT需要外部ESC或具有从站能力的新平台，不作为当前G431板的虚拟软件能力。
+
+所有第三方协议只允许使用协议所有者的官方源码/生成器，固定精确ref并隔离在
+`third_party/`；FluxRT只写port和adapter。没有官方可复用实现时保持关闭，不自写兼容栈。
+原生VESC CAN因官方实现与完整GPLv3固件耦合且暂无确认的独立SDK而延期，PX4/VESC互操作
+优先统一使用DroneCAN。
+
+完整Kconfig依赖、运行配置、线程/ISR所有权、目录分配和P2.4～P2.8任务见
+[可选外部控制与通信架构](可选外部控制与通信架构.md)。
+第三方上游、升级与PX4接入细节见
+[第三方协议依赖与 PX4 接入策略](第三方协议依赖与PX4接入策略.md)。
+
+P2.4A/B1/B2现已完成公共C层、Rust命令仲裁接线、板级资源事实、V3统一配置和唯一低频
+poll owner；P2.4C已完成官方上游/PX4的S0策略门。P2.5A1又完成PWM/Analog/Step-Dir的
+纯Rust归一化/映射、输入ABI、setpoint-only适配和Fake输入。仍没有物理采集、运行时输入
+标定、协议codec、后台任务或MotorService执行路径；下一步是P2.5A2配置与service接线。
 
 ---
 
@@ -862,14 +892,17 @@ PASS 替代。核心开发不能因此完全阻塞，但发布候选不能绕过
 
 ## 16. 分阶段实施路线
 
-编号表示能力域，不再强制按数字顺序实施。当前执行优先级冻结为：
+编号表示能力域，不再强制按数字顺序实施。按当前用户优先级，近期执行顺序冻结为：
 
 ```text
-U0 → U1 → U2 → U3 → U4 → U5 → U7 → U8-S/U8-T → U6 → U8-H → U9～U11
+P2.4A → P2.4B1 → P2.4B2 → P2.4C → P2.5A1 → P2.5A2/A3/A4 → P1.4/P2.1/P2.6
+→ P2.7A/P2.7B/P2.7C/P2.7D → P2.8软件门 → P2.9
+→ U7/U8剩余细节 → U9/U10 → P7.1 FluxRT Studio → U11
 ```
 
-也就是先完成基础和高级FOC的软件/双仿真/目标关闭态门，再开发FluxRT Studio。U8-H是
-高级功能powered实机门，可以与U6只读上位机并行，但U8-S/U8-T未完成前不启动上位机代码。
+也就是先把设备端外部控制、通信和未来上位机需要的设备接口补完整，再回到此前FOC细节；
+真正FluxRT Studio最后开发。纯软件通信骨架可以先行，但目标启用和powered验证仍受U0安全门
+约束，不能用新的总线入口绕过MotorService。
 
 ### U0：关闭当前基线缺口
 
@@ -926,10 +959,14 @@ U0 → U1 → U2 → U3 → U4 → U5 → U7 → U8-S/U8-T → U6 → U8-H → U
 
 完成门：任意模拟掉电不会产生半份可用配置，错误板卡/电机组合拒绝 arm。
 
-P3.1 已完成其中的纯配置核心：六组定宽配置、512 B双槽、双CRC、最后提交标记、
-candidate/approved/active、V0→V1迁移、factory fallback、自动/显式回滚和全写入点掉电
-穷举均已落地；错误硬件身份和缺失反馈标定由 `validate_for_arm` 拒绝。目标Flash、设备端
-pending/active事务和MATLAB profile自动导入仍未接入，因此U3整体尚未完成。详见
+P3.1 已完成定宽配置、双槽、双CRC、最后提交标记、迁移、factory fallback、回滚和全写入点
+掉电穷举。P3.2A完成token化pending/active事务、分组patch、应用等级、停机apply/rollback和
+commit回读锁定；P3.2B最初完成独立V1管理ABI、固定容量上下文、Platform→Axis→Management
+执行器和Fake Flash故障门，P4.2C因Axis motion字段扩展升级V2。P2.4B2现已升级为V3：
+七组配置、768 B当前槽、724 B V4 payload、4 KiB管理上下文，并保持V0～V3旧记录迁移，
+新增External I/O组默认关闭。错误硬件身份和缺失反馈标定由
+`validate_for_arm`拒绝。目标Flash、RT-Thread服务、真实控制器/平台动作和MATLAB profile
+自动导入仍未接入，因此U3的软件架构门已通过、板端产品能力仍未完成。详见
 [可恢复配置核心 V1](可恢复配置核心V1.md)。
 
 ### U4：反馈源与基础标定
@@ -946,6 +983,15 @@ pending/active事务和MATLAB profile自动导入仍未接入，因此U3整体�
 
 完成门：相同速度/位置控制器可切换反馈源，失效时进入定义好的安全状态。
 
+P4.1A 已完成板级无关核心：复用现有 `ProductFeedbackSnapshot`，实现 Sensorless/ABZ/Hall
+质量门、获取/丢失/恢复迟滞、主备回退和 Disabled-only 标定证据状态机。P4.1B1 已冻结
+独立V1管理ABI，补齐目标中立C sample adapter，并把批准更新接入Axis/Calibration pending
+事务；它不自动应用或写Flash。P4.1B2又完成Rust PC + MATLAB独立传感器模型，5场景
+80行轨迹通过反馈子契约D0/D2/D3/D4和feature-off门。P4.1C又完成默认关闭的应用层
+单owner协调器，覆盖超时、取消/回滚、stage+validate和外部commit确认；当前未注册目标实例，
+不自动apply或写Flash。P4.1D真实传感器接线仍后置，因此U4硬件门尚未完成。详见
+[统一反馈源与标定核心 V1](统一反馈源与标定核心V1.md)。
+
 ### U5：转矩、速度、位置与轨迹
 
 目标：形成通用伺服/ESC 控制接口。
@@ -960,24 +1006,61 @@ pending/active事务和MATLAB profile自动导入仍未接入，因此U3整体�
 
 完成门：两套仿真 D0～D4 通过；实机按转矩、速度、位置分别建立受限验收。
 
-### U6：通信协议与上位机最小闭环
+P4.2A 已完成第一道纯软件门：`foc-control::motion`复用ProductCommand，提供默认关闭的
+Torque/Velocity/Position参考规划、InputMode、产品硬限制与命令收紧、软位置限制和切换
+预置拍；非法输入不推进状态。P4.2B又新增`motion_cascade`，完成Position P、Velocity PI、Torque→Iq、
+前馈余量、最终转矩/电流限制、反算anti-windup和实测Iq积分预置；模式变化缺transition、
+transition缺实测Iq或反馈非有限值均事务拒绝。P4.2C现已补齐schema V2配置映射、独立V1
+motion ABI、C适配器和默认关闭Diagnostic候选；既有ISR仍未调用，Production忽略候选。
+P4.2D的Rust PC runner、MATLAB独立engine、8类场景和严格比较器已并行完成；192行D0～D4、
+15个连续通道零差异、修复后全回归和默认关闭四档构建/map均通过。P4.2E0又完成默认关闭的
+单执行上下文owner。P4.2E1现已建立ISR单写者dispatcher、固定快照/urgent请求和Rust combined
+realtime接点；P4.2E1B继续加入不能arm的Diagnostic无功率活调用、mode 0/1增量测量和
+configure/combined/commit六点注入。130,340 B candidate已通过板端无功率S4：mode 0/1各
+1,200拍，motion最坏12,157/12,750 cycles、0 miss，六点全部fail-closed；默认固件随后恢复。
+P4.2E2现已完成逐模式S3：Torque/Velocity/Position三个动态机械plant候选与原8类用例组成
+11场景31,392行Rust/MATLAB严格对拍，并分别通过峰值、末端与超调门。下一步只评审Torque
+100 ms低功率S5清单；不允许ISR/task双写同一context，也不能从理想plant或无功率S4直接
+推导powered闭环通过。完整分段见
+[通用控制与轨迹核心 V1](通用控制与轨迹核心V1.md)。
+
+### U6：外部控制、通信协议与设备管理接口
 
 目标：脱离 Shell 也能完成设备发现、配置、标定、控制和诊断。
 
-实施前置：U0～U5、U7以及U8-S/U8-T完成。此前只保留架构文档和仿真trace schema，
-不创建FluxRT Studio页面、FakeDevice或正式设备协议实现。
+实施边界：P2.4A/B1/B2公共层、P2.4C官方上游/PX4策略门和P2.5A1简单输入纯逻辑已完成，
+P2.5A2默认关闭的配置/service骨架已完成，当前从P2.5A3/A4做物理采集与失效门，之后才做codec、
+FakeTransport和设备消息；P0未关闭前不得
+做会arm功率级的目标通信控制验收。FluxRT Studio页面和Host SDK不属于U6本轮实现。
 
 内容：
 
-- CAN 控制/状态/心跳；
-- UART/USB 配置与遥测；
+- 编译期Kconfig capability和运行期`ExternalIoConfig`两级选择；
+- FluxRT Native CAN/CAN-FD控制、状态、心跳与多节点基础；
+- UART/USB 配置、控制与遥测；
+- PWM、Analog、Step/Dir简单外部输入；DShot通过官方上游选择门后再接；
+- PX4 DroneCAN ESC第一CAN路线和Cyphal/UDRAL第二CAN路线；
+- MAVLink配置/诊断/遥测管理链路，不进入FOC实时命令；
+- CANopenNode官方栈与CANopen/CiA402独立映射；
+- 原生VESC CAN延期，不复制或重写VESC固件协议实现；
+- EtherCAT作为需要专用ESC/平台能力的独立目标；
+- 第三方协议的官方仓库、精确ref、许可证、零修改上游和port/adapter升级边界；
 - 协议版本和兼容策略；
-- Python/Qt 上位机 MVP；
+- 为未来Host保留的设备端能力/配置/状态/统计/输入监视消息和Fake client；
 - 命令 timeout、批量参数和 trace 下载。
 
-完成门：断线、乱序、重复帧和非法参数不能绕过安全层。
-FluxRT Studio 先按只读链路、参数事务、受控试运行的顺序开放权限，不允许第一版 GUI
-直接绕过 MotorService 操作硬件。
+完成门：每项能力可以独立编译和运行时关闭；断线、乱序、重复帧、坏CRC、队列满、bus-off、
+watchdog和非法参数不能绕过安全层，任何adapter都不能直接写FOC状态或PWM。
+P2.9只完成设备端接口，不实现GUI。未来FluxRT Studio仍按只读链路、参数事务、受控试运行
+顺序开放权限，不允许GUI直接绕过MotorService操作硬件。
+
+设备先通过P2.9提供`ExternalIoCapabilities`、`ExternalIoConfigSnapshot`、
+`ExternalIoStatusSnapshot`、`CommandSourceStatus`、`TransportStatistics`和`ResourceConflict`；
+真正上位机到P7.1才使用统一`DeviceClient`和Serial/USB/CAN/EtherCAT管理adapter，不为每种
+总线复制业务逻辑。接口定义见
+[可选外部控制与通信架构](可选外部控制与通信架构.md)和
+[第三方协议依赖与 PX4 接入策略](第三方协议依赖与PX4接入策略.md)以及
+[FluxRT Studio 上位机架构与调参可视化设计](FluxRTStudio上位机架构与调参可视化设计.md)。
 
 ### U7：热、功率与再生管理
 
@@ -1008,9 +1091,15 @@ U8拆成三个不能混写证据的子门：
   WCET和故障回退通过，不要求带电启用；
 - **U8-H powered实机门**：按电机凸极性、转速区间、母线和测量真值逐项受限验证。
 
-U8-S和U8-T是启动U6上位机实现的前置；U8-H可以在上位机只读能力开始后继续。只有三个
+U8-S/U8-T剩余细节在P2.9设备接口之后继续；FluxRT Studio统一延后到P7.1。只有三个U8
 子门都通过，才能把对应高级功能标为“实机完成”。GBM2804不适用的MTPA/HFI工况允许使用
 独立IPMSM仿真profile证明软件能力，但不能据此宣称该实物电机已验证。
+
+2026-10-01进展：U8-S已完成MTPA、弱磁、MTPV、dq解耦、DPWM、过调制、HFI候选和被动
+Flying Start的统一组合核心，以及Rust/MATLAB 9场景静态策略对拍；动态PMSM plant、图和跨工况
+指标仍待补。U8-T已完成独立高级ABI、启动默认关闭事务、feature-off单测等价和一个Diagnostic
+候选交叉构建；四个普通档位构建也已通过，目标逐拍等价、逐项WCET和故障回退仍未关闭。因此U8-S/U8-T
+均保持“进行中”，U8-H未开始。
 
 ### U9：Bootloader 与升级
 
@@ -1035,6 +1124,7 @@ U8-S和U8-T是启动U6上位机实现的前置；U8-H可以在上位机只读能
 - `BoardCapabilities`；
 - 1/2/3 shunt、不同 ADC/PWM 拓扑；
 - 国产 MCU 平台端口；
+- CAN/FDCAN、外部输入timer/ADC与EtherCAT ESC的平台capability矩阵；
 - 双 Axis 与共享母线/功率预算；
 - per-axis 命令、fault 和 telemetry。
 
@@ -1064,11 +1154,11 @@ U8-S和U8-T是启动U6上位机实现的前置；U8-H可以在上位机只读能
 | `0.3 Configurable Drive` | U3～U4，配置、ABZ/Hall | 高级算法、升级 |
 | `0.4 Motion Control` | U5，转矩/速度/位置/轨迹 | 多轴、量产 |
 | `0.5 Extended FOC Core` | U7 + U8-S/U8-T，热/母线/再生与高级FOC双仿真、目标关闭态 | 高级功能powered实机结论、上位机 |
-| `0.6 Connected Drive` | U6，CAN/UART/USB + 上位机 MVP | U8-H全部实机结论、多板量产 |
+| `0.6 Connected Drive` | U6，Native CAN/UART/USB、可选PWM/DShot/Analog/Step-Dir、协议映射和设备管理接口 | FluxRT Studio、EtherCAT硬件认证、U8-H全部实机结论、多板量产 |
 | `0.7 Advanced Hardware` | U8-H，高级FOC逐项受限实机证据 | 全平台认证 |
 | `0.8 Maintainable Device` | U9，升级和回滚 | 多轴 |
-| `0.9 Portable/Multi-Axis` | U10 | 产品级全工况声明 |
-| `1.0` | U11 与明确硬件规格验收 | 未列入规格的应用 |
+| `0.9 Portable/Multi-Axis` | U10，含专用硬件上的EtherCAT平台能力 | 产品级全工况声明 |
+| `1.0` | P7.1 FluxRT Studio + U11明确硬件规格验收 | 未列入规格的应用 |
 
 版本号是能力门，不是时间承诺。
 
@@ -1134,7 +1224,7 @@ simulation/scenarios/
 以下内容有价值，但不应早于通用骨架：
 
 - 同时支持 BLDC 六步、PMSM FOC、ACIM 和步进电机；
-- 一次性支持 CANopen、DroneCAN、VESC CAN 和自有协议；
+- 一次性支持 CANopen、DroneCAN、Cyphal、MAVLink管理和自有协议；
 - 双 Axis；
 - Resolver/BiSS-C；
 - 直接由 MATLAB Coder 生成目标 FOC；

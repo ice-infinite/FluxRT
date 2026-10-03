@@ -59,16 +59,16 @@ extern "C" {
 #endif
 
 /*
- * ABI 版本。主/次版本各占 16 位：0x0014_0000 表示第 20 代主版本。
- * ABI version. Major and minor occupy one 16-bit half each: 0x0014_0000 is
- * major revision 20.
+ * ABI 版本。主/次版本各占 16 位：0x0015_0000 表示第 21 代主版本。
+ * ABI version. Major and minor occupy one 16-bit half each: 0x0015_0000 is
+ * major revision 21.
  *
  * 提升规则 / Bump rule: 任何结构体字段、函数签名或语义（不仅是尺寸）变化
  * 都必须提升；main.c 会在启动时比对并拒绝不匹配的固件组合。
  * Bump for any struct field, signature or semantic change, not only size
  * changes. main.c compares this at boot and rejects a mismatched combination.
  */
-#define FOC_RUST_ABI_VERSION        (0x00140000UL)
+#define FOC_RUST_ABI_VERSION        (0x00150000UL)
 /* 运行时配置结构体的版本，与 ABI 版本独立演进，用于结构体内自检。
  * Version of the runtime configuration struct; it evolves independently of the
  * ABI version and is used for the struct's internal self-check. */
@@ -81,7 +81,11 @@ extern "C" {
  * Controller storage capacity supplied by C [bytes], 8-byte aligned. It exceeds
  * the current controller size (compile-time asserted) so that new state fields
  * do not immediately force a change on the C side. */
+#if defined(FLUXRT_ADVANCED_CANDIDATE_BUILD)
+#define FOC_RUST_CONTEXT_CAPACITY   (2560U)
+#else
 #define FOC_RUST_CONTEXT_CAPACITY   (2048U)
+#endif
 
 /*
  * 逻辑故障位。与 foc_platform_diagnostics_t.flags 是两套独立位域：
@@ -108,6 +112,10 @@ extern "C" {
 #define FOC_RUST_FAULT_OBSERVER_LOST     (1UL << 3)
 /* V19 实时输入携带稳定硬件故障镜像；任一已知位命中时在算法前锁存。 */
 #define FOC_RUST_FAULT_PLATFORM_INPUT    (1UL << 4)
+/* Combined motion planner/cascade rejected a realtime request or feedback. */
+#define FOC_RUST_FAULT_MOTION_CONTROL    (1UL << 5)
+/* Advanced operating-region/modulation supervisor rejected a runtime input. */
+#define FOC_RUST_FAULT_ADVANCED_CONTROL  (1UL << 6)
 
 /*
  * 观测器后端选择。数值与 ABI 绑定，只能追加不能重排。

@@ -40,6 +40,11 @@ documentation, dependency, simulation, test, hardware, flashing, debugging, Git,
 - Place new work according to `docs/整改架构与职责分配.md`.
 - Keep MCU register/HAL work in C platform code, deterministic control composition in
   `foc-control`, pure algorithms in `foc-algorithm`, and C ABI conversion in `foc-rt-bridge`.
+- Third-party protocol stacks must come from the protocol owner's official upstream repository or
+  official generator output, be pinned to an exact reviewed tag/commit, and remain isolated under
+  `third_party/` behind FluxRT ports/adapters. Do not reimplement third-party wire codecs or state
+  machines, copy implementation files into FluxRT modules, or edit vendored upstream code. If no
+  reusable official implementation exists, keep the feature disabled and deferred.
 - Keep all new control features disabled by default until their documented validation gate passes.
 - Preserve immediate C-side hardware shutdown and output validation.
 - Do not mix a structural refactor with control-law, timing, and hardware changes in one step unless

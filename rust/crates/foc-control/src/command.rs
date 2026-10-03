@@ -52,6 +52,7 @@ pub struct CommandSourcePolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArbiterConfigError {
     EmptySourceSet,
+    SourceCountExceedsCapacity,
     DuplicateSourceId,
     ZeroDuration,
     AmbiguousDuration,
@@ -169,16 +170,32 @@ struct ActiveLease {
 /// by the smaller `source_id`, independent of arrival order.
 pub struct CommandArbiter<const N: usize> {
     sources: [SourceMailbox; N],
+    active_source_count: usize,
     active: Option<ActiveLease>,
     emergency_stop_latched: bool,
 }
 
 impl<const N: usize> CommandArbiter<N> {
     pub fn new(policies: [CommandSourcePolicy; N]) -> Result<Self, ArbiterConfigError> {
-        if N == 0 {
+        Self::new_with_active_count(policies, N)
+    }
+
+    /// Construct a fixed-capacity arbiter with only the leading policy slots
+    /// active. This lets FFI callers use one code-generated capacity instead
+    /// of monomorphizing the complete arbitration logic once per source count.
+    /// Inactive tail policies are storage only and are never searched, polled
+    /// or emitted.
+    pub fn new_with_active_count(
+        policies: [CommandSourcePolicy; N],
+        active_source_count: usize,
+    ) -> Result<Self, ArbiterConfigError> {
+        if active_source_count == 0 {
             return Err(ArbiterConfigError::EmptySourceSet);
         }
-        for (index, policy) in policies.iter().enumerate() {
+        if active_source_count > N {
+            return Err(ArbiterConfigError::SourceCountExceedsCapacity);
+        }
+        for (index, policy) in policies[..active_source_count].iter().enumerate() {
             if policy.lease_ms == 0 || policy.command_timeout_ms == 0 {
                 return Err(ArbiterConfigError::ZeroDuration);
             }
@@ -200,6 +217,7 @@ impl<const N: usize> CommandArbiter<N> {
 
         Ok(Self {
             sources: policies.map(SourceMailbox::new),
+            active_source_count,
             active: None,
             emergency_stop_latched: false,
         })
@@ -221,8 +239,7 @@ impl<const N: usize> CommandArbiter<N> {
             .validate()
             .map_err(CommandSubmitError::InvalidContract)?;
 
-        let source_index = self
-            .sources
+        let source_index = self.sources[..self.active_source_count]
             .iter()
             .position(|source| source.policy.source_id == command.source_id)
             .ok_or(CommandSubmitError::UnknownSource)?;
@@ -308,8 +325,7 @@ impl<const N: usize> CommandArbiter<N> {
                 .position(|done| !done)
                 .expect("one unprocessed batch entry must remain");
             let source_id = commands[first].source_id;
-            let source_watermark = self
-                .sources
+            let source_watermark = self.sources[..self.active_source_count]
                 .iter()
                 .find(|source| source.policy.source_id == source_id)
                 .and_then(|source| source.has_sequence.then_some(source.last_sequence));
@@ -429,7 +445,10 @@ impl<const N: usize> CommandArbiter<N> {
 
     fn prune_timed_out_payloads(&mut self, now_ms: u32) -> bool {
         let mut active_timed_out = false;
-        for (source_index, source) in self.sources.iter_mut().enumerate() {
+        for (source_index, source) in self.sources[..self.active_source_count]
+            .iter_mut()
+            .enumerate()
+        {
             let timeout_ms = source.policy.command_timeout_ms;
             if source
                 .setpoint
@@ -457,7 +476,7 @@ impl<const N: usize> CommandArbiter<N> {
     }
 
     fn best_action(&self, kind: ProductCommandKind) -> Option<usize> {
-        self.sources
+        self.sources[..self.active_source_count]
             .iter()
             .enumerate()
             .filter(|(_, source)| {
@@ -473,7 +492,7 @@ impl<const N: usize> CommandArbiter<N> {
     }
 
     fn best_normal_source(&self) -> Option<usize> {
-        self.sources
+        self.sources[..self.active_source_count]
             .iter()
             .enumerate()
             .filter(|(_, source)| source.has_normal_command())
@@ -524,7 +543,7 @@ impl<const N: usize> CommandArbiter<N> {
     }
 
     fn clear_all_payloads(&mut self) {
-        for source in &mut self.sources {
+        for source in &mut self.sources[..self.active_source_count] {
             source.clear_all_payloads();
         }
     }
@@ -692,6 +711,16 @@ mod tests {
             CommandArbiter::new([policy(1, 1), policy(1, 2)]),
             Err(ArbiterConfigError::DuplicateSourceId)
         ));
+        assert!(matches!(
+            CommandArbiter::new_with_active_count([policy(1, 1)], 2),
+            Err(ArbiterConfigError::SourceCountExceedsCapacity)
+        ));
+        let mut prefix_only =
+            CommandArbiter::new_with_active_count([policy(1, 1), policy(1, 2)], 1).unwrap();
+        assert_eq!(
+            prefix_only.submit(velocity_setpoint(2, 1, 100, 1.0), 100),
+            Err(CommandSubmitError::UnknownSource)
+        );
         let mut zero = policy(1, 1);
         zero.lease_ms = 0;
         assert!(matches!(

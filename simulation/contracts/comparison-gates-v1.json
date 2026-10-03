@@ -12,6 +12,29 @@
     {"channel":"iq_a","absolute":0.0001,"relative":0.0001},
     {"channel":"vd_command_v","absolute":0.0001,"relative":0.0001},
     {"channel":"vq_command_v","absolute":0.0001,"relative":0.0001},
-    {"channel":"selected_electrical_angle_rad","absolute":0.00001,"relative":0.00001}
+    {"channel":"selected_electrical_angle_rad","absolute":0.00001,"relative":0.00001},
+    {"channel":"feedback_encoder_position_rad","absolute":0.000002,"relative":0.000001},
+    {"channel":"feedback_hall_electrical_angle_rad","absolute":0.000002,"relative":0.000001},
+    {"channel":"feedback_selected_position_rad","absolute":0.000002,"relative":0.000001},
+    {"channel":"feedback_selected_velocity_rad_s","absolute":0.000002,"relative":0.000001},
+    {"channel":"feedback_selected_electrical_angle_rad","absolute":0.000002,"relative":0.000001},
+    {"channel":"feedback_sample_age_s","absolute":0.000000001,"relative":0.000001}
+  ],
+  "motion_numeric_tolerances": [
+    {"channel":"time_s","absolute":0.000000001,"relative":0.000000001},
+    {"channel":"command_position_rad","absolute":0.000002,"relative":0.000002},
+    {"channel":"command_velocity_rad_s","absolute":0.000002,"relative":0.000002},
+    {"channel":"command_torque_nm","absolute":0.000002,"relative":0.000002},
+    {"channel":"feedback_position_rad","absolute":0.000002,"relative":0.000002},
+    {"channel":"feedback_velocity_rad_s","absolute":0.000002,"relative":0.000002},
+    {"channel":"feedback_iq_a","absolute":0.000002,"relative":0.000002},
+    {"channel":"planned_position_rad","absolute":0.000002,"relative":0.000002},
+    {"channel":"planned_velocity_rad_s","absolute":0.000002,"relative":0.000002},
+    {"channel":"planned_torque_nm","absolute":0.000002,"relative":0.000002},
+    {"channel":"output_velocity_ref_rad_s","absolute":0.000002,"relative":0.000002},
+    {"channel":"output_torque_nm","absolute":0.000002,"relative":0.000002},
+    {"channel":"output_id_a","absolute":0.000002,"relative":0.000002},
+    {"channel":"output_iq_a","absolute":0.000002,"relative":0.000002},
+    {"channel":"velocity_integrator_nm","absolute":0.000002,"relative":0.000002}
   ]
 }

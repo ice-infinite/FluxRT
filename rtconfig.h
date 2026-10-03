@@ -448,6 +448,22 @@
 
 /* end of FOC timing candidates */
 
+/* FOC advanced-control candidates */
+
+/* end of FOC advanced-control candidates */
+
+/* FOC power-management candidates */
+
+/* end of FOC power-management candidates */
+
+/* FOC motion-control candidates */
+
+/* end of FOC motion-control candidates */
+
+/* FluxRT external control and communication */
+
+/* end of FluxRT external control and communication */
+
 /* FOC diagnostics */
 
 /* end of FOC diagnostics */

@@ -35,10 +35,13 @@ hal_src = os.path.abspath(os.path.join(
     'Src',
 ))
 src = [
+    'runtime/foc_config_apply_executor.c',
+    'runtime/foc_feedback_adapter.c',
     'runtime/foc_lsi_actuation_executor.c',
     'runtime/foc_lsi_capture_service.c',
     'runtime/foc_lsi_raw_capture.c',
     'runtime/foc_lsi_sample_contract.c',
+    'runtime/foc_monitor_sampling.c',
     'runtime/foc_phase_voltage_capture.c',
     'runtime/foc_phase_voltage_model.c',
     'runtime/foc_phase_voltage_quality.c',
@@ -55,6 +58,16 @@ src = [
     os.path.join(hal_src, 'stm32g4xx_hal_tim.c'),
     os.path.join(hal_src, 'stm32g4xx_hal_tim_ex.c'),
 ]
+if GetDepend('FOC_MOTION_CONTROL_CANDIDATE'):
+    src.append('runtime/foc_motion_adapter.c')
+    src.append('runtime/foc_motion_dispatcher.c')
+    src.append('runtime/foc_motion_probe.c')
+    src.append('runtime/foc_motion_torque_trial.c')
+if GetDepend('FOC_EXTERNAL_IO_FRAMEWORK'):
+    src.append('runtime/foc_external_io.c')
+    src.append('runtime/foc_external_input_port.c')
+    src.append('platform/stm32g431/foc_external_io_board.c')
+    src.append('platform/stm32g431/foc_external_input_stm32g431.c')
 path = [
     cwd + '/include',
 ]

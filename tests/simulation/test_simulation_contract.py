@@ -33,7 +33,7 @@ class SimulationContractTests(unittest.TestCase):
         bundle = json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(bundle["units"], "SI")
         self.assertEqual(bundle["product_contract_version"], "0x00010000")
-        self.assertEqual(bundle["bridge_abi_version"], "0x00140000")
+        self.assertEqual(bundle["bridge_abi_version"], "0x00150000")
         for path_key, hash_key in (
             ("schema_path", "schema_sha256"),
             ("profile_path", "profile_sha256"),

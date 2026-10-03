@@ -117,6 +117,10 @@ Write-Host '[Rust] Cortex-M4F STM32G4 CORDIC static library ...' -ForegroundColo
 & $cargo build --manifest-path $rustManifest --package foc-rt-bridge --release --target thumbv7em-none-eabihf --features stm32g4-cordic --locked
 if ($LASTEXITCODE -ne 0) { throw 'Rust CORDIC cross build failed.' }
 
+Write-Host '[Rust] Cortex-M4F external-input normalization ABI ...' -ForegroundColor Cyan
+& $cargo build --manifest-path $rustManifest --package foc-rt-bridge --release --target thumbv7em-none-eabihf --features external-inputs,native-protocol --locked
+if ($LASTEXITCODE -ne 0) { throw 'Rust external-input cross build failed.' }
+
 Write-Host '[C] Platform safety test ...' -ForegroundColor Cyan
 # 主机 C 测试用 tests/host/CMakeLists.txt 单独配置，不复用固件 build 目录：它的编译
 # 选项、宏定义与链接目标都不同，混在一起会互相污染。

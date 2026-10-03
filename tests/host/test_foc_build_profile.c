@@ -3,7 +3,54 @@
 #include "foc_build_profile.h"
 #include "foc_lsi_identification.h"
 
-#if defined(TEST_EXPECT_DIAGNOSTIC)
+#if defined(TEST_EXPECT_POWER_CANDIDATE)
+#if !defined(FLUXRT_DIAGNOSTIC_BUILD) || \
+    !defined(FLUXRT_POWER_CANDIDATE_BUILD) || \
+    !defined(FLUXRT_RUNTIME_TUNING_BUILD) || \
+    !defined(FLUXRT_TRACE_BUILD) || \
+    !defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD) || \
+    !defined(FLUXRT_MATH_DIAGNOSTICS_BUILD)
+#error "Power-management candidate capability contract changed"
+#endif
+#if defined(FLUXRT_ADVANCED_CANDIDATE_BUILD) || \
+    defined(FLUXRT_MOTION_CANDIDATE_BUILD) || \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD) || \
+    defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD)
+#error "Power-management candidate must extend only normal Diagnostic"
+#endif
+#define TEST_EXPECTED_CAPABILITY_MASK (143UL)
+#define TEST_EXPECTED_LSI_AUTHORIZED (0UL)
+#elif defined(TEST_EXPECT_ADVANCED_CANDIDATE)
+#if !defined(FLUXRT_DIAGNOSTIC_BUILD) || \
+    !defined(FLUXRT_ADVANCED_CANDIDATE_BUILD) || \
+    !defined(FLUXRT_RUNTIME_TUNING_BUILD) || \
+    !defined(FLUXRT_TRACE_BUILD) || \
+    !defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD) || \
+    !defined(FLUXRT_MATH_DIAGNOSTICS_BUILD)
+#error "Advanced FOC candidate capability contract changed"
+#endif
+#if defined(FLUXRT_MOTION_CANDIDATE_BUILD) || \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD) || \
+    defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD)
+#error "Advanced FOC candidate must extend only the normal Diagnostic profile"
+#endif
+#define TEST_EXPECTED_CAPABILITY_MASK (79UL)
+#define TEST_EXPECTED_LSI_AUTHORIZED (0UL)
+#elif defined(TEST_EXPECT_MOTION_CANDIDATE)
+#if !defined(FLUXRT_DIAGNOSTIC_BUILD) || \
+    !defined(FLUXRT_MOTION_CANDIDATE_BUILD)
+#error "Motion candidate subprofile contract changed"
+#endif
+#if defined(FLUXRT_RUNTIME_TUNING_BUILD) || defined(FLUXRT_TRACE_BUILD) || \
+    defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD) || \
+    defined(FLUXRT_MATH_DIAGNOSTICS_BUILD) || \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD) || \
+    defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD)
+#error "Motion candidate must contain only its dedicated capability"
+#endif
+#define TEST_EXPECTED_CAPABILITY_MASK (32UL)
+#define TEST_EXPECTED_LSI_AUTHORIZED (0UL)
+#elif defined(TEST_EXPECT_DIAGNOSTIC)
 #if !defined(FLUXRT_DIAGNOSTIC_BUILD) || \
     !defined(FLUXRT_RUNTIME_TUNING_BUILD) || \
     !defined(FLUXRT_TRACE_BUILD) || \

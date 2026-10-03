@@ -1,0 +1,87 @@
+{
+  "contract": "fluxrt-feedback-sensor-scenario",
+  "version": 1,
+  "scenario_id": "fluxrt.feedback_sensor_fault_matrix.v1",
+  "revision": 1,
+  "units": "SI",
+  "profile_id": "fluxrt.stm32g431.ihm16m1.gbm2804h.reference",
+  "profile_revision": 1,
+  "model_revision": "feedback-sensor-model-v1",
+  "evaluation_ticks": 16,
+  "initial_mechanical_position_rad": 0.15,
+  "mechanical_velocity_rad_s": 12.0,
+  "router": {
+    "primary_mode": "IncrementalEncoder",
+    "backup_mode": "Hall",
+    "maximum_age_control_ticks": 1,
+    "acquire_good_samples": 2,
+    "loss_bad_samples": 2,
+    "recovery_good_samples": 3
+  },
+  "encoder": {
+    "counts_per_revolution": 4096,
+    "delay_control_ticks": 1,
+    "electrical_offset_rad": 0.07
+  },
+  "hall": {
+    "delay_control_ticks": 1,
+    "sector_map": [0, 1, 2, 3, 4, 5]
+  },
+  "cases": [
+    {
+      "case_id": "feature_off",
+      "feature_enabled": false,
+      "encoder_drop_enabled": false,
+      "encoder_drop_start_tick": 0,
+      "encoder_drop_end_tick": 0,
+      "encoder_index_missing": false,
+      "hall_wrong_order_enabled": false,
+      "hall_wrong_order_start_tick": 0,
+      "hall_wrong_order_end_tick": 0
+    },
+    {
+      "case_id": "nominal",
+      "feature_enabled": true,
+      "encoder_drop_enabled": false,
+      "encoder_drop_start_tick": 0,
+      "encoder_drop_end_tick": 0,
+      "encoder_index_missing": false,
+      "hall_wrong_order_enabled": false,
+      "hall_wrong_order_start_tick": 0,
+      "hall_wrong_order_end_tick": 0
+    },
+    {
+      "case_id": "encoder_drop_fallback",
+      "feature_enabled": true,
+      "encoder_drop_enabled": true,
+      "encoder_drop_start_tick": 6,
+      "encoder_drop_end_tick": 9,
+      "encoder_index_missing": false,
+      "hall_wrong_order_enabled": false,
+      "hall_wrong_order_start_tick": 0,
+      "hall_wrong_order_end_tick": 0
+    },
+    {
+      "case_id": "encoder_index_missing",
+      "feature_enabled": true,
+      "encoder_drop_enabled": false,
+      "encoder_drop_start_tick": 0,
+      "encoder_drop_end_tick": 0,
+      "encoder_index_missing": true,
+      "hall_wrong_order_enabled": false,
+      "hall_wrong_order_start_tick": 0,
+      "hall_wrong_order_end_tick": 0
+    },
+    {
+      "case_id": "hall_wrong_order_and_primary_drop",
+      "feature_enabled": true,
+      "encoder_drop_enabled": true,
+      "encoder_drop_start_tick": 6,
+      "encoder_drop_end_tick": 10,
+      "encoder_index_missing": false,
+      "hall_wrong_order_enabled": true,
+      "hall_wrong_order_start_tick": 6,
+      "hall_wrong_order_end_tick": 10
+    }
+  ]
+}

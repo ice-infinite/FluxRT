@@ -1,0 +1,389 @@
+{
+  "contract": "fluxrt-motion-control-scenario",
+  "version": 1,
+  "scenario_id": "fluxrt.motion.control.matrix.v1",
+  "revision": 2,
+  "units": "SI",
+  "profile_id": "fluxrt.stm32g431.ihm16m1.gbm2804h.reference",
+  "profile_revision": 1,
+  "model_revision": "fluxrt.motion.reference.v2",
+  "runtime": {
+    "control_frequency_hz": 12000,
+    "maximum_current_a": 0.8,
+    "maximum_torque_nm": 0.04644358236,
+    "maximum_velocity_rad_s": 164.619455,
+    "torque_constant_nm_per_a": 0.05805447795,
+    "torque_ramp_rate_nm_s": 0.2,
+    "velocity_ramp_rate_rad_s2": 20.0,
+    "position_filter_bandwidth_rad_s": 40.0,
+    "trajectory_acceleration_rad_s2": 30.0,
+    "trajectory_deceleration_rad_s2": 35.0,
+    "soft_limit_min_rad": -4.0,
+    "soft_limit_max_rad": 4.0,
+    "position_kp_per_s": 1.0,
+    "velocity_kp_nm_per_rad_s": 0.02,
+    "velocity_ki_nm_per_rad": 0.2
+  },
+  "cases": [
+    {
+      "case_id": "feature_off",
+      "enabled": false,
+      "evaluation_ticks": 16,
+      "initial_feedback": {
+        "position_rad": 0.25,
+        "velocity_rad_s": 1.5,
+        "iq_a": 0.1
+      },
+      "commands": [
+        {
+          "start_tick": 0,
+          "control_mode": "Torque",
+          "input_mode": "Passthrough",
+          "position_ref_rad": 0.0,
+          "velocity_ref_rad_s": 0.0,
+          "torque_ref_nm": 0.02,
+          "velocity_feedforward_rad_s": 0.0,
+          "torque_feedforward_nm": 0.0,
+          "current_limit_a": 0.0,
+          "torque_limit_nm": 0.0,
+          "velocity_limit_rad_s": 0.0
+        }
+      ],
+      "feedback_faults": []
+    },
+    {
+      "case_id": "torque_ramp",
+      "enabled": true,
+      "evaluation_ticks": 24,
+      "initial_feedback": {
+        "position_rad": 0.0,
+        "velocity_rad_s": 0.0,
+        "iq_a": 0.0
+      },
+      "commands": [
+        {
+          "start_tick": 0,
+          "control_mode": "Torque",
+          "input_mode": "TorqueRamp",
+          "position_ref_rad": 0.0,
+          "velocity_ref_rad_s": 0.0,
+          "torque_ref_nm": 0.04,
+          "velocity_feedforward_rad_s": 0.0,
+          "torque_feedforward_nm": 0.0,
+          "current_limit_a": 0.0,
+          "torque_limit_nm": 0.0,
+          "velocity_limit_rad_s": 0.0
+        }
+      ],
+      "feedback_faults": []
+    },
+    {
+      "case_id": "velocity_ramp",
+      "enabled": true,
+      "evaluation_ticks": 24,
+      "initial_feedback": {
+        "position_rad": 0.0,
+        "velocity_rad_s": 2.0,
+        "iq_a": 0.05
+      },
+      "commands": [
+        {
+          "start_tick": 0,
+          "control_mode": "Velocity",
+          "input_mode": "VelocityRamp",
+          "position_ref_rad": 0.0,
+          "velocity_ref_rad_s": 20.0,
+          "torque_ref_nm": 0.0,
+          "velocity_feedforward_rad_s": 0.0,
+          "torque_feedforward_nm": 0.002,
+          "current_limit_a": 0.0,
+          "torque_limit_nm": 0.0,
+          "velocity_limit_rad_s": 0.0
+        }
+      ],
+      "feedback_faults": []
+    },
+    {
+      "case_id": "position_filter",
+      "enabled": true,
+      "evaluation_ticks": 24,
+      "initial_feedback": {
+        "position_rad": -0.2,
+        "velocity_rad_s": 0.5,
+        "iq_a": 0.02
+      },
+      "commands": [
+        {
+          "start_tick": 0,
+          "control_mode": "Position",
+          "input_mode": "PositionFilter",
+          "position_ref_rad": 1.2,
+          "velocity_ref_rad_s": 0.0,
+          "torque_ref_nm": 0.0,
+          "velocity_feedforward_rad_s": 0.3,
+          "torque_feedforward_nm": 0.001,
+          "current_limit_a": 0.0,
+          "torque_limit_nm": 0.0,
+          "velocity_limit_rad_s": 0.0
+        }
+      ],
+      "feedback_faults": []
+    },
+    {
+      "case_id": "trapezoidal_trajectory",
+      "enabled": true,
+      "evaluation_ticks": 32,
+      "initial_feedback": {
+        "position_rad": 0.1,
+        "velocity_rad_s": 0.0,
+        "iq_a": 0.0
+      },
+      "commands": [
+        {
+          "start_tick": 0,
+          "control_mode": "Position",
+          "input_mode": "TrapezoidalTrajectory",
+          "position_ref_rad": 2.5,
+          "velocity_ref_rad_s": 0.0,
+          "torque_ref_nm": 0.0,
+          "velocity_feedforward_rad_s": 0.0,
+          "torque_feedforward_nm": 0.0,
+          "current_limit_a": 0.0,
+          "torque_limit_nm": 0.0,
+          "velocity_limit_rad_s": 12.0
+        }
+      ],
+      "feedback_faults": []
+    },
+    {
+      "case_id": "mode_switch",
+      "enabled": true,
+      "evaluation_ticks": 32,
+      "initial_feedback": {
+        "position_rad": 0.4,
+        "velocity_rad_s": 3.0,
+        "iq_a": 0.08
+      },
+      "commands": [
+        {
+          "start_tick": 0,
+          "control_mode": "Torque",
+          "input_mode": "Passthrough",
+          "position_ref_rad": 0.0,
+          "velocity_ref_rad_s": 0.0,
+          "torque_ref_nm": 0.015,
+          "velocity_feedforward_rad_s": 0.0,
+          "torque_feedforward_nm": 0.0,
+          "current_limit_a": 0.0,
+          "torque_limit_nm": 0.0,
+          "velocity_limit_rad_s": 0.0
+        },
+        {
+          "start_tick": 10,
+          "control_mode": "Velocity",
+          "input_mode": "VelocityRamp",
+          "position_ref_rad": 0.0,
+          "velocity_ref_rad_s": 12.0,
+          "torque_ref_nm": 0.0,
+          "velocity_feedforward_rad_s": 0.0,
+          "torque_feedforward_nm": 0.0,
+          "current_limit_a": 0.0,
+          "torque_limit_nm": 0.0,
+          "velocity_limit_rad_s": 0.0
+        },
+        {
+          "start_tick": 20,
+          "control_mode": "Position",
+          "input_mode": "PositionFilter",
+          "position_ref_rad": 1.0,
+          "velocity_ref_rad_s": 0.0,
+          "torque_ref_nm": 0.0,
+          "velocity_feedforward_rad_s": 0.0,
+          "torque_feedforward_nm": 0.0,
+          "current_limit_a": 0.0,
+          "torque_limit_nm": 0.0,
+          "velocity_limit_rad_s": 0.0
+        }
+      ],
+      "feedback_faults": []
+    },
+    {
+      "case_id": "command_limit",
+      "enabled": true,
+      "evaluation_ticks": 20,
+      "initial_feedback": {
+        "position_rad": 0.0,
+        "velocity_rad_s": 0.0,
+        "iq_a": 0.0
+      },
+      "commands": [
+        {
+          "start_tick": 0,
+          "control_mode": "Velocity",
+          "input_mode": "Passthrough",
+          "position_ref_rad": 0.0,
+          "velocity_ref_rad_s": 40.0,
+          "torque_ref_nm": 0.0,
+          "velocity_feedforward_rad_s": 0.0,
+          "torque_feedforward_nm": 0.03,
+          "current_limit_a": 0.2,
+          "torque_limit_nm": 0.01,
+          "velocity_limit_rad_s": 5.0
+        }
+      ],
+      "feedback_faults": []
+    },
+    {
+      "case_id": "invalid_feedback",
+      "enabled": true,
+      "evaluation_ticks": 20,
+      "initial_feedback": {
+        "position_rad": 0.3,
+        "velocity_rad_s": 1.0,
+        "iq_a": 0.05
+      },
+      "commands": [
+        {
+          "start_tick": 0,
+          "control_mode": "Position",
+          "input_mode": "Passthrough",
+          "position_ref_rad": 0.8,
+          "velocity_ref_rad_s": 0.0,
+          "torque_ref_nm": 0.0,
+          "velocity_feedforward_rad_s": 0.0,
+          "torque_feedforward_nm": 0.0,
+          "current_limit_a": 0.0,
+          "torque_limit_nm": 0.0,
+          "velocity_limit_rad_s": 0.0
+        }
+      ],
+      "feedback_faults": [
+        {
+          "start_tick": 7,
+          "end_tick": 10,
+          "position_valid": false,
+          "velocity_valid": true,
+          "current_q_valid": true
+        }
+      ]
+    },
+    {
+      "case_id": "accept_torque_low_power",
+      "enabled": true,
+      "evaluation_ticks": 1200,
+      "initial_feedback": {
+        "position_rad": 0.0,
+        "velocity_rad_s": 0.0,
+        "iq_a": 0.0
+      },
+      "commands": [
+        {
+          "start_tick": 0,
+          "control_mode": "Torque",
+          "input_mode": "TorqueRamp",
+          "position_ref_rad": 0.0,
+          "velocity_ref_rad_s": 0.0,
+          "torque_ref_nm": 0.002,
+          "velocity_feedforward_rad_s": 0.0,
+          "torque_feedforward_nm": 0.0,
+          "current_limit_a": 0.08,
+          "torque_limit_nm": 0.003,
+          "velocity_limit_rad_s": 0.0
+        }
+      ],
+      "feedback_faults": [],
+      "mechanical_plant": {
+        "inertia_kg_m2": 0.0000291,
+        "viscous_friction_nm_s": 0.00000937,
+        "load_torque_nm": 0.0,
+        "current_response_bandwidth_rad_s": 2500.0
+      },
+      "acceptance": {
+        "mode": "Torque",
+        "maximum_absolute_iq_a": 0.06,
+        "maximum_absolute_velocity_rad_s": 8.0,
+        "maximum_final_torque_error_nm": 0.0001,
+        "minimum_final_velocity_rad_s": 5.0
+      }
+    },
+    {
+      "case_id": "accept_velocity_low_power",
+      "enabled": true,
+      "evaluation_ticks": 6000,
+      "initial_feedback": {
+        "position_rad": 0.0,
+        "velocity_rad_s": 0.0,
+        "iq_a": 0.0
+      },
+      "commands": [
+        {
+          "start_tick": 0,
+          "control_mode": "Velocity",
+          "input_mode": "VelocityRamp",
+          "position_ref_rad": 0.0,
+          "velocity_ref_rad_s": 5.0,
+          "torque_ref_nm": 0.0,
+          "velocity_feedforward_rad_s": 0.0,
+          "torque_feedforward_nm": 0.0,
+          "current_limit_a": 0.25,
+          "torque_limit_nm": 0.012,
+          "velocity_limit_rad_s": 6.0
+        }
+      ],
+      "feedback_faults": [],
+      "mechanical_plant": {
+        "inertia_kg_m2": 0.0000291,
+        "viscous_friction_nm_s": 0.00000937,
+        "load_torque_nm": 0.0,
+        "current_response_bandwidth_rad_s": 2500.0
+      },
+      "acceptance": {
+        "mode": "Velocity",
+        "maximum_absolute_iq_a": 0.25,
+        "maximum_absolute_velocity_rad_s": 5.5,
+        "maximum_final_velocity_error_rad_s": 0.05,
+        "maximum_velocity_overshoot_rad_s": 0.25
+      }
+    },
+    {
+      "case_id": "accept_position_low_power",
+      "enabled": true,
+      "evaluation_ticks": 24000,
+      "initial_feedback": {
+        "position_rad": 0.0,
+        "velocity_rad_s": 0.0,
+        "iq_a": 0.0
+      },
+      "commands": [
+        {
+          "start_tick": 0,
+          "control_mode": "Position",
+          "input_mode": "PositionFilter",
+          "position_ref_rad": 0.2,
+          "velocity_ref_rad_s": 0.0,
+          "torque_ref_nm": 0.0,
+          "velocity_feedforward_rad_s": 0.0,
+          "torque_feedforward_nm": 0.0,
+          "current_limit_a": 0.25,
+          "torque_limit_nm": 0.012,
+          "velocity_limit_rad_s": 0.5
+        }
+      ],
+      "feedback_faults": [],
+      "mechanical_plant": {
+        "inertia_kg_m2": 0.0000291,
+        "viscous_friction_nm_s": 0.00000937,
+        "load_torque_nm": 0.0,
+        "current_response_bandwidth_rad_s": 2500.0
+      },
+      "acceptance": {
+        "mode": "Position",
+        "maximum_absolute_iq_a": 0.25,
+        "maximum_absolute_velocity_rad_s": 0.55,
+        "maximum_final_position_error_rad": 0.04,
+        "maximum_position_overshoot_rad": 0.02,
+        "maximum_final_absolute_velocity_rad_s": 0.05
+      }
+    }
+  ]
+}

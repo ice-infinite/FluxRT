@@ -38,12 +38,22 @@ MEMORY
 }
 
 ENTRY(Reset_Handler)
-/* 主栈大小 [bytes]，由 .stack 段预留 1 KiB；RT-Thread 的线程栈是另外分配的，
- * 这里只放 Reset_Handler 到调度器启动前的主栈以及异常入口。
- * Main stack size in bytes, 1 KiB reserved by the .stack section. RT-Thread thread
- * stacks are allocated separately; this only covers the main stack from
- * Reset_Handler until the scheduler starts, plus exception entry. */
-_system_stack_size = 0x400;
+/* 主栈大小 [bytes]。普通镜像默认 1 KiB；需要更深异常栈的专用候选镜像可用
+ * 链接器 --defsym 覆盖本符号，而不挤占所有构建档的线程堆。RT-Thread 线程栈另行
+ * 分配；这里承载 Reset_Handler 到调度器启动前的主栈以及全部异常/ISR 调用链。
+ * Main stack size in bytes. Normal images default to 1 KiB; a dedicated candidate
+ * may override this symbol with linker --defsym without charging every profile's
+ * thread heap. RT-Thread thread stacks are separate; this stack covers startup and
+ * every exception/ISR call chain. */
+PROVIDE(_system_stack_size = 0x400);
+/* RT_USING_HEAP 下 main 与 Finsh 各需 4 KiB 动态线程栈，另需线程控制块和
+ * small-mem 分配头。9 KiB 是当前诊断镜像的链接期最低门，不是可用堆目标；
+ * 正常构建仍应保留更多运行余量。
+ * With RT_USING_HEAP, main and Finsh each need a 4 KiB dynamic thread stack,
+ * plus thread control blocks and small-mem allocation headers.  Nine KiB is a
+ * link-time floor for the current diagnostic image, not the desired runtime
+ * headroom; normal builds should retain more. */
+PROVIDE(_minimum_runtime_heap_size = 0x2400);
 
 SECTIONS
 {
@@ -132,9 +142,9 @@ SECTIONS
         _edata = .;
     } > RAM AT > ROM
 
-    /* 主栈：NOLOAD 表示不占用 Flash 初值，只在 SRAM 里预留 1 KiB。对齐到 8 是因为
+    /* 主栈：NOLOAD 表示不占用 Flash 初值，只在 SRAM 里预留上述大小。对齐到 8 是因为
      * ARM EABI 要求栈指针对齐到 8 字节，未对齐会在浮点/双字访问时触发 UsageFault。
-     * Main stack: NOLOAD means no Flash initialiser, only a 1 KiB reservation in SRAM.
+     * Main stack: NOLOAD means no Flash initialiser, only the reservation above in SRAM.
      * The 8-byte alignment comes from the ARM EABI stack alignment requirement; a
      * misaligned stack faults on double-word and floating-point accesses. */
     .stack (NOLOAD) :
@@ -174,6 +184,12 @@ SECTIONS
      * ring buffer is charged exactly this way. */
     __bss_end = .;
     _end = .;
+
+    /* Do not accept an image that links but fails in rt_application_init before
+     * main() because the first dynamic thread cannot be allocated. */
+    ASSERT((ORIGIN(RAM) + LENGTH(RAM) - __bss_end) >=
+           _minimum_runtime_heap_size,
+           "FluxRT RAM overflow: less than 9 KiB runtime heap remains")
 
     .ARM.attributes 0 : { *(.ARM.attributes) }
     .comment 0 : { *(.comment) }

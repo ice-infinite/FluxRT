@@ -123,6 +123,88 @@ elseif(FOC_FAST_MATH_BENCH_CONFIG_LINE OR FOC_FAST_MATH_CANDIDATE_CONFIG_LINE)
     message(STATUS "FOC CPU fast math: ignored outside Diagnostic profile")
 endif()
 
+# P4.2 motion candidate owns an independent ABI and is never silently pulled
+# into non-Diagnostic Rust archives. Enabling the Kconfig symbol compiles the
+# single-writer dispatcher and combined ADC-ISR branch, but the runtime route
+# remains zero until an explicit stopped-state configure call succeeds.
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_MOTION_CONFIG_LINE
+    REGEX "^#define FOC_MOTION_CONTROL_CANDIDATE$")
+if(FLUXRT_BUILD_PROFILE STREQUAL "diagnostic" AND FOC_MOTION_CONFIG_LINE)
+    list(APPEND FOC_RUST_FEATURE_ARGS --features motion-control)
+    message(STATUS "FOC motion control: Diagnostic candidate available, default runtime disabled")
+    # The forced no-power combined path uses a deeper Rust exception call chain than
+    # the legacy ISR.  A 1 KiB MSP overflow was proven on target by CFSR=0x8200 and a
+    # corrupted RT-Thread defunct-list pointer below _sstack.  Charge 4 KiB only to
+    # this dedicated candidate; normal Diagnostic keeps its heap and 1 KiB MSP.
+    set_property(TARGET ${CMAKE_PROJECT_NAME}.elf APPEND_STRING PROPERTY
+        LINK_FLAGS " -Wl,--defsym=_system_stack_size=0x1000")
+    message(STATUS "FOC motion control: candidate exception stack 4096 bytes")
+elseif(FOC_MOTION_CONFIG_LINE)
+    message(STATUS "FOC motion control: Rust candidate ignored outside Diagnostic profile")
+else()
+    message(STATUS "FOC motion control: candidate disabled")
+endif()
+
+# Advanced FOC is a separate, default-off Diagnostic candidate.  Merely
+# compiling it leaves enabled_features=0, so the basic realtime path remains
+# bit-identical.  Hardware-coupled policies also require their platform
+# capability bits at the stopped-state configuration boundary.
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_ADVANCED_CONFIG_LINE
+    REGEX "^#define FOC_ADVANCED_CONTROL_CANDIDATE$")
+if(FLUXRT_BUILD_PROFILE STREQUAL "diagnostic" AND FOC_ADVANCED_CONFIG_LINE)
+    list(APPEND FOC_RUST_FEATURE_ARGS --features advanced-foc)
+    message(STATUS "FOC advanced control: Diagnostic supervisor available, default runtime disabled")
+elseif(FOC_ADVANCED_CONFIG_LINE)
+    message(STATUS "FOC advanced control: Rust candidate ignored outside Diagnostic profile")
+else()
+    message(STATUS "FOC advanced control: candidate disabled")
+endif()
+
+# P5.1 power management is deliberately independent from the realtime ISR.
+# Compiling it adds only the versioned Rust policy ABI and the default-off C
+# owner; board sensors, a brake output and regeneration capability remain absent
+# until separately implemented and approved.
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_POWER_CONFIG_LINE
+    REGEX "^#define FOC_POWER_MANAGEMENT_CANDIDATE$")
+if(FLUXRT_BUILD_PROFILE STREQUAL "diagnostic" AND FOC_POWER_CONFIG_LINE)
+    list(APPEND FOC_RUST_FEATURE_ARGS --features power-management)
+    message(STATUS "FOC power management: Diagnostic policy available, default runtime disabled")
+elseif(FOC_POWER_CONFIG_LINE)
+    message(STATUS "FOC power management: Rust candidate ignored outside Diagnostic profile")
+else()
+    message(STATUS "FOC power management: candidate disabled")
+endif()
+
+# P2.5 simple-input normalization is portable Rust and a fixed C ABI. Each
+# physical input remains separately default-off in Kconfig; any selected input
+# adds the shared normalization feature. Board drivers/capabilities are separate
+# gates, so this cannot make an input physically available or arm the drive.
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_INPUT_PWM_CONFIG_LINE
+    REGEX "^#define FLUXRT_INPUT_PWM_PULSE$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_INPUT_ANALOG_CONFIG_LINE
+    REGEX "^#define FLUXRT_INPUT_ANALOG$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_INPUT_STEP_DIR_CONFIG_LINE
+    REGEX "^#define FLUXRT_INPUT_STEP_DIR$")
+if(FOC_INPUT_PWM_CONFIG_LINE OR FOC_INPUT_ANALOG_CONFIG_LINE OR
+   FOC_INPUT_STEP_DIR_CONFIG_LINE)
+    list(APPEND FOC_RUST_FEATURE_ARGS --features external-inputs)
+    message(STATUS "FOC external inputs: portable normalization ABI compiled, physical board capability still gated")
+else()
+    message(STATUS "FOC external inputs: normalization candidates disabled")
+endif()
+
+# P2.6 FluxRT Native framing is pure no_std Rust. C transport drivers consume
+# it only through foc_native_bridge.h; selecting the codec still does not add a
+# physical UART/USB/CAN driver or make a board transport available.
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_NATIVE_PROTOCOL_CONFIG_LINE
+    REGEX "^#define FLUXRT_PROTOCOL_NATIVE$")
+if(FOC_NATIVE_PROTOCOL_CONFIG_LINE)
+    list(APPEND FOC_RUST_FEATURE_ARGS --features native-protocol)
+    message(STATUS "FluxRT Native: portable Rust framing ABI compiled, physical transport still gated")
+else()
+    message(STATUS "FluxRT Native: codec disabled")
+endif()
+
 # 24/12 kHz 定时候选只改变 STM32 平台层，Rust 控制频率仍为 12 kHz。这里打印
 # 最终档位语义，避免仅凭 .config 把 Production 误认为候选镜像。
 file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_PWM_MULTIRATE_CONFIG_LINE

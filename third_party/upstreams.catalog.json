@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-10-01",
+  "selection_policy": "Refresh official upstream at integration time, prefer the latest stable release, then pin the reviewed exact commit. Rolling repositories require a reviewed exact commit.",
+  "components": [
+    {
+      "id": "dronecan_libcanard",
+      "official_url": "https://github.com/DroneCAN/libcanard.git",
+      "candidate_ref": "master",
+      "observed_commit": "601ed35467e0ac38819df17cd7c918de19f62d58",
+      "license": "MIT",
+      "integration": "planned_submodule",
+      "vendored": false,
+      "purpose": "PX4-compatible DroneCAN ESC transport core"
+    },
+    {
+      "id": "dronecan_dsdl",
+      "official_url": "https://github.com/DroneCAN/DSDL.git",
+      "candidate_ref": "master",
+      "observed_commit": "b4653c7abc3c47cb31b16efa24ea755232774756",
+      "license": "review_required",
+      "integration": "planned_generator_input",
+      "vendored": false,
+      "purpose": "Official DroneCAN data type definitions"
+    },
+    {
+      "id": "dronecan_dsdlc",
+      "official_url": "https://github.com/DroneCAN/dronecan_dsdlc.git",
+      "candidate_ref": "master",
+      "observed_commit": "431170fa4bfe2212b516b8f33bdc796267907f1c",
+      "license": "review_required",
+      "integration": "build_tool_only",
+      "vendored": false,
+      "purpose": "Official DroneCAN DSDL code generator"
+    },
+    {
+      "id": "opencyphal_libcanard",
+      "official_url": "https://github.com/OpenCyphal/libcanard.git",
+      "candidate_ref": "v4.0.0",
+      "observed_commit": "d362f195c074f37056dfe5aef33e4558da3cd53a",
+      "observed_head": "120600375535b6a383fbe99a9d77c04b7a65e81a",
+      "license": "MIT",
+      "integration": "planned_submodule",
+      "vendored": false,
+      "purpose": "Stable Cyphal/CAN transport; do not select the v5 alpha line without a separate review"
+    },
+    {
+      "id": "opencyphal_public_regulated_data_types",
+      "official_url": "https://github.com/OpenCyphal/public_regulated_data_types.git",
+      "candidate_ref": "master",
+      "observed_commit": "a229bb78e76c48a3082be163bc240b2c13ff2d89",
+      "license": "review_required",
+      "integration": "planned_generator_input",
+      "vendored": false,
+      "purpose": "Cyphal regulated data types including actuator-related UDRAL types"
+    },
+    {
+      "id": "opencyphal_nunavut",
+      "official_url": "https://github.com/OpenCyphal/nunavut.git",
+      "candidate_ref": "3.0.1b1",
+      "observed_commit": "37095abb9fac47f924a52500bf4cebe2256dcff5",
+      "license": "review_required",
+      "integration": "build_tool_candidate",
+      "vendored": false,
+      "purpose": "Cyphal DSDL code generator; beta status requires compatibility review before lock"
+    },
+    {
+      "id": "mavlink_c_library_v2",
+      "official_url": "https://github.com/mavlink/c_library_v2.git",
+      "candidate_ref": "master",
+      "observed_commit": "56f6435ee725ed15d2e6d2a4c97ab6b41886ffc9",
+      "license": "review_required",
+      "integration": "planned_generated_headers",
+      "vendored": false,
+      "purpose": "PX4 management, diagnostics and telemetry only; not the realtime motor command path"
+    },
+    {
+      "id": "canopennode",
+      "official_url": "https://github.com/CANopenNode/CANopenNode.git",
+      "candidate_ref": "v4.1",
+      "observed_commit": "ac2140717c3c498d9b0351bce052bab630a74764",
+      "observed_head": "9b8beed8367241e96ac03f916cd5a500bcb2cf23",
+      "license": "Apache-2.0",
+      "integration": "planned_submodule",
+      "vendored": false,
+      "purpose": "CANopen/CiA 402 route"
+    },
+    {
+      "id": "soes",
+      "official_url": "https://github.com/OpenEtherCATsociety/SOES.git",
+      "candidate_ref": "v3.1.0",
+      "observed_commit": "591d08d474e8bcdca21562b23f00555567a5cb2c",
+      "observed_head": "6ef7b9415e936c061ad30626ca00004bdde2ac62",
+      "license": "GPL-2.0 with linking exception; legal review required",
+      "integration": "planned_submodule_on_ethercat_capable_hardware",
+      "vendored": false,
+      "purpose": "EtherCAT slave stack; current STM32G431 board lacks an ESC"
+    },
+    {
+      "id": "px4_autopilot_reference",
+      "official_url": "https://github.com/PX4/PX4-Autopilot.git",
+      "candidate_ref": "main",
+      "observed_commit": "7d509d832acb61e8928ce19c2c73c87c67ea67eb",
+      "license": "BSD-3-Clause",
+      "integration": "external_compatibility_reference_only",
+      "vendored": false,
+      "purpose": "PX4 DroneCAN/Cyphal/PWM/DShot interoperability and HIL reference"
+    },
+    {
+      "id": "vesc_bldc_reference",
+      "official_url": "https://github.com/vedderb/bldc.git",
+      "candidate_ref": "master",
+      "observed_commit": "4fd8279ea45a17c0d69357438ae2f7237a32514f",
+      "license": "GPL-3.0",
+      "integration": "reference_only_native_can_deferred",
+      "vendored": false,
+      "purpose": "Do not copy comm_can.c; use DroneCAN for PX4/VESC interoperability unless an official standalone SDK is released"
+    }
+  ]
+}

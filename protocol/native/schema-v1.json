@@ -1,0 +1,45 @@
+{
+  "schema": "fluxrt-native-wire",
+  "schema_version": 1,
+  "wire_version": 1,
+  "byte_order": "little-endian",
+  "magic_hex": "4652",
+  "header_size": 20,
+  "trailer_size": 4,
+  "maximum_payload_size": 256,
+  "maximum_frame_size": 280,
+  "crc": {
+    "name": "CRC-32C/Castagnoli",
+    "reflected_polynomial_hex": "82F63B78",
+    "initial_hex": "FFFFFFFF",
+    "final_xor_hex": "FFFFFFFF",
+    "coverage": "header-and-payload"
+  },
+  "flags": {
+    "request": 1,
+    "response": 2,
+    "error": 4,
+    "ack_required": 8
+  },
+  "message_types": {
+    "discover_request": 1,
+    "discover_response": 2,
+    "capabilities_request": 17,
+    "capabilities_response": 18,
+    "status_request": 33,
+    "status_response": 34,
+    "product_command": 49,
+    "command_result": 50,
+    "parameter_get_request": 65,
+    "parameter_get_response": 66,
+    "parameter_set_request": 67,
+    "parameter_set_response": 68,
+    "parameter_commit_request": 69,
+    "parameter_commit_response": 70
+  },
+  "payload_contract": {
+    "schema": "payload-schema-v1.json",
+    "golden": "payload-golden-v1.json",
+    "implemented_messages": [2, 18, 34, 49, 50]
+  }
+}

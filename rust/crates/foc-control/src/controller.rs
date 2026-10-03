@@ -34,7 +34,9 @@
 
 use core::f32::consts::PI;
 
-use foc_algorithm::{clarke, svpwm_update, Abc, AlphaBeta, Dq, PiState, SvpwmParam};
+use foc_algorithm::{
+    clarke, dpwm_update, svpwm_update, Abc, AlphaBeta, DpwmMode, DpwmParam, Dq, PiState, SvpwmParam,
+};
 
 use crate::{
     ControlMath, ControlParameters, ControlTelemetry, CpuMath, CurrentCommand, FeedbackSnapshot,
@@ -66,6 +68,43 @@ pub struct ControlAngleOffsets {
     /// 电压指令做逆 Park 时的角度偏移 `[rad]`。
     /// Angle offset used by the voltage inverse-Park transform `[rad]`.
     pub reverse_park_rad: f32,
+}
+
+/// One Park-frame current sample together with the base angle transaction that
+/// produced it.  The combined motion/current realtime path uses this value to
+/// preload the motion cascade from the same ADC sample and then reuses the exact
+/// same sine/cosine pair in the current PI.  This keeps the hardware CORDIC
+/// budget at at most one `sin_cos` operation per fast-loop tick.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PrecomputedCurrentFrame {
+    pub current_dq: Dq,
+    base_sin: f32,
+    base_cos: f32,
+}
+
+/// Optional final-stage policy used by the advanced-FOC supervisor.
+///
+/// The all-zero/default value preserves the historical basic-FOC path exactly:
+/// no feed-forward, no injection, the configured linear voltage circle and
+/// SVPWM.  Target code must therefore opt in explicitly before any advanced
+/// voltage or modulation reaches a duty command.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CurrentLoopPolicy {
+    pub voltage_feedforward_dq: Dq,
+    pub injection_voltage_alpha_beta: AlphaBeta,
+    /// Zero selects `params.voltage_utilization * Vbus / sqrt(3)`.
+    pub voltage_limit_v: f32,
+    pub modulation: CurrentLoopModulation,
+    /// Back-calculate both PI integrators after vector-circle saturation.
+    pub vector_anti_windup: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CurrentLoopModulation {
+    #[default]
+    Svpwm,
+    DpwmClampMax,
+    DpwmClampMin,
 }
 
 /// 从一组基础 sin/cos 通过小角度旋转得到 `angle + offset` 的 sin/cos。
@@ -219,6 +258,78 @@ impl CurrentLoop {
             d: current_alpha_beta.alpha * park_cos + current_alpha_beta.beta * park_sin,
             q: -current_alpha_beta.alpha * park_sin + current_alpha_beta.beta * park_cos,
         };
+        self.update_from_precomputed_current_frame_with_math(
+            params,
+            feedback,
+            reference,
+            angle_offsets,
+            PrecomputedCurrentFrame {
+                current_dq,
+                base_sin,
+                base_cos,
+            },
+            math,
+        )
+    }
+
+    /// Precompute the Park current and retain the base angle transaction for a
+    /// later current-loop update in the same fast tick.
+    pub fn precompute_current_frame_with_math<M: ControlMath>(
+        feedback: &FeedbackSnapshot,
+        current_alpha_beta: AlphaBeta,
+        park_offset_rad: f32,
+        math: &mut M,
+    ) -> PrecomputedCurrentFrame {
+        let (base_sin, base_cos) = math.sin_cos(feedback.rotor.electrical_angle_rad);
+        let (park_sin, park_cos) = shifted_sin_cos(base_sin, base_cos, park_offset_rad);
+        PrecomputedCurrentFrame {
+            current_dq: Dq {
+                d: current_alpha_beta.alpha * park_cos + current_alpha_beta.beta * park_sin,
+                q: -current_alpha_beta.alpha * park_sin + current_alpha_beta.beta * park_cos,
+            },
+            base_sin,
+            base_cos,
+        }
+    }
+
+    /// Complete a current-loop update from a Park sample and base sine/cosine
+    /// already calculated in this tick.
+    pub fn update_from_precomputed_current_frame_with_math<M: ControlMath>(
+        &mut self,
+        params: &ControlParameters,
+        feedback: &FeedbackSnapshot,
+        reference: CurrentCommand,
+        angle_offsets: ControlAngleOffsets,
+        frame: PrecomputedCurrentFrame,
+        math: &mut M,
+    ) -> (PwmCommand, ControlTelemetry) {
+        self.update_from_precomputed_current_frame_with_policy_and_math(
+            params,
+            feedback,
+            reference,
+            angle_offsets,
+            frame,
+            CurrentLoopPolicy::default(),
+            math,
+        )
+    }
+
+    /// Completes the same current-loop transaction with an explicit advanced
+    /// voltage/modulation policy.  The policy is applied in this order:
+    /// PI -> dq feed-forward -> vector limit -> inverse Park -> stationary-frame
+    /// injection -> final vector limit -> selected modulator.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_from_precomputed_current_frame_with_policy_and_math<M: ControlMath>(
+        &mut self,
+        params: &ControlParameters,
+        feedback: &FeedbackSnapshot,
+        reference: CurrentCommand,
+        angle_offsets: ControlAngleOffsets,
+        frame: PrecomputedCurrentFrame,
+        policy: CurrentLoopPolicy,
+        math: &mut M,
+    ) -> (PwmCommand, ControlTelemetry) {
+        let current_dq = frame.current_dq;
         let mut voltage_dq = Dq {
             d: self
                 .id_pi
@@ -227,12 +338,19 @@ impl CurrentLoop {
                 .iq_pi
                 .update(&params.iq_pi, reference.iq_ref_a, current_dq.q),
         };
+        voltage_dq.d += policy.voltage_feedforward_dq.d;
+        voltage_dq.q += policy.voltage_feedforward_dq.q;
         // 电压圆限幅半径：SVPWM 线性区的最大相电压幅值是 Vbus/sqrt(3)，再乘可用率
         //（本项目 0.95，余量留给死区、管压降与过调制）。用**实测**母线电压而不是
         // 标称值，母线跌落时才能自动收紧限幅。
         // Voltage circle radius: Vbus/sqrt(3) times the utilisation factor. Using
         // the MEASURED bus voltage lets the limit tighten automatically on sag.
-        let limit = params.voltage_utilization * feedback.dc_bus_voltage / SQRT_3;
+        let default_limit = params.voltage_utilization * feedback.dc_bus_voltage / SQRT_3;
+        let limit = if policy.voltage_limit_v.is_finite() && policy.voltage_limit_v > 0.0 {
+            policy.voltage_limit_v.min(feedback.dc_bus_voltage)
+        } else {
+            default_limit
+        };
         let magnitude = math.magnitude(voltage_dq.d, voltage_dq.q);
         // `magnitude > 0.0` 防止零电压矢量被误判为"超限"后除以 0 产生 NaN。
         // The `magnitude > 0.0` guard stops the zero vector from being divided by
@@ -246,25 +364,83 @@ impl CurrentLoop {
             let scale = limit / magnitude;
             voltage_dq.d *= scale;
             voltage_dq.q *= scale;
+            if policy.vector_anti_windup {
+                let tracked_id_pi = voltage_dq.d - policy.voltage_feedforward_dq.d;
+                let tracked_iq_pi = voltage_dq.q - policy.voltage_feedforward_dq.q;
+                let _ = self.id_pi.preload_output(
+                    &params.id_pi,
+                    reference.id_ref_a,
+                    current_dq.d,
+                    tracked_id_pi,
+                );
+                let _ = self.iq_pi.preload_output(
+                    &params.iq_pi,
+                    reference.iq_ref_a,
+                    current_dq.q,
+                    tracked_iq_pi,
+                );
+            }
         }
-        let (reverse_park_sin, reverse_park_cos) =
-            shifted_sin_cos(base_sin, base_cos, angle_offsets.reverse_park_rad);
-        let voltage_alpha_beta = AlphaBeta {
+        let (reverse_park_sin, reverse_park_cos) = shifted_sin_cos(
+            frame.base_sin,
+            frame.base_cos,
+            angle_offsets.reverse_park_rad,
+        );
+        let mut voltage_alpha_beta = AlphaBeta {
             alpha: voltage_dq.d * reverse_park_cos - voltage_dq.q * reverse_park_sin,
             beta: voltage_dq.d * reverse_park_sin + voltage_dq.q * reverse_park_cos,
         };
-        let pwm = svpwm_update(
-            voltage_alpha_beta,
-            &SvpwmParam {
-                v_bus: feedback.dc_bus_voltage,
-            },
-        );
+        voltage_alpha_beta.alpha += policy.injection_voltage_alpha_beta.alpha;
+        voltage_alpha_beta.beta += policy.injection_voltage_alpha_beta.beta;
+        let injection_active = policy.injection_voltage_alpha_beta.alpha != 0.0
+            || policy.injection_voltage_alpha_beta.beta != 0.0;
+        let final_magnitude = if injection_active {
+            math.magnitude(voltage_alpha_beta.alpha, voltage_alpha_beta.beta)
+        } else {
+            0.0
+        };
+        let injection_limited =
+            injection_active && final_magnitude > limit && final_magnitude > 0.0;
+        if injection_limited {
+            let scale = limit / final_magnitude;
+            voltage_alpha_beta.alpha *= scale;
+            voltage_alpha_beta.beta *= scale;
+        }
+        let pwm = match policy.modulation {
+            CurrentLoopModulation::Svpwm => {
+                let output = svpwm_update(
+                    voltage_alpha_beta,
+                    &SvpwmParam {
+                        v_bus: feedback.dc_bus_voltage,
+                    },
+                );
+                PwmCommand {
+                    duty_a: output.duty_a,
+                    duty_b: output.duty_b,
+                    duty_c: output.duty_c,
+                }
+            }
+            CurrentLoopModulation::DpwmClampMax | CurrentLoopModulation::DpwmClampMin => {
+                let output = dpwm_update(
+                    voltage_alpha_beta,
+                    &DpwmParam {
+                        v_bus: feedback.dc_bus_voltage,
+                        mode: if policy.modulation == CurrentLoopModulation::DpwmClampMin {
+                            DpwmMode::ClampMin
+                        } else {
+                            DpwmMode::ClampMax
+                        },
+                    },
+                );
+                PwmCommand {
+                    duty_a: output.duty_a,
+                    duty_b: output.duty_b,
+                    duty_c: output.duty_c,
+                }
+            }
+        };
         (
-            PwmCommand {
-                duty_a: pwm.duty_a,
-                duty_b: pwm.duty_b,
-                duty_c: pwm.duty_c,
-            },
+            pwm,
             ControlTelemetry {
                 current_reference: reference,
                 current_dq,
@@ -273,7 +449,7 @@ impl CurrentLoop {
                 // 机械角速度 [rad/s] → 机械转速 [rpm]：乘 30/pi。
                 // Mechanical speed [rad/s] to [rpm]: multiply by 30/pi.
                 measured_speed_rpm: feedback.rotor.mechanical_speed_rad_s * 30.0 / PI,
-                voltage_limited,
+                voltage_limited: voltage_limited || injection_limited,
             },
         )
     }
@@ -666,6 +842,203 @@ mod tests {
         );
         assert_eq!(math.sin_cos_calls, 1);
         assert_eq!(math.magnitude_calls, 1);
+    }
+
+    #[test]
+    fn precomputed_motion_frame_is_reused_without_a_second_sin_cos() {
+        let params = st_gbm2804_reference_parameters();
+        let feedback = FeedbackSnapshot {
+            currents: PhaseCurrents {
+                a: 0.37,
+                b: -0.22,
+                c: -0.15,
+            },
+            dc_bus_voltage: 13.0,
+            rotor: RotorFeedback {
+                electrical_angle_rad: 1.25,
+                mechanical_speed_rad_s: 41.0,
+            },
+        };
+        let alpha_beta = clarke(Abc {
+            a: feedback.currents.a,
+            b: feedback.currents.b,
+            c: feedback.currents.c,
+        });
+        let offsets = ControlAngleOffsets {
+            park_rad: 0.02,
+            reverse_park_rad: 0.03,
+        };
+        let mut math = CountingMath::default();
+        let frame = CurrentLoop::precompute_current_frame_with_math(
+            &feedback,
+            alpha_beta,
+            offsets.park_rad,
+            &mut math,
+        );
+        let mut loop_ = CurrentLoop::default();
+        let _ = loop_.update_from_precomputed_current_frame_with_math(
+            &params,
+            &feedback,
+            CurrentCommand {
+                id_ref_a: 0.1,
+                iq_ref_a: 0.6,
+            },
+            offsets,
+            frame,
+            &mut math,
+        );
+        assert_eq!(math.sin_cos_calls, 1);
+        assert_eq!(math.magnitude_calls, 1);
+    }
+
+    /// The explicit policy entry is the integration seam for advanced FOC.  A
+    /// default policy must remain bit-for-bit identical to the basic path so a
+    /// compiled-but-disabled feature cannot change the shipped control law.
+    #[test]
+    fn default_current_loop_policy_is_bit_identical_to_basic_path() {
+        let params = st_gbm2804_reference_parameters();
+        let feedback = FeedbackSnapshot {
+            currents: PhaseCurrents {
+                a: 0.21,
+                b: -0.34,
+                c: 0.13,
+            },
+            dc_bus_voltage: 12.3,
+            rotor: RotorFeedback {
+                electrical_angle_rad: 1.7,
+                mechanical_speed_rad_s: 33.0,
+            },
+        };
+        let reference = CurrentCommand {
+            id_ref_a: -0.05,
+            iq_ref_a: 0.47,
+        };
+        let current_alpha_beta = clarke(Abc {
+            a: feedback.currents.a,
+            b: feedback.currents.b,
+            c: feedback.currents.c,
+        });
+        let offsets = ControlAngleOffsets {
+            park_rad: -0.015,
+            reverse_park_rad: 0.025,
+        };
+        let mut legacy_math = CpuMath;
+        let legacy_frame = CurrentLoop::precompute_current_frame_with_math(
+            &feedback,
+            current_alpha_beta,
+            offsets.park_rad,
+            &mut legacy_math,
+        );
+        let mut policy_math = CpuMath;
+        let policy_frame = CurrentLoop::precompute_current_frame_with_math(
+            &feedback,
+            current_alpha_beta,
+            offsets.park_rad,
+            &mut policy_math,
+        );
+        assert_eq!(policy_frame, legacy_frame);
+
+        let mut legacy = CurrentLoop::default();
+        let mut policy = CurrentLoop::default();
+        let legacy_output = legacy.update_from_precomputed_current_frame_with_math(
+            &params,
+            &feedback,
+            reference,
+            offsets,
+            legacy_frame,
+            &mut legacy_math,
+        );
+        let policy_output = policy.update_from_precomputed_current_frame_with_policy_and_math(
+            &params,
+            &feedback,
+            reference,
+            offsets,
+            policy_frame,
+            CurrentLoopPolicy::default(),
+            &mut policy_math,
+        );
+        assert_eq!(policy_output, legacy_output);
+    }
+
+    #[test]
+    fn advanced_feedforward_and_injection_share_the_final_voltage_circle() {
+        let params = st_gbm2804_reference_parameters();
+        let feedback = FeedbackSnapshot {
+            currents: PhaseCurrents::default(),
+            dc_bus_voltage: 12.0,
+            rotor: RotorFeedback::default(),
+        };
+        let frame = PrecomputedCurrentFrame {
+            current_dq: Dq::default(),
+            base_sin: 0.0,
+            base_cos: 1.0,
+        };
+        let policy = CurrentLoopPolicy {
+            voltage_feedforward_dq: Dq { d: 8.0, q: 6.0 },
+            injection_voltage_alpha_beta: AlphaBeta {
+                alpha: 4.0,
+                beta: -3.0,
+            },
+            voltage_limit_v: 5.0,
+            modulation: CurrentLoopModulation::Svpwm,
+            vector_anti_windup: true,
+        };
+        let mut loop_ = CurrentLoop::default();
+        let (pwm, telemetry) = loop_.update_from_precomputed_current_frame_with_policy_and_math(
+            &params,
+            &feedback,
+            CurrentCommand::default(),
+            ControlAngleOffsets::default(),
+            frame,
+            policy,
+            &mut CpuMath,
+        );
+        let final_magnitude = libm::sqrtf(
+            telemetry.voltage_alpha_beta.alpha * telemetry.voltage_alpha_beta.alpha
+                + telemetry.voltage_alpha_beta.beta * telemetry.voltage_alpha_beta.beta,
+        );
+        assert!(pwm.is_valid());
+        assert!(telemetry.voltage_limited);
+        assert!(final_magnitude <= 5.0 + 1.0e-5);
+    }
+
+    #[test]
+    fn dpwm_policy_clamps_one_phase_to_the_selected_rail() {
+        let params = st_gbm2804_reference_parameters();
+        let feedback = FeedbackSnapshot {
+            currents: PhaseCurrents::default(),
+            dc_bus_voltage: 24.0,
+            rotor: RotorFeedback::default(),
+        };
+        let frame = PrecomputedCurrentFrame {
+            current_dq: Dq::default(),
+            base_sin: 0.0,
+            base_cos: 1.0,
+        };
+        for (mode, rail) in [
+            (CurrentLoopModulation::DpwmClampMax, 1.0_f32),
+            (CurrentLoopModulation::DpwmClampMin, 0.0_f32),
+        ] {
+            let mut loop_ = CurrentLoop::default();
+            let (pwm, _) = loop_.update_from_precomputed_current_frame_with_policy_and_math(
+                &params,
+                &feedback,
+                CurrentCommand::default(),
+                ControlAngleOffsets::default(),
+                frame,
+                CurrentLoopPolicy {
+                    injection_voltage_alpha_beta: AlphaBeta {
+                        alpha: 2.0,
+                        beta: 1.0,
+                    },
+                    modulation: mode,
+                    ..CurrentLoopPolicy::default()
+                },
+                &mut CpuMath,
+            );
+            assert!(pwm.is_valid());
+            assert!(pwm.duty_a == rail || pwm.duty_b == rail || pwm.duty_c == rail);
+        }
     }
 
     /// 小角度旋转在配置允许的 ±0.25 rad 范围内应与直接三角计算足够接近；该范围

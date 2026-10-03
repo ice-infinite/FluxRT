@@ -18,11 +18,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "foc-input"
+version = "0.1.0"
+
+[[package]]
+name = "foc-protocol"
+version = "0.1.0"
+
+[[package]]
 name = "foc-rt-bridge"
 version = "0.1.0"
 dependencies = [
  "foc-algorithm",
  "foc-control",
+ "foc-input",
+ "foc-protocol",
 ]
 
 [[package]]

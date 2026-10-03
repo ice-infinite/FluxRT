@@ -43,6 +43,7 @@
 #include "foc_production_profile.h"
 #include "foc_platform.h"
 #include "foc_math_accel.h"
+#include "foc_platform_motion_candidate.h"
 #include "foc_pwm_timing.h"
 #include "foc_rust_bridge.h"
 
@@ -450,17 +451,17 @@ int main(void)
 
     /* ABI 触发线 / ABI tripwires:
      *   ABI 版本必须与 foc/include/foc_rust_bridge.h 中的 FOC_RUST_ABI_VERSION
-     *   完全一致（当前 0x00140000）；上下文容量必须与静态断言一致；运行时配置 296 B、
+     *   完全一致（当前 0x00150000）；上下文容量必须与静态断言一致；运行时配置 296 B、
      *   遥测 100 B 是 C 与 Rust 双方共同约定的结构体尺寸。改任何一处都必须同时
      *   提升 ABI 版本并更新本测试，否则板上应拒绝启动（见 applications/main.c）。
      *   The ABI version must match FOC_RUST_ABI_VERSION in
-     *   foc/include/foc_rust_bridge.h exactly (currently 0x00140000); the context
+     *   foc/include/foc_rust_bridge.h exactly (currently 0x00150000); the context
      *   capacity must match its _Static_assert; and 296 B for the runtime
      *   configuration and 100 B
      *   for telemetry are the struct sizes both sides agreed on. Any change requires
      *   bumping the ABI version and updating this test, otherwise the board must
      *   refuse to start (see applications/main.c). */
-    assert(FOC_RUST_ABI_VERSION == 0x00140000UL);
+    assert(FOC_RUST_ABI_VERSION == 0x00150000UL);
     assert(FOC_REALTIME_INPUT_VERSION == 1UL);
     assert(sizeof(foc_feedback_t) == 20U);
     assert(sizeof(foc_realtime_input_t) == 88U);
@@ -563,6 +564,20 @@ int main(void)
      * could touch hardware must answer NOT_CONFIGURED. */
     foc_platform_emergency_stop();
     assert(foc_platform_init() == FOC_STATUS_NOT_CONFIGURED);
+    /* P4.2E1 is a Diagnostic target-only candidate.  A host/default build must
+     * expose deterministic fail-closed stubs and can never make the runtime
+     * route appear enabled. */
+    assert(foc_platform_motion_candidate_configure(NULL, NULL, 0U, 1U) ==
+           FOC_STATUS_NOT_CONFIGURED);
+    assert(foc_platform_motion_candidate_publish(NULL, 0U, 0.0f, 0U) ==
+           FOC_STATUS_NOT_CONFIGURED);
+    assert(foc_platform_motion_candidate_request_stop() ==
+           FOC_STATUS_NOT_CONFIGURED);
+    assert(foc_platform_motion_candidate_request_fault(0U) ==
+           FOC_STATUS_NOT_CONFIGURED);
+    assert(foc_platform_motion_candidate_shutdown() ==
+           FOC_STATUS_NOT_CONFIGURED);
+    assert(foc_platform_motion_candidate_is_enabled() == 0U);
     /* 读反馈失败时结构体必须已清零：上位脚本会直接打印这些 [A] / [V] 字段，未定义
      * 值会被误读成真实测量。
      * A failed feedback read must leave the struct zeroed: host scripts print these

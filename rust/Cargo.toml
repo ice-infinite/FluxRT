@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/foc-algorithm",
     "crates/foc-control",
+    "crates/foc-input",
+    "crates/foc-protocol",
     "crates/foc-rt-bridge",
     "crates/foc-sim",
 ]

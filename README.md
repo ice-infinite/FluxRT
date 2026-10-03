@@ -24,11 +24,38 @@
 - P0.1 审计整改基线已收口：全量 Host/Rust/Python 回归和四档目标构建通过，构建脚本
   固定 `SOURCE_DATE_EPOCH` 后完整重生成哈希可复现。本次收口没有重新烧录或运行电机，
   P0.2～P0.5 的目标安全注入、耐久和实时性复验仍待执行。
-- P1.1～P1.3 与 P3.1 软件基础已完成：产品公共契约V1/bridge V20、固定容量命令仲裁与来源权限、
+- P1.1～P1.3 与 P3.1 软件基础已完成：产品公共契约V1/bridge当前V21、固定容量命令仲裁与来源权限、
   以及Rust PC + MATLAB共享的scenario/profile/trace/comparison契约已经建立；524 rpm场景的
-  完整D0身份和七字段D1生命周期严格对拍通过。P3.1又建立六组配置、512 B双槽、CRC、
-  迁移、掉电恢复和回滚纯逻辑。既有V19快环和默认运行行为未改；下一软件主线是P3.2
-  设备端参数事务，仿真D2～D4、目标Flash和命令接入仍未完成。
+  完整D0身份和七字段D1生命周期严格对拍通过。P3.1又建立可恢复配置、CRC、迁移、掉电恢复
+  和回滚纯逻辑。P3.2A建立token化设备端参数事务、分组patch、应用等级、
+  volatile apply/rollback和commit回读确认；P2.5A2已将配置schema/管理ABI升级为V4：七组配置、
+  768 B当前双槽兼容V0～V3旧记录、4 KiB上下文，384 B `ExternalIoConfig`包含88 B三输入标定；
+  V3迁移保留transport/link但强制关闭缺少标定的simple input；
+  Platform→Axis→Management执行器和Fake Flash故障门。它们仍未接RT-Thread服务或真实Flash，
+  既有V19快环和默认运行行为未改。P4.1A 已新增纯 Rust 统一反馈与标定核心；P4.1B1 又冻结
+  独立反馈管理ABI，补齐 Sensorless/ABZ/Hall 目标中立C adapter，并把批准后的标定更新接到
+  既有配置事务的 pending Axis/Calibration 组。P4.1B2 已加入 Rust PC 与 MATLAB 两套独立编码器/Hall模型，量化、整拍
+  延迟、丢脉冲、Index缺失、Hall错序、回退/恢复和feature-off共5场景80行轨迹通过
+  D0/D2/D3/D4对拍。P4.1C又在应用层加入默认关闭的单owner管理服务，完成超时、取消/回滚、
+  批准后事务暂存和commit/readback确认门；它没有注册Shell/RT线程，没有自动apply/写Flash，
+  也没有接默认ISR或真实传感器。P4.2A/B/C现已建立默认关闭的通用参考规划与级联控制：
+  覆盖Torque/Velocity/Position、ramp/filter/trapezoidal trajectory、Position P、Velocity PI、
+  Torque→Iq、前馈后的最终限幅、anti-windup和实测Iq切换预置；P4.2C又补齐schema V2
+  配置映射、独立motion V1 ABI、C适配器和Diagnostic候选。P4.2D又完成Rust PC与MATLAB独立
+  motion模型：8类场景、192行trace的D0～D4/feature-off严格对拍通过，15个连续通道最大
+  绝对差均为0；修复后全回归和默认关闭四档构建/map也通过。Cargo/Kconfig仍默认关闭，既有
+  ISR未改。P4.2E0又新增默认关闭、单执行上下文的motion owner。P4.2E1现已落位ADC ISR
+  单写者dispatcher、136 B固定快照/urgent请求和Rust combined realtime单入口，并修复动态
+  `f32::clamp`误带约20 KiB浮点格式化链的问题。P4.2E1B现已增加Diagnostic-only、不能arm的
+  无功率活调用点、mode 0/1增量测量和configure/combined/commit六点故障注入；candidate `s`
+  为130,340 B ROM/20,664 B RAM。无电机电源板测已完成：mode 0/1各1,200拍，motion完整ISR
+  最坏12,157/12,750 cycles、0 miss，六个注入点全部fail-closed且duty为0。候选随后关闭并
+  烧回默认Diagnostic（110,660 B/22,472 B）。P4.2E2先完成逐模式S3软件门：在同一契约中
+  增加Torque/Velocity/Position三个动态机械plant场景，Rust/MATLAB共11场景31,392行严格
+  对拍及模式阈值全部通过。Torque随后又增加固定0.002 N·m/0.08 A/100 ms状态机、专用
+  candidate能力档和唯一arm入口；板端低母线拒绝、mode 0/1无功率WCET及六点注入通过，
+  mode 1最坏12,233/12,750 cycles、0 miss。源码已恢复candidate默认关闭，板上暂留输出关闭的
+  候选等待一次powered S5；这些证据仍不等于真实Torque、观察器获取或仿真实机一致。
 - 已建立 Diagnostic / Calibration / Identification / Production 四个隔离构建档。Identification 的 EXP-B3 S4～S5.4硬件链通过；S5.5A/B确认LCR线对/位置差异，S5.5C又证明简单乘法比例不能把动态1.9503 mH拉入0.98～1.4103 mH诊断包络。Rust在该包络10个PC闭环工况全部完成，但现有仪器缺独立动态电流/差分PWM电压，精确 `Ld/Lq`、参数更新及再次powered run仍未授权。
 - A19 已在目标板完成 Calibration 首次下载、启动和 `foc_start` 拒绝门，并取得停机 256 拍连续原始码；当前缺可信万用表多点参考，仍未形成电压标定参数。
 - A17 已接通 PC0/PC3/PC1 三路 BEMF ADC 原始码的 12 kHz、256 拍只读固定窗；无功率实机采集通过，但尚未完成电压标定、动态相序、示波器对拍或观察器接入。
@@ -59,7 +86,7 @@ applications/ + RT-Thread     C：启动、线程、通信和管理
         ↓ 固定 C ABI
 rust/crates/foc-rt-bridge/    Rust：控制状态机、参数验证、快环入口
         ↓ Rust API
-rust/crates/foc-control/      Rust：速度/电流环、启动、观测器和硬件 ports
+rust/crates/foc-control/      Rust：参考规划、速度/电流环、启动、观测器和硬件 ports
         ↓ 纯算法
 rust/crates/foc-algorithm/    Rust：纯算法库（no_std、无 HAL）
         ↑ 反馈 / ↓ 占空比
@@ -155,7 +182,7 @@ TIM1/ADC、固件默认和板上镜像仍保持 12/12 kHz，详见 A7 报告。
 - [命令仲裁、来源权限、sequence、lease和timeout契约V1](docs/命令仲裁与租约契约V1.md)
 - [Rust PC与MATLAB共享的双仿真共同契约V1](docs/双仿真共同契约V1.md)
 - [P1.2/P1.3命令仲裁与双仿真D0/D1验证报告](docs/performance/2026-09-28-P1.2-P1.3-命令仲裁与双仿真共同契约.md)
-- [可恢复配置核心V1：六组配置、双槽、CRC、迁移、掉电与回滚](docs/可恢复配置核心V1.md)
+- [可恢复配置核心V1：七组V4配置、兼容双槽、CRC、迁移、掉电与回滚](docs/可恢复配置核心V1.md)
 - [P3.1可恢复配置核心验证报告](docs/performance/2026-09-28-P3.1-可恢复配置核心.md)
 - [并行任务的文件隔离、串行集成与证据规则](docs/并行任务执行与集成规则.md)
 - [A22.1/A24.1 并行软件门与 A23 V19 输入 ABI 冻结](docs/performance/2026-09-27-A22.1-A24.1-并行软件门与A23-ABI冻结.md)
@@ -178,6 +205,12 @@ TIM1/ADC、固件默认和板上镜像仍保持 12/12 kHz，详见 A7 报告。
 - [FOC 整改工程架构分配与代码落位规范](docs/整改架构与职责分配.md)
 - [借鉴 ST MCSDK 与 VESC 的工程修正、补全和验证路线](docs/ST与VESC工程改进路线图.md)
 - [FluxRT 通用 FOC 产品架构、U0～U11 路线与 Rust/MATLAB 双仿真契约](docs/FluxRT通用FOC产品架构与双仿真路线图.md)
+- [可选外部控制、通信、设备接口与最终上位机边界](docs/可选外部控制与通信架构.md)
+- [FluxRT Native V1 帧层协议、CRC、消息编号与安全边界](docs/FluxRT%20Native协议V1.md)
+- [P2.6B Native定宽载荷、ProductCommand映射与只读Fake服务](docs/performance/2026-10-01-P2.6B-Native载荷与只读Fake服务.md)
+- [P2.5A1 PWM/Analog/Step-Dir简单输入归一化核心](docs/performance/2026-10-01-P2.5A1-简单输入归一化核心.md)
+- [P2.5A2 输入持久化配置、V3迁移与服务接线](docs/performance/2026-10-01-P2.5A2-输入配置与服务接线.md)
+- [第三方协议官方上游隔离、升级规则与 PX4 接入策略](docs/第三方协议依赖与PX4接入策略.md)
 - [FluxRT Studio 上位机、在线调参、实时可视化与协议设计](docs/FluxRTStudio上位机架构与调参可视化设计.md)
 - [ST MCSDK 参考参数、硬件接口与 PC 闭环仿真](docs/ST_MCSDK参考参数与仿真.md)
 - [CORDIC 硬件数学加速、CPU 回退与换芯片方法](docs/硬件数学加速与CPU回退.md)
