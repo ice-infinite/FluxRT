@@ -1923,7 +1923,7 @@ static int foc_advanced_trial(int argc, char **argv)
             foc_platform_advanced_candidate_power_trial_finish(
                 &g_foc_runtime_config);
         rt_kprintf("FADVP,start=%u,state=%u,result=%u,finish=%u,"
-                   "snap=%u,ctrlstate=%u,orel=%u,closed=%u\n",
+                   "snap=%u,ctrlstate=%u,orel=%u,closed=%u,ogates=%02x\n",
                    (unsigned int)status,
                    (unsigned int)trial.state,
                    (unsigned int)trial.result,
@@ -1933,7 +1933,8 @@ static int foc_advanced_trial(int argc, char **argv)
                                    FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION)),
                    (unsigned int)snapshot.state,
                    (unsigned int)snapshot.observer_reliable,
-                   (unsigned int)snapshot.closed_loop_active);
+                   (unsigned int)snapshot.closed_loop_active,
+                   (unsigned int)snapshot.observer_reliability_flags);
         g_foc_management_log_inhibit = 0U;
         return -1;
     }
@@ -1960,7 +1961,7 @@ static int foc_advanced_trial(int argc, char **argv)
         &g_foc_runtime_config);
     rt_kprintf("FADVP,state=%u,result=%u,ticks=%u/%u,first=%u,"
                "epoch=%u/%u,miss=%u/%u,features=%02x,status=%08x,"
-               "snap=%u,ctrlstate=%u,orel=%u,closed=%u,"
+               "snap=%u,ctrlstate=%u,orel=%u,closed=%u,ogates=%02x,"
                "wcet=%u,ctrl=%u,diagmiss=%u,finish=%u\n",
                (unsigned int)trial.state,
                (unsigned int)trial.result,
@@ -1979,6 +1980,7 @@ static int foc_advanced_trial(int argc, char **argv)
                (unsigned int)snapshot.state,
                (unsigned int)snapshot.observer_reliable,
                (unsigned int)snapshot.closed_loop_active,
+               (unsigned int)snapshot.observer_reliability_flags,
                (unsigned int)timing.wcet.total_cycles,
                (unsigned int)timing.peak_control_cycles,
                (unsigned int)diagnostics.deadline_miss_count,

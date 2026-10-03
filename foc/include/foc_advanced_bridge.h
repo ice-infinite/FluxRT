@@ -21,7 +21,7 @@ extern "C" {
 #define FOC_ADVANCED_ABI_VERSION       (0x00020000UL)
 #define FOC_ADVANCED_CONFIG_VERSION    (1UL)
 #define FOC_ADVANCED_PROBE_INPUT_VERSION (1UL)
-#define FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION (1UL)
+#define FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION (2UL)
 
 #define FOC_ADVANCED_FEATURE_MTPA             (1UL << 0)
 #define FOC_ADVANCED_FEATURE_FIELD_WEAKENING  (1UL << 1)
@@ -163,6 +163,8 @@ typedef struct
     uint32_t closed_loop_active;
     uint32_t active_features;
     uint32_t status_flags;
+    /* Diagnostic-only decomposition of the observer reliability decision. */
+    uint32_t observer_reliability_flags;
 } foc_advanced_power_trial_snapshot_t;
 
 uint32_t foc_rust_advanced_abi_version(void);
@@ -198,7 +200,7 @@ _Static_assert(sizeof(foc_advanced_probe_input_t) == 44U,
                "advanced probe input ABI size mismatch");
 _Static_assert(sizeof(foc_advanced_telemetry_t) == 68U,
                "advanced telemetry ABI size mismatch");
-_Static_assert(sizeof(foc_advanced_power_trial_snapshot_t) == 28U,
+_Static_assert(sizeof(foc_advanced_power_trial_snapshot_t) == 32U,
                "advanced power-trial snapshot ABI size mismatch");
 
 #ifdef __cplusplus
