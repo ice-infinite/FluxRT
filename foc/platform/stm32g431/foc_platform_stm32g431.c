@@ -43,6 +43,7 @@
  */
 
 #include "foc_platform.h"
+#include "foc_arm_diagnostics.h"
 #include "foc_lsi_actuation_executor.h"
 #include "foc_lsi_capture_service.h"
 #if defined(FOC_TARGET_STM32G431) && \
@@ -4885,6 +4886,7 @@ static foc_status_t foc_platform_control_start_internal(
     uint32_t primask;
     uint16_t bus_min_raw;
     uint16_t bus_max_raw;
+    uint16_t arm_reject_facts = 0U;
     foc_power_arm_token_t arm_token;
     foc_feedback_t feedback;
     foc_status_t status;
@@ -4938,6 +4940,8 @@ static foc_status_t foc_platform_control_start_internal(
     {
         return status;
     }
+    g_foc_diagnostics.arm_reject_stage = FOC_ARM_REJECT_STAGE_NONE;
+    g_foc_diagnostics.arm_reject_facts = 0U;
     foc_platform_refresh_safety_flags();
     bus_min_raw = foc_platform_bus_voltage_to_raw(g_foc_platform_config.minimum_bus_voltage_v);
     bus_max_raw = foc_platform_bus_voltage_to_raw(g_foc_platform_config.maximum_bus_voltage_v);
@@ -4951,6 +4955,9 @@ static foc_status_t foc_platform_control_start_internal(
     }
     if (foc_power_safety_begin_arm(&g_foc_power_safety, &arm_token) == 0U)
     {
+        g_foc_diagnostics.arm_reject_stage = FOC_ARM_REJECT_STAGE_BEGIN;
+        g_foc_diagnostics.arm_reject_facts =
+            FOC_ARM_REJECT_FACT_SAFETY_STATE;
         return FOC_STATUS_HARDWARE_FAULT;
     }
     status = foc_rust_start_realtime(g_foc_controller, 1U, target_speed_rpm);
@@ -4998,13 +5005,20 @@ static foc_status_t foc_platform_control_start_internal(
      * before and after opening the physical path. */
     primask = __get_PRIMASK();
     __disable_irq();
-    if ((g_foc_power_safety.state != FOC_POWER_SAFETY_ARMING) ||
-        (g_foc_power_safety.fault_epoch != arm_token.fault_epoch) ||
-        ((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U) ||
-        (foc_platform_driver_faulted() != 0U) ||
-        (g_foc_diagnostics.bus_voltage_raw < bus_min_raw) ||
-        (g_foc_diagnostics.bus_voltage_raw > bus_max_raw))
+    arm_reject_facts = foc_arm_diagnostics_pre_facts(
+        TIM1->SR,
+        TIM_SR_BIF,
+        TIM_SR_B2IF,
+        foc_platform_driver_faulted(),
+        (g_foc_power_safety.state == FOC_POWER_SAFETY_ARMING) ? 1U : 0U,
+        (g_foc_power_safety.fault_epoch == arm_token.fault_epoch) ? 1U : 0U,
+        ((g_foc_diagnostics.bus_voltage_raw >= bus_min_raw) &&
+         (g_foc_diagnostics.bus_voltage_raw <= bus_max_raw)) ? 1U : 0U);
+    if (arm_reject_facts != 0U)
     {
+        g_foc_diagnostics.arm_reject_stage =
+            FOC_ARM_REJECT_STAGE_PRE_ENABLE;
+        g_foc_diagnostics.arm_reject_facts = arm_reject_facts;
         status = FOC_STATUS_HARDWARE_FAULT;
     }
     else
@@ -5014,14 +5028,30 @@ static foc_status_t foc_platform_control_start_internal(
         TIM1->BDTR |= TIM_BDTR_MOE;
         FOC_GATE_ENABLE_PORT->BSRR = FOC_GATE_ENABLE_PINS;
         __DSB();
-        if (((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U) ||
-            ((TIM1->CCER & channel_mask) != channel_mask) ||
-            ((TIM1->BDTR & TIM_BDTR_MOE) == 0U) ||
-            (foc_platform_gate_is_low() != 0U) ||
-            (foc_platform_driver_faulted() != 0U) ||
+        arm_reject_facts = foc_arm_diagnostics_post_facts(
+            TIM1->SR,
+            TIM_SR_BIF,
+            TIM_SR_B2IF,
+            foc_platform_driver_faulted(),
+            (g_foc_power_safety.state == FOC_POWER_SAFETY_ARMING) ? 1U : 0U,
+            (g_foc_power_safety.fault_epoch == arm_token.fault_epoch) ? 1U : 0U,
+            ((g_foc_diagnostics.bus_voltage_raw >= bus_min_raw) &&
+             (g_foc_diagnostics.bus_voltage_raw <= bus_max_raw)) ? 1U : 0U,
+            ((TIM1->CCER & channel_mask) == channel_mask) ? 1U : 0U,
+            ((TIM1->BDTR & TIM_BDTR_MOE) != 0U) ? 1U : 0U,
+            (foc_platform_gate_is_low() == 0U) ? 1U : 0U,
+            1U);
+        if ((arm_reject_facts == 0U) &&
             (foc_power_safety_commit_arm(
                  &g_foc_power_safety, &arm_token) == 0U))
         {
+            arm_reject_facts |= FOC_ARM_REJECT_FACT_COMMIT;
+        }
+        if (arm_reject_facts != 0U)
+        {
+            g_foc_diagnostics.arm_reject_stage =
+                FOC_ARM_REJECT_STAGE_POST_ENABLE;
+            g_foc_diagnostics.arm_reject_facts = arm_reject_facts;
             status = FOC_STATUS_HARDWARE_FAULT;
         }
         else
@@ -5035,7 +5065,8 @@ static foc_status_t foc_platform_control_start_internal(
     if (status != FOC_STATUS_OK)
     {
         foc_platform_latch_fault_fast(
-            (((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) != 0U) ?
+            (((arm_reject_facts & (FOC_ARM_REJECT_FACT_BIF |
+                                   FOC_ARM_REJECT_FACT_B2IF)) != 0U) ?
                 FOC_POWER_FAULT_BREAK : FOC_POWER_FAULT_PLATFORM),
             FOC_RUST_FAULT_PLATFORM_INPUT);
     }

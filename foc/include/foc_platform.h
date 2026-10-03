@@ -252,12 +252,16 @@ typedef struct
     uint16_t last_duty_a_per_mille;
     uint16_t last_duty_b_per_mille;
     uint16_t last_duty_c_per_mille;
-    uint16_t reserved1;
+    /* 最近一次arm拒绝阶段，取值见foc_arm_diagnostics.h。
+     * Last arm rejection stage; values are defined in foc_arm_diagnostics.h. */
+    uint16_t arm_reject_stage;
     /* arm 期间观测到的最大单相电流偏移 [counts]（相对标定零点）。
      * Largest single-phase current offset seen while armed, in counts relative
      * to the calibrated zero. */
     uint16_t peak_current_delta_counts;
-    uint16_t reserved0;
+    /* 最近一次arm拒绝事实位；BIF/B2IF、driver、Gate/MOE/CCER等。
+     * Last arm rejection fact mask: BIF/B2IF, driver and Gate/MOE/CCER facts. */
+    uint16_t arm_reject_facts;
     /* 三相电流与母线/温度/电位器的原始 ADC 值及标定零点 [counts]。
      * Raw ADC values and calibrated offsets for the three currents, bus,
      * temperature and potentiometer, in counts. */

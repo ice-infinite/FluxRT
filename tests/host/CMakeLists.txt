@@ -3,6 +3,23 @@ project(fluxrt_host_tests C)
 
 enable_testing()
 
+add_executable(foc_arm_diagnostics_tests
+    test_foc_arm_diagnostics.c
+    ../../foc/runtime/foc_arm_diagnostics.c
+)
+target_include_directories(foc_arm_diagnostics_tests PRIVATE
+    ../../foc/include
+)
+target_compile_features(foc_arm_diagnostics_tests PRIVATE c_std_11)
+if(MSVC)
+    target_compile_options(foc_arm_diagnostics_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(foc_arm_diagnostics_tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
+endif()
+add_test(NAME foc_arm_reject_stage_and_fact_encoding
+    COMMAND foc_arm_diagnostics_tests)
+
 add_executable(foc_monitor_sampling_tests
     test_foc_monitor_sampling.c
     ../../foc/runtime/foc_monitor_sampling.c

@@ -486,11 +486,13 @@ static int foc_status(int argc, char **argv)
                (unsigned int)diagnostics.last_duty_a_per_mille,
                (unsigned int)diagnostics.last_duty_b_per_mille,
                (unsigned int)diagnostics.last_duty_c_per_mille);
-    rt_kprintf("FFAULT,%08x,%08x,%u,%u\n",
+    rt_kprintf("FFAULT,%08x,%08x,%u,%u,ARM,%u,%04x\n",
                (unsigned int)diagnostics.first_power_fault,
                (unsigned int)diagnostics.last_power_fault,
                (unsigned int)diagnostics.power_fault_count,
-               (unsigned int)diagnostics.power_fault_epoch);
+               (unsigned int)diagnostics.power_fault_epoch,
+               (unsigned int)diagnostics.arm_reject_stage,
+               (unsigned int)diagnostics.arm_reject_facts);
     rt_kprintf("FPROF,%u,%u,%08x,%08x,%02x,%08x,%08x\n",
                (unsigned int)g_foc_profile_status,
                (unsigned int)g_foc_profile_report.profile_revision,
