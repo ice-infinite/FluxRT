@@ -70,12 +70,17 @@ class AdvancedTrialCaptureTests(unittest.TestCase):
     def test_normal_completion_is_parsed_without_changing_values(self) -> None:
         parsed = capture_tool.parse_completion(
             "FADVP,state=5,result=7,ticks=26/85688,first=85662,"
-            "snap=1,ctrlstate=4,orel=0,closed=0,finish=0"
+            "snap=1,ctrlstate=7,orel=0,closed=1,ogates=3f,"
+            "phase=-751,speed=579,lossus=83,finish=3"
         )
         assert parsed is not None
         self.assertEqual(parsed["result"], "7")
         self.assertEqual(parsed["ticks"], "26/85688")
         self.assertEqual(parsed["orel"], "0")
+        self.assertEqual(parsed["ogates"], "3f")
+        self.assertEqual(parsed["phase"], "-751")
+        self.assertEqual(parsed["speed"], "579")
+        self.assertEqual(parsed["lossus"], "83")
 
     def test_early_start_rejection_is_also_a_completion(self) -> None:
         parsed = capture_tool.parse_completion(

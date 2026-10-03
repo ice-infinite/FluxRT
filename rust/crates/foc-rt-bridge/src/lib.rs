@@ -2694,6 +2694,9 @@ pub unsafe extern "C" fn foc_rust_get_advanced_power_trial_snapshot(
         active_features: controller.advanced_telemetry.active_features,
         status_flags: controller.advanced_telemetry.status_flags,
         observer_reliability_flags: controller.telemetry.observer_reliability_flags,
+        observer_pll_phase_error_rad: controller.telemetry.observer_pll_phase_error_rad,
+        observer_speed_mean_rpm: controller.telemetry.observer_speed_mean_rpm,
+        observer_loss_elapsed_s: controller.telemetry.observer_loss_elapsed_s,
     };
     FocStatus::Ok
 }
@@ -4862,12 +4865,15 @@ mod tests {
                 controller.telemetry.observer_reliable = 1;
                 controller.telemetry.closed_loop_active = 1;
                 controller.telemetry.observer_reliability_flags = 0x5a;
+                controller.telemetry.observer_pll_phase_error_rad = -0.75;
+                controller.telemetry.observer_speed_mean_rpm = 581.5;
+                controller.telemetry.observer_loss_elapsed_s = 0.0125;
             }
             assert_eq!(
                 foc_rust_get_advanced_power_trial_snapshot(&mut context, &mut power_trial_snapshot,),
                 FocStatus::Ok
             );
-            assert_eq!(power_trial_snapshot.struct_size, 32);
+            assert_eq!(power_trial_snapshot.struct_size, 44);
             assert_eq!(
                 power_trial_snapshot.version,
                 FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION
@@ -4878,6 +4884,9 @@ mod tests {
             assert_eq!(power_trial_snapshot.active_features, 0);
             assert_eq!(power_trial_snapshot.status_flags, 0);
             assert_eq!(power_trial_snapshot.observer_reliability_flags, 0x5a);
+            assert_eq!(power_trial_snapshot.observer_pll_phase_error_rad, -0.75);
+            assert_eq!(power_trial_snapshot.observer_speed_mean_rpm, 581.5);
+            assert_eq!(power_trial_snapshot.observer_loss_elapsed_s, 0.0125);
 
             let accepted = advanced;
             advanced.algorithm.enabled_features = foc_control::ADV_FOC_DECOUPLING;

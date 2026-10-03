@@ -1923,7 +1923,8 @@ static int foc_advanced_trial(int argc, char **argv)
             foc_platform_advanced_candidate_power_trial_finish(
                 &g_foc_runtime_config);
         rt_kprintf("FADVP,start=%u,state=%u,result=%u,finish=%u,"
-                   "snap=%u,ctrlstate=%u,orel=%u,closed=%u,ogates=%02x\n",
+                   "snap=%u,ctrlstate=%u,orel=%u,closed=%u,ogates=%02x,"
+                   "phase=%d,speed=%d,lossus=%u\n",
                    (unsigned int)status,
                    (unsigned int)trial.state,
                    (unsigned int)trial.result,
@@ -1934,7 +1935,10 @@ static int foc_advanced_trial(int argc, char **argv)
                    (unsigned int)snapshot.state,
                    (unsigned int)snapshot.observer_reliable,
                    (unsigned int)snapshot.closed_loop_active,
-                   (unsigned int)snapshot.observer_reliability_flags);
+                   (unsigned int)snapshot.observer_reliability_flags,
+                   (int)(snapshot.observer_pll_phase_error_rad * 1000.0f),
+                   (int)snapshot.observer_speed_mean_rpm,
+                   (unsigned int)(snapshot.observer_loss_elapsed_s * 1000000.0f));
         g_foc_management_log_inhibit = 0U;
         return -1;
     }
@@ -1962,6 +1966,7 @@ static int foc_advanced_trial(int argc, char **argv)
     rt_kprintf("FADVP,state=%u,result=%u,ticks=%u/%u,first=%u,"
                "epoch=%u/%u,miss=%u/%u,features=%02x,status=%08x,"
                "snap=%u,ctrlstate=%u,orel=%u,closed=%u,ogates=%02x,"
+               "phase=%d,speed=%d,lossus=%u,"
                "wcet=%u,ctrl=%u,diagmiss=%u,finish=%u\n",
                (unsigned int)trial.state,
                (unsigned int)trial.result,
@@ -1981,6 +1986,9 @@ static int foc_advanced_trial(int argc, char **argv)
                (unsigned int)snapshot.observer_reliable,
                (unsigned int)snapshot.closed_loop_active,
                (unsigned int)snapshot.observer_reliability_flags,
+               (int)(snapshot.observer_pll_phase_error_rad * 1000.0f),
+               (int)snapshot.observer_speed_mean_rpm,
+               (unsigned int)(snapshot.observer_loss_elapsed_s * 1000000.0f),
                (unsigned int)timing.wcet.total_cycles,
                (unsigned int)timing.peak_control_cycles,
                (unsigned int)diagnostics.deadline_miss_count,
