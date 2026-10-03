@@ -3562,7 +3562,8 @@ foc_status_t foc_platform_advanced_candidate_power_trial_start(
 
 foc_status_t foc_platform_advanced_candidate_power_trial_get_status(
     foc_advanced_power_trial_status_t *status,
-    foc_advanced_telemetry_t *telemetry)
+    foc_advanced_telemetry_t *telemetry,
+    foc_advanced_power_trial_snapshot_t *snapshot)
 {
 #if defined(FOC_TARGET_STM32G431) && \
     defined(FLUXRT_DIAGNOSTIC_BUILD) && \
@@ -3570,7 +3571,7 @@ foc_status_t foc_platform_advanced_candidate_power_trial_get_status(
     foc_advanced_power_trial_result_t result;
     uint32_t key;
 
-    if ((status == 0) || (telemetry == 0))
+    if ((status == 0) || (telemetry == 0) || (snapshot == 0))
     {
         return FOC_STATUS_INVALID_ARGUMENT;
     }
@@ -3582,12 +3583,22 @@ foc_status_t foc_platform_advanced_candidate_power_trial_get_status(
     telemetry->abi_version = FOC_ADVANCED_ABI_VERSION;
     telemetry->active_features = status->last_active_features;
     telemetry->status_flags = status->last_advanced_status_flags;
+    *snapshot = g_foc_advanced_shared_status.power_trial_snapshot;
+    if ((snapshot->struct_size != sizeof(*snapshot)) ||
+        (snapshot->version != FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION))
+    {
+        /* A start rejected before the first realtime step has no coherent
+         * controller snapshot.  Publish an explicit invalid/zero record
+         * instead of interpreting whichever union member was active. */
+        (void)memset(snapshot, 0, sizeof(*snapshot));
+    }
     foc_platform_advanced_exit_critical(key);
     return (result == FOC_ADVANCED_POWER_TRIAL_RESULT_OK) ?
         FOC_STATUS_OK : FOC_STATUS_NOT_CONFIGURED;
 #else
     (void)status;
     (void)telemetry;
+    (void)snapshot;
     return FOC_STATUS_NOT_CONFIGURED;
 #endif
 }

@@ -30,7 +30,8 @@ foc_status_t foc_platform_advanced_candidate_power_trial_start(
     const foc_runtime_config_t *active_realtime_config);
 foc_status_t foc_platform_advanced_candidate_power_trial_get_status(
     foc_advanced_power_trial_status_t *status,
-    foc_advanced_telemetry_t *telemetry);
+    foc_advanced_telemetry_t *telemetry,
+    foc_advanced_power_trial_snapshot_t *snapshot);
 foc_status_t foc_platform_advanced_candidate_power_trial_finish(
     const foc_runtime_config_t *restore_realtime_config);
 

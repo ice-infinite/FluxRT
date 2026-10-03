@@ -1864,6 +1864,7 @@ static int foc_advanced_trial(int argc, char **argv)
 {
     foc_advanced_power_trial_status_t trial;
     foc_advanced_telemetry_t advanced;
+    foc_advanced_power_trial_snapshot_t snapshot;
     foc_realtime_timing_stats_t timing;
     foc_platform_diagnostics_t diagnostics;
     foc_status_t status;
@@ -1878,6 +1879,7 @@ static int foc_advanced_trial(int argc, char **argv)
     }
     (void)memset(&trial, 0, sizeof(trial));
     (void)memset(&advanced, 0, sizeof(advanced));
+    (void)memset(&snapshot, 0, sizeof(snapshot));
     g_foc_management_log_inhibit = 1U;
     status = foc_platform_advanced_candidate_power_trial_start(
         FOC_ADVANCED_POWER_TRIAL_MODE_BASIC,
@@ -1885,15 +1887,22 @@ static int foc_advanced_trial(int argc, char **argv)
     if (status != FOC_STATUS_OK)
     {
         (void)foc_platform_advanced_candidate_power_trial_get_status(
-            &trial, &advanced);
+            &trial, &advanced, &snapshot);
         finish_status =
             foc_platform_advanced_candidate_power_trial_finish(
                 &g_foc_runtime_config);
-        rt_kprintf("FADVP,start=%u,state=%u,result=%u,finish=%u\n",
+        rt_kprintf("FADVP,start=%u,state=%u,result=%u,finish=%u,"
+                   "snap=%u,ctrlstate=%u,orel=%u,closed=%u\n",
                    (unsigned int)status,
                    (unsigned int)trial.state,
                    (unsigned int)trial.result,
-                   (unsigned int)finish_status);
+                   (unsigned int)finish_status,
+                   (unsigned int)((snapshot.struct_size == sizeof(snapshot)) &&
+                                  (snapshot.version ==
+                                   FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION)),
+                   (unsigned int)snapshot.state,
+                   (unsigned int)snapshot.observer_reliable,
+                   (unsigned int)snapshot.closed_loop_active);
         g_foc_management_log_inhibit = 0U;
         return -1;
     }
@@ -1903,7 +1912,7 @@ static int foc_advanced_trial(int argc, char **argv)
     {
         rt_thread_mdelay(1);
         status = foc_platform_advanced_candidate_power_trial_get_status(
-            &trial, &advanced);
+            &trial, &advanced, &snapshot);
         if ((status != FOC_STATUS_OK) ||
             (trial.state == FOC_ADVANCED_POWER_TRIAL_COMPLETE) ||
             (trial.state == FOC_ADVANCED_POWER_TRIAL_FAILED) ||
@@ -1920,6 +1929,7 @@ static int foc_advanced_trial(int argc, char **argv)
         &g_foc_runtime_config);
     rt_kprintf("FADVP,state=%u,result=%u,ticks=%u/%u,first=%u,"
                "epoch=%u/%u,miss=%u/%u,features=%02x,status=%08x,"
+               "snap=%u,ctrlstate=%u,orel=%u,closed=%u,"
                "wcet=%u,ctrl=%u,diagmiss=%u,finish=%u\n",
                (unsigned int)trial.state,
                (unsigned int)trial.result,
@@ -1932,6 +1942,12 @@ static int foc_advanced_trial(int argc, char **argv)
                (unsigned int)trial.observed_deadline_miss_count,
                (unsigned int)trial.last_active_features,
                (unsigned int)trial.last_advanced_status_flags,
+               (unsigned int)((snapshot.struct_size == sizeof(snapshot)) &&
+                              (snapshot.version ==
+                               FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION)),
+               (unsigned int)snapshot.state,
+               (unsigned int)snapshot.observer_reliable,
+               (unsigned int)snapshot.closed_loop_active,
                (unsigned int)timing.wcet.total_cycles,
                (unsigned int)timing.peak_control_cycles,
                (unsigned int)diagnostics.deadline_miss_count,

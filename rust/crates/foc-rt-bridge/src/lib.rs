@@ -4855,6 +4855,12 @@ mod tests {
             );
             assert_eq!(advanced_telemetry.struct_size, 68);
             assert_eq!(advanced_telemetry.abi_version, FOC_ADVANCED_ABI_VERSION);
+            {
+                let controller = controller_mut(&mut context).unwrap();
+                controller.telemetry.state = FocState::ClosedLoop as u32;
+                controller.telemetry.observer_reliable = 1;
+                controller.telemetry.closed_loop_active = 1;
+            }
             assert_eq!(
                 foc_rust_get_advanced_power_trial_snapshot(&mut context, &mut power_trial_snapshot,),
                 FocStatus::Ok
@@ -4864,6 +4870,9 @@ mod tests {
                 power_trial_snapshot.version,
                 FOC_ADVANCED_POWER_TRIAL_SNAPSHOT_VERSION
             );
+            assert_eq!(power_trial_snapshot.state, FocState::ClosedLoop as u32);
+            assert_eq!(power_trial_snapshot.observer_reliable, 1);
+            assert_eq!(power_trial_snapshot.closed_loop_active, 1);
             assert_eq!(power_trial_snapshot.active_features, 0);
             assert_eq!(power_trial_snapshot.status_flags, 0);
 
