@@ -149,6 +149,11 @@ static foc_realtime_timing_stats_t g_foc_timing_stats;
  * PA11 is TIM1_BKIN2 / driver protection, active low with a pull-up. */
 #define FOC_DRIVER_PROTECTION_PORT       GPIOA
 #define FOC_DRIVER_PROTECTION_PIN        GPIO_PIN_11
+/* Match the official MCSDK bounded clear budget, but additionally require a
+ * short run of coherent clear/high samples before accepting the history as
+ * stale. This executes only while every physical output is closed. */
+#define FOC_BREAK2_REARM_MAX_ATTEMPTS    (1000UL)
+#define FOC_BREAK2_REARM_STABLE_READS    (8UL)
 #if defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD)
 /*
  * IHM16M1 端电压网络：U/V/W 分别接 PC0/PC3/PC1（ADC12_IN6/9/7）。
@@ -1025,6 +1030,111 @@ static uint32_t foc_platform_driver_faulted(void)
 {
     /* IHM16M1 driver-protection input is active low and has a pull-up. */
     return ((FOC_DRIVER_PROTECTION_PORT->IDR & FOC_DRIVER_PROTECTION_PIN) == 0U) ? 1U : 0U;
+}
+
+/* Re-arm only a historical Break2 latch. A live PA11 fault, BIF, enabled
+ * output, enabled Break IRQ or non-disabled safety state is a hard blocker.
+ * Hardware Break remains enabled in BDTR throughout; the short critical
+ * section only prevents software IRQ delivery while the sticky flag is
+ * cleared and sampled. Any reassertion after this function is caught by the
+ * existing pre/post arm checks and by the asynchronous timer Break action. */
+static uint16_t foc_platform_rearm_break2_before_arm(void)
+{
+    const uint32_t channel_mask = TIM_CCER_CC1E |
+                                  TIM_CCER_CC2E |
+                                  TIM_CCER_CC3E;
+    uint32_t attempts;
+    uint32_t stable_reads = 0U;
+    uint32_t primask;
+    uint16_t facts;
+
+    if ((TIM1->SR & TIM_SR_B2IF) == 0U)
+    {
+        return 0U;
+    }
+
+    facts = FOC_ARM_REJECT_FACT_B2IF |
+        foc_arm_diagnostics_rearm_blockers(
+            TIM1->SR,
+            TIM_SR_BIF,
+            foc_platform_driver_faulted(),
+            (g_foc_power_safety.state == FOC_POWER_SAFETY_DISABLED) ? 1U : 0U,
+            ((TIM1->CCER & channel_mask) == 0U) ? 1U : 0U,
+            ((TIM1->BDTR & TIM_BDTR_MOE) == 0U) ? 1U : 0U,
+            foc_platform_gate_is_low(),
+            ((TIM1->DIER & TIM_DIER_BIE) == 0U) ? 1U : 0U);
+    if (facts != FOC_ARM_REJECT_FACT_B2IF)
+    {
+        return facts;
+    }
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+    facts = FOC_ARM_REJECT_FACT_B2IF |
+        foc_arm_diagnostics_rearm_blockers(
+            TIM1->SR,
+            TIM_SR_BIF,
+            foc_platform_driver_faulted(),
+            (g_foc_power_safety.state == FOC_POWER_SAFETY_DISABLED) ? 1U : 0U,
+            ((TIM1->CCER & channel_mask) == 0U) ? 1U : 0U,
+            ((TIM1->BDTR & TIM_BDTR_MOE) == 0U) ? 1U : 0U,
+            foc_platform_gate_is_low(),
+            ((TIM1->DIER & TIM_DIER_BIE) == 0U) ? 1U : 0U);
+    if (facts == FOC_ARM_REJECT_FACT_B2IF)
+    {
+        for (attempts = 0U;
+             attempts < FOC_BREAK2_REARM_MAX_ATTEMPTS;
+             ++attempts)
+        {
+            if (foc_platform_driver_faulted() != 0U)
+            {
+                facts |= FOC_ARM_REJECT_FACT_DRIVER;
+                break;
+            }
+            /* TIM status flags clear by writing zero to the selected bit and
+             * one to the others; this is the same operation as
+             * LL_TIM_ClearFlag_BRK2(). */
+            TIM1->SR = ~TIM_SR_B2IF;
+            __DSB();
+            if (((TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF)) == 0U) &&
+                (foc_platform_driver_faulted() == 0U))
+            {
+                ++stable_reads;
+                if (stable_reads >= FOC_BREAK2_REARM_STABLE_READS)
+                {
+                    facts |= FOC_ARM_REJECT_FACT_B2IF_REARMED;
+                    break;
+                }
+            }
+            else
+            {
+                stable_reads = 0U;
+            }
+        }
+    }
+    {
+        uint16_t final_blockers = foc_arm_diagnostics_rearm_blockers(
+            TIM1->SR,
+            TIM_SR_BIF,
+            foc_platform_driver_faulted(),
+            (g_foc_power_safety.state == FOC_POWER_SAFETY_DISABLED) ? 1U : 0U,
+            ((TIM1->CCER & channel_mask) == 0U) ? 1U : 0U,
+            ((TIM1->BDTR & TIM_BDTR_MOE) == 0U) ? 1U : 0U,
+            foc_platform_gate_is_low(),
+            ((TIM1->DIER & TIM_DIER_BIE) == 0U) ? 1U : 0U);
+
+        facts |= final_blockers;
+        if ((final_blockers != 0U) ||
+            ((TIM1->SR & TIM_SR_B2IF) != 0U))
+        {
+            facts &= (uint16_t)~FOC_ARM_REJECT_FACT_B2IF_REARMED;
+        }
+    }
+    if (primask == 0U)
+    {
+        __enable_irq();
+    }
+    return facts;
 }
 
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
@@ -3440,6 +3550,72 @@ foc_status_t foc_platform_advanced_candidate_probe_finish(void)
 #endif
 }
 
+foc_status_t foc_platform_advanced_candidate_break2_rearm_test(
+    uint16_t *before_flags,
+    uint16_t *rearm_facts,
+    uint16_t *after_flags)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    const uint32_t channel_mask = TIM_CCER_CC1E |
+                                  TIM_CCER_CC2E |
+                                  TIM_CCER_CC3E;
+    uint16_t facts;
+
+    if ((before_flags == 0) || (rearm_facts == 0) || (after_flags == 0))
+    {
+        return FOC_STATUS_INVALID_ARGUMENT;
+    }
+    *before_flags = 0U;
+    *rearm_facts = 0U;
+    *after_flags = 0U;
+    if ((g_foc_controller == 0) ||
+        (g_foc_control_armed != 0U) ||
+        (g_foc_advanced_probe_active != 0U) ||
+        (g_foc_power_safety.state != FOC_POWER_SAFETY_DISABLED) ||
+        (g_foc_diagnostics.bus_voltage_raw >= g_foc_bus_min_raw))
+    {
+        return FOC_STATUS_DISABLED;
+    }
+
+    foc_platform_disable_power_fast();
+    TIM1->DIER &= ~TIM_DIER_BIE;
+    if (((TIM1->CCER & channel_mask) != 0U) ||
+        ((TIM1->BDTR & TIM_BDTR_MOE) != 0U) ||
+        (foc_platform_gate_is_low() == 0U) ||
+        (foc_platform_driver_faulted() != 0U))
+    {
+        return FOC_STATUS_HARDWARE_FAULT;
+    }
+
+    TIM1->EGR = TIM_EGR_B2G;
+    __DSB();
+    *before_flags = (uint16_t)(TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF));
+    facts = foc_platform_rearm_break2_before_arm();
+    *rearm_facts = facts;
+    *after_flags = (uint16_t)(TIM1->SR & (TIM_SR_BIF | TIM_SR_B2IF));
+    g_foc_diagnostics.arm_reject_stage =
+        FOC_ARM_REJECT_STAGE_PRE_ENABLE;
+    g_foc_diagnostics.arm_reject_facts = facts;
+    if (((*before_flags & (uint16_t)TIM_SR_B2IF) == 0U) ||
+        (facts != (FOC_ARM_REJECT_FACT_B2IF |
+                   FOC_ARM_REJECT_FACT_B2IF_REARMED)) ||
+        (*after_flags != 0U))
+    {
+        foc_platform_latch_fault_fast(FOC_POWER_FAULT_BREAK,
+                                      FOC_RUST_FAULT_PLATFORM_INPUT);
+        return FOC_STATUS_HARDWARE_FAULT;
+    }
+    return FOC_STATUS_OK;
+#else
+    (void)before_flags;
+    (void)rearm_facts;
+    (void)after_flags;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
 foc_status_t foc_platform_advanced_candidate_power_trial_start(
     foc_advanced_power_trial_mode_t mode,
     const foc_runtime_config_t *active_realtime_config)
@@ -4952,6 +5128,30 @@ static foc_status_t foc_platform_control_start_internal(
         (g_foc_diagnostics.bus_voltage_raw > bus_max_raw))
     {
         return FOC_STATUS_NOT_CONFIGURED;
+    }
+    arm_reject_facts = foc_platform_rearm_break2_before_arm();
+    if ((arm_reject_facts != 0U) &&
+        ((arm_reject_facts & FOC_ARM_REJECT_FACT_B2IF_REARMED) == 0U))
+    {
+        g_foc_diagnostics.arm_reject_stage =
+            FOC_ARM_REJECT_STAGE_PRE_ENABLE;
+        g_foc_diagnostics.arm_reject_facts = arm_reject_facts;
+        foc_platform_latch_fault_fast(
+            ((arm_reject_facts & (FOC_ARM_REJECT_FACT_BIF |
+                                  FOC_ARM_REJECT_FACT_B2IF)) != 0U) ?
+                FOC_POWER_FAULT_BREAK : FOC_POWER_FAULT_PLATFORM,
+            FOC_RUST_FAULT_PLATFORM_INPUT);
+        foc_platform_mirror_pending_rust_fault();
+        foc_platform_refresh_safety_flags();
+        return FOC_STATUS_HARDWARE_FAULT;
+    }
+    if ((arm_reject_facts & FOC_ARM_REJECT_FACT_B2IF_REARMED) != 0U)
+    {
+        /* Preserve evidence that a historical, inactive B2IF was re-armed.
+         * Later pre/post failures overwrite this with the rejecting fact set. */
+        g_foc_diagnostics.arm_reject_stage =
+            FOC_ARM_REJECT_STAGE_PRE_ENABLE;
+        g_foc_diagnostics.arm_reject_facts = arm_reject_facts;
     }
     if (foc_power_safety_begin_arm(&g_foc_power_safety, &arm_token) == 0U)
     {

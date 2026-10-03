@@ -1856,6 +1856,35 @@ static int foc_advanced_wcet(int argc, char **argv)
 }
 MSH_CMD_EXPORT(foc_advanced_wcet, -);
 
+/* foc_arm_rearm_test
+ *
+ * No-power S4 proof for the exact register path used by pre-arm Break2
+ * recovery. The platform refuses this command once Vbus reaches the motor
+ * operating window and keeps Gate/MOE/CH1..3 closed throughout. */
+static int foc_arm_rearm_test(int argc, char **argv)
+{
+    uint16_t before_flags = 0U;
+    uint16_t rearm_facts = 0U;
+    uint16_t after_flags = 0U;
+    foc_status_t status;
+
+    (void)argv;
+    if (argc != 1)
+    {
+        rt_kprintf("foc_arm_rearm_test\n");
+        return -1;
+    }
+    status = foc_platform_advanced_candidate_break2_rearm_test(
+        &before_flags, &rearm_facts, &after_flags);
+    rt_kprintf("FARMR,%u,%04x,%04x,%04x\n",
+               (unsigned int)status,
+               (unsigned int)before_flags,
+               (unsigned int)rearm_facts,
+               (unsigned int)after_flags);
+    return (status == FOC_STATUS_OK) ? 0 : -1;
+}
+MSH_CMD_EXPORT(foc_arm_rearm_test, -);
+
 /* foc_advanced_trial P54-BASIC-100MS
  *
  * The first P5.4 powered gate exposes one exact token and only the feature=0

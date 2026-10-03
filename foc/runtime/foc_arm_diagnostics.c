@@ -38,6 +38,49 @@ static uint16_t foc_arm_diagnostics_common_facts(
     return facts;
 }
 
+uint16_t foc_arm_diagnostics_rearm_blockers(
+    uint32_t timer_status,
+    uint32_t break1_mask,
+    uint32_t driver_faulted,
+    uint32_t safety_disabled,
+    uint32_t phase_channels_disabled,
+    uint32_t moe_disabled,
+    uint32_t gate_low,
+    uint32_t break_irq_disabled)
+{
+    uint16_t facts = 0U;
+
+    if ((timer_status & break1_mask) != 0U)
+    {
+        facts |= FOC_ARM_REJECT_FACT_BIF;
+    }
+    if (driver_faulted != 0U)
+    {
+        facts |= FOC_ARM_REJECT_FACT_DRIVER;
+    }
+    if (safety_disabled == 0U)
+    {
+        facts |= FOC_ARM_REJECT_FACT_SAFETY_STATE;
+    }
+    if (phase_channels_disabled == 0U)
+    {
+        facts |= FOC_ARM_REJECT_FACT_CHANNELS;
+    }
+    if (moe_disabled == 0U)
+    {
+        facts |= FOC_ARM_REJECT_FACT_MOE;
+    }
+    if (gate_low == 0U)
+    {
+        facts |= FOC_ARM_REJECT_FACT_GATE;
+    }
+    if (break_irq_disabled == 0U)
+    {
+        facts |= FOC_ARM_REJECT_FACT_BREAK_IRQ;
+    }
+    return facts;
+}
+
 uint16_t foc_arm_diagnostics_pre_facts(
     uint32_t timer_status,
     uint32_t break1_mask,

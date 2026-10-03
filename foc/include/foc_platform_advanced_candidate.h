@@ -21,6 +21,13 @@ foc_status_t foc_platform_advanced_candidate_probe_get_status(
     foc_advanced_telemetry_t *telemetry);
 foc_status_t foc_platform_advanced_candidate_probe_finish(void);
 
+/* No-power S4 register-path proof. Generates a software Break2 event with all
+ * outputs closed, then exercises the same bounded re-arm used by motor start. */
+foc_status_t foc_platform_advanced_candidate_break2_rearm_test(
+    uint16_t *before_flags,
+    uint16_t *rearm_facts,
+    uint16_t *after_flags);
+
 /* P5.4A fixed-envelope powered trial.  The caller selects only the audited
  * Basic/decoupling mode; target speed and the 100 ms active window are compile-
  * time constants owned by foc_advanced_power_trial.  Generic foc_start is

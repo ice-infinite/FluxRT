@@ -2,7 +2,7 @@
 #define FOC_ARM_DIAGNOSTICS_H
 
 /*
- * Arm transaction reject evidence.
+ * Arm transaction evidence.
  *
  * This module is deliberately register-agnostic: the STM32 platform captures
  * one coherent register fact set and this helper encodes it into a stable
@@ -32,7 +32,24 @@ enum
     FOC_ARM_REJECT_FACT_MOE = (1U << 7),
     FOC_ARM_REJECT_FACT_GATE = (1U << 8),
     FOC_ARM_REJECT_FACT_COMMIT = (1U << 9),
+    FOC_ARM_REJECT_FACT_BREAK_IRQ = (1U << 10),
+    /* A stale B2IF was cleared only after every output/live-input guard passed.
+     * This is evidence, not a fault bit. */
+    FOC_ARM_REJECT_FACT_B2IF_REARMED = (1U << 11),
 };
+
+/* Return blockers for clearing a historical B2IF while every output remains
+ * closed. B2IF itself is intentionally not a blocker; BIF is never cleared by
+ * this recovery path. */
+uint16_t foc_arm_diagnostics_rearm_blockers(
+    uint32_t timer_status,
+    uint32_t break1_mask,
+    uint32_t driver_faulted,
+    uint32_t safety_disabled,
+    uint32_t phase_channels_disabled,
+    uint32_t moe_disabled,
+    uint32_t gate_low,
+    uint32_t break_irq_disabled);
 
 uint16_t foc_arm_diagnostics_pre_facts(
     uint32_t timer_status,
