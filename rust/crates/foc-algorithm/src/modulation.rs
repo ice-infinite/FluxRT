@@ -319,18 +319,35 @@ pub enum DpwmMode {
 /// DPWM 参数。
 /// DPWM parameters.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DpwmParam {
     /// 母线电压 `[V]`，语义与 `SvpwmParam::v_bus` 相同；`<= 0` 时返回 0.5/0.5/0.5。
     /// DC-link voltage in `[V]` with the same meaning as `SvpwmParam::v_bus`; `<= 0`
     /// returns 0.5/0.5/0.5.
     pub v_bus: f32,
+    /// 允许的最小/最大占空比。目标板可用它保留自举充电与最小脉宽；纯算法默认
+    /// 仍是完整的 `[0,1]` 母线轨。
+    /// Allowed duty window. Targets use it to preserve bootstrap/minimum-pulse
+    /// margins; the algorithm-only default remains the full `[0,1]` rails.
+    pub minimum_duty: f32,
+    pub maximum_duty: f32,
     /// 钳位侧选择。运行中切换会让钳位相跳变一次，建议在低速或零电压矢量附近切换，
     /// 并重核电流采样窗口。
     /// Chooses the clamped side. Switching it while running steps the clamped phase once,
     /// so prefer to switch at low speed or near a zero-voltage vector, and re-check the
     /// current-sampling window.
     pub mode: DpwmMode,
+}
+
+impl Default for DpwmParam {
+    fn default() -> Self {
+        Self {
+            v_bus: 0.0,
+            minimum_duty: 0.0,
+            maximum_duty: 1.0,
+            mode: DpwmMode::ClampMax,
+        }
+    }
 }
 
 /// DPWM 输出：三相 duty 与本拍注入的零序量。
@@ -410,7 +427,13 @@ pub fn dpwm_update(v_alpha_beta: AlphaBeta, param: &DpwmParam) -> DpwmOutput {
     // 与 SVPWM 相同的防御：母线电压非法时输出零电压矢量，不产生 NaN/Inf duty。
     // Same guard as SVPWM: an invalid DC link yields a zero-voltage vector instead of
     // NaN/Inf duties.
-    if param.v_bus <= 0.0 {
+    if param.v_bus <= 0.0
+        || !param.minimum_duty.is_finite()
+        || !param.maximum_duty.is_finite()
+        || param.minimum_duty < 0.0
+        || param.maximum_duty > 1.0
+        || param.maximum_duty <= param.minimum_duty
+    {
         return DpwmOutput::default();
     }
     // 幅值不变逆 Clarke：αβ 电压 `[V]` → 三相相电压 `[V]`。
@@ -433,16 +456,16 @@ pub fn dpwm_update(v_alpha_beta: AlphaBeta, param: &DpwmParam) -> DpwmOutput {
     // onto 1 (`ClampMax`); both move the common mode only and leave the line voltages
     // unchanged.
     let zero = match param.mode {
-        DpwmMode::ClampMin => -d_min,
-        DpwmMode::ClampMax => 1.0 - d_max,
+        DpwmMode::ClampMin => param.minimum_duty - d_min,
+        DpwmMode::ClampMax => param.maximum_duty - d_max,
     };
     // 钳位后仍可能有浮点舍入或过调制造成的轻微越界，平台层写 CCR 前会再检查一遍。
     // After clamping, rounding or over-modulation can still leave a tiny excursion, which
     // the platform re-checks before writing the compare registers.
     DpwmOutput {
-        duty_a: clamp(d0_a + zero, 0.0, 1.0),
-        duty_b: clamp(d0_b + zero, 0.0, 1.0),
-        duty_c: clamp(d0_c + zero, 0.0, 1.0),
+        duty_a: clamp(d0_a + zero, param.minimum_duty, param.maximum_duty),
+        duty_b: clamp(d0_b + zero, param.minimum_duty, param.maximum_duty),
+        duty_c: clamp(d0_c + zero, param.minimum_duty, param.maximum_duty),
         zero_sequence: zero,
     }
 }
@@ -543,6 +566,7 @@ mod tests {
         let mut p = DpwmParam {
             v_bus: 24.0,
             mode: DpwmMode::ClampMax,
+            ..DpwmParam::default()
         };
         let max = dpwm_update(voltage, &p);
         assert!((max.duty_a - 1.0).abs() <= 1e-6);
@@ -553,5 +577,17 @@ mod tests {
         let min = dpwm_update(voltage, &p);
         assert!((min.duty_b - 0.0).abs() <= 1e-6);
         assert!((min.duty_c - 0.0).abs() <= 1e-6);
+
+        p.minimum_duty = 0.03;
+        p.maximum_duty = 0.97;
+        p.mode = DpwmMode::ClampMax;
+        let bounded_max = dpwm_update(voltage, &p);
+        assert!((bounded_max.duty_a - 0.97).abs() <= 1e-6);
+        assert!(bounded_max.duty_b >= 0.03 && bounded_max.duty_c >= 0.03);
+        p.mode = DpwmMode::ClampMin;
+        let bounded_min = dpwm_update(voltage, &p);
+        assert!((bounded_min.duty_b - 0.03).abs() <= 1e-6);
+        assert!((bounded_min.duty_c - 0.03).abs() <= 1e-6);
+        assert!(bounded_min.duty_a <= 0.97);
     }
 }

@@ -300,11 +300,13 @@ impl MtpvState {
     /// torque rather than reuse the previous result. This is a deliberate, documented behavioural
     /// difference, not a defect.
     ///
-    /// WCET：循环 `search_steps + 1` 次、每次一次 `libm::sqrtf`；`search_steps` 未设上界时（例如
-    /// `i32::MAX`）会退化成超长循环，产品必须限制该参数并实测 WCET 后才能放进 12 kHz 快环。
-    /// WCET: the loop runs `search_steps + 1` times with one `libm::sqrtf` each; an unbounded
-    /// `search_steps` (for example `i32::MAX`) degenerates into a very long loop, so a product must
-    /// bound this parameter and measure the WCET before using it in the 12 kHz loop.
+    /// WCET：循环 `search_steps + 1` 次；内部候选点计算电流圆和电压幅值各一次
+    /// `sqrtf`，两个解析端点只计算电压幅值。`search_steps` 未设上界时（例如
+    /// `i32::MAX`）仍会退化成超长循环，产品必须限制参数并实测 WCET。
+    /// WCET: the loop runs `search_steps + 1` times. Interior candidates evaluate
+    /// one current-circle and one voltage-magnitude `sqrtf`; the two analytic
+    /// endpoints evaluate only the latter. Products must still bound and measure
+    /// `search_steps`.
     pub fn update(&mut self, param: &MtpvParam, omega_e_rad_s: f32, iq_sign: f32) -> Dq {
         let current_limit = param.current_limit.abs();
         let omega_abs = omega_e_rad_s.abs();
@@ -335,7 +337,17 @@ impl MtpvState {
             // iq 由电流圆反解，`.max(0.0)` 的作用与 MTPA 相同：吸收 ratio = 1 时的极小负值。
             // iq is back-solved from the current circle; `.max(0.0)` has the same purpose as in
             // MTPA, absorbing the tiny negative value possible at ratio = 1.
-            let iq = sign * libm::sqrtf((current_limit * current_limit - id * id).max(0.0));
+            /* The current-circle endpoints are exact: i=0 has |Iq|=I and
+             * i=steps has Iq=0.  Avoiding sqrtf there preserves every candidate
+             * and comparison while removing two expensive calls per sweep. */
+            let iq_magnitude = if i == 0 {
+                current_limit
+            } else if i == steps {
+                0.0
+            } else {
+                libm::sqrtf((current_limit * current_limit - id * id).max(0.0))
+            };
+            let iq = sign * iq_magnitude;
             // 稳态电压（忽略 R）：vd 来自 q 轴电流与 lq 的交叉耦合，vq 来自 d 轴磁链，
             // 两者都是 `[V]`。
             // Steady-state voltage with R neglected: vd comes from the cross-coupling of the q-axis

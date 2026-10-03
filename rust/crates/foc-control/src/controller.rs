@@ -95,6 +95,11 @@ pub struct CurrentLoopPolicy {
     /// Zero selects `params.voltage_utilization * Vbus / sqrt(3)`.
     pub voltage_limit_v: f32,
     pub modulation: CurrentLoopModulation,
+    /// Target-safe duty window.  `(0,0)` is the legacy/default sentinel and
+    /// resolves to the full `[0,1]` range, so Basic FOC remains bit-for-bit
+    /// unchanged until an advanced target configuration supplies a window.
+    pub minimum_duty: f32,
+    pub maximum_duty: f32,
     /// Back-calculate both PI integrators after vector-circle saturation.
     pub vector_anti_windup: bool,
 }
@@ -367,18 +372,12 @@ impl CurrentLoop {
             if policy.vector_anti_windup {
                 let tracked_id_pi = voltage_dq.d - policy.voltage_feedforward_dq.d;
                 let tracked_iq_pi = voltage_dq.q - policy.voltage_feedforward_dq.q;
-                let _ = self.id_pi.preload_output(
-                    &params.id_pi,
-                    reference.id_ref_a,
-                    current_dq.d,
-                    tracked_id_pi,
-                );
-                let _ = self.iq_pi.preload_output(
-                    &params.iq_pi,
-                    reference.iq_ref_a,
-                    current_dq.q,
-                    tracked_iq_pi,
-                );
+                let _ = self
+                    .id_pi
+                    .track_output_from_last_error(&params.id_pi, tracked_id_pi);
+                let _ = self
+                    .iq_pi
+                    .track_output_from_last_error(&params.iq_pi, tracked_iq_pi);
             }
         }
         let (reverse_park_sin, reverse_park_cos) = shifted_sin_cos(
@@ -406,6 +405,16 @@ impl CurrentLoop {
             voltage_alpha_beta.alpha *= scale;
             voltage_alpha_beta.beta *= scale;
         }
+        let duty_window_valid = policy.minimum_duty.is_finite()
+            && policy.maximum_duty.is_finite()
+            && policy.minimum_duty >= 0.0
+            && policy.maximum_duty <= 1.0
+            && policy.maximum_duty > policy.minimum_duty;
+        let (minimum_duty, maximum_duty) = if duty_window_valid {
+            (policy.minimum_duty, policy.maximum_duty)
+        } else {
+            (0.0, 1.0)
+        };
         let pwm = match policy.modulation {
             CurrentLoopModulation::Svpwm => {
                 let output = svpwm_update(
@@ -425,6 +434,8 @@ impl CurrentLoop {
                     voltage_alpha_beta,
                     &DpwmParam {
                         v_bus: feedback.dc_bus_voltage,
+                        minimum_duty,
+                        maximum_duty,
                         mode: if policy.modulation == CurrentLoopModulation::DpwmClampMin {
                             DpwmMode::ClampMin
                         } else {
@@ -438,6 +449,24 @@ impl CurrentLoop {
                     duty_c: output.duty_c,
                 }
             }
+        };
+        /* Preserve NaN for the bridge's fail-closed validity check; only finite
+         * excursions are clipped to the target's validated minimum-pulse
+         * window.  This is required by both DPWM rail parking and intentional
+         * overmodulation. */
+        let clamp_duty = |value: f32| {
+            if value < minimum_duty {
+                minimum_duty
+            } else if value > maximum_duty {
+                maximum_duty
+            } else {
+                value
+            }
+        };
+        let pwm = PwmCommand {
+            duty_a: clamp_duty(pwm.duty_a),
+            duty_b: clamp_duty(pwm.duty_b),
+            duty_c: clamp_duty(pwm.duty_c),
         };
         (
             pwm,
@@ -981,6 +1010,8 @@ mod tests {
             },
             voltage_limit_v: 5.0,
             modulation: CurrentLoopModulation::Svpwm,
+            minimum_duty: 0.0,
+            maximum_duty: 0.0,
             vector_anti_windup: true,
         };
         let mut loop_ = CurrentLoop::default();
@@ -1038,6 +1069,49 @@ mod tests {
             );
             assert!(pwm.is_valid());
             assert!(pwm.duty_a == rail || pwm.duty_b == rail || pwm.duty_c == rail);
+        }
+    }
+
+    #[test]
+    fn advanced_duty_window_bounds_dpwm_and_overmodulated_svpwm() {
+        let params = st_gbm2804_reference_parameters();
+        let feedback = FeedbackSnapshot {
+            currents: PhaseCurrents::default(),
+            dc_bus_voltage: 24.0,
+            rotor: RotorFeedback::default(),
+        };
+        let frame = PrecomputedCurrentFrame {
+            current_dq: Dq::default(),
+            base_sin: 0.0,
+            base_cos: 1.0,
+        };
+        for modulation in [
+            CurrentLoopModulation::DpwmClampMax,
+            CurrentLoopModulation::Svpwm,
+        ] {
+            let mut loop_ = CurrentLoop::default();
+            let (pwm, _) = loop_.update_from_precomputed_current_frame_with_policy_and_math(
+                &params,
+                &feedback,
+                CurrentCommand::default(),
+                ControlAngleOffsets::default(),
+                frame,
+                CurrentLoopPolicy {
+                    injection_voltage_alpha_beta: AlphaBeta {
+                        alpha: 20.0,
+                        beta: -12.0,
+                    },
+                    voltage_limit_v: 20.0,
+                    modulation,
+                    minimum_duty: 0.03,
+                    maximum_duty: 0.97,
+                    ..CurrentLoopPolicy::default()
+                },
+                &mut CpuMath,
+            );
+            for duty in [pwm.duty_a, pwm.duty_b, pwm.duty_c] {
+                assert!((0.03..=0.97).contains(&duty));
+            }
         }
     }
 

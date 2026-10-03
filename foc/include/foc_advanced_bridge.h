@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define FOC_ADVANCED_ABI_VERSION       (0x00010000UL)
+#define FOC_ADVANCED_ABI_VERSION       (0x00020000UL)
 #define FOC_ADVANCED_CONFIG_VERSION    (1UL)
 #define FOC_ADVANCED_PROBE_INPUT_VERSION (1UL)
 
@@ -106,7 +106,8 @@ typedef struct
     uint32_t struct_size;
     uint32_t abi_version;
     uint32_t platform_capabilities;
-    uint32_t reserved;
+    float minimum_duty;
+    float maximum_duty;
     foc_advanced_algorithm_config_t algorithm;
 } foc_advanced_runtime_config_t;
 
@@ -172,7 +173,7 @@ foc_status_t foc_rust_realtime_step_advanced_no_power(
 
 _Static_assert(sizeof(foc_advanced_algorithm_config_t) == 128U,
                "advanced algorithm config ABI size mismatch");
-_Static_assert(sizeof(foc_advanced_runtime_config_t) == 144U,
+_Static_assert(sizeof(foc_advanced_runtime_config_t) == 148U,
                "advanced runtime config ABI size mismatch");
 _Static_assert(sizeof(foc_advanced_probe_input_t) == 44U,
                "advanced probe input ABI size mismatch");

@@ -564,6 +564,7 @@ int main(void)
      * could touch hardware must answer NOT_CONFIGURED. */
     foc_platform_emergency_stop();
     assert(foc_platform_init() == FOC_STATUS_NOT_CONFIGURED);
+    assert(foc_platform_realtime_work_active() == 0U);
     /* P4.2E1 is a Diagnostic target-only candidate.  A host/default build must
      * expose deterministic fail-closed stubs and can never make the runtime
      * route appear enabled. */

@@ -400,6 +400,10 @@ foc_status_t foc_platform_read_feedback(foc_feedback_t *feedback);
 foc_status_t foc_platform_apply_output(const foc_output_t *output);
 foc_status_t foc_platform_get_diagnostics(foc_platform_diagnostics_t *diagnostics);
 foc_status_t foc_platform_get_telemetry(foc_telemetry_t *telemetry);
+/* Non-zero while the ADC ISR owns a production control transaction or a
+ * target-side realtime probe. Management code must not start console/logging
+ * traffic in that window because some board UART backends briefly mask IRQs. */
+uint32_t foc_platform_realtime_work_active(void);
 /* 复制同拍时序统计。与诊断里的三个独立峰值不同，这里的 total 与三个分段
  * 来自同一拍，可以互相比较。
  * Copies the same-tick timing statistics. Unlike the three independent peaks in

@@ -15,7 +15,7 @@ use foc_control::{
     ADV_FOC_OVERMODULATION,
 };
 
-pub const FOC_ADVANCED_ABI_VERSION: u32 = 0x0001_0000;
+pub const FOC_ADVANCED_ABI_VERSION: u32 = 0x0002_0000;
 pub const FOC_ADVANCED_PROBE_INPUT_VERSION: u32 = 1;
 
 /// Hardware-coupled features require an independently proven platform
@@ -81,7 +81,10 @@ pub struct FocAdvancedRuntimeConfig {
     pub struct_size: u32,
     pub abi_version: u32,
     pub platform_capabilities: u32,
-    pub reserved: u32,
+    /// Platform-validated output window.  It is kept outside the pure
+    /// supervisor configuration because it belongs to the PWM/power adapter.
+    pub minimum_duty: f32,
+    pub maximum_duty: f32,
     pub algorithm: AdvancedFocConfig,
 }
 
@@ -156,7 +159,8 @@ impl Default for FocAdvancedRuntimeConfig {
             struct_size: size_of::<Self>() as u32,
             abi_version: FOC_ADVANCED_ABI_VERSION,
             platform_capabilities: 0,
-            reserved: 0,
+            minimum_duty: 0.0,
+            maximum_duty: 1.0,
             algorithm: AdvancedFocConfig::default(),
         }
     }
@@ -170,9 +174,17 @@ impl FocAdvancedRuntimeConfig {
     ) -> u32 {
         if self.struct_size != size_of::<Self>() as u32
             || self.abi_version != FOC_ADVANCED_ABI_VERSION
-            || self.reserved != 0
         {
             return FOC_ADVANCED_REASON_CONFIG_IDENTITY;
+        }
+        if !self.minimum_duty.is_finite()
+            || !self.maximum_duty.is_finite()
+            || self.minimum_duty < 0.0
+            || self.maximum_duty > 1.0
+            || self.minimum_duty >= 0.5
+            || self.maximum_duty <= 0.5
+        {
+            return FOC_ADVANCED_REASON_CONFIG_INVALID;
         }
         if self.platform_capabilities & !FOC_ADVANCED_CAPABILITY_KNOWN_MASK != 0
             || self.algorithm.enabled_features & !ADV_FOC_KNOWN_MASK != 0
@@ -365,7 +377,7 @@ pub(crate) fn default_advanced_runtime_config(
 }
 
 const _: () = assert!(size_of::<AdvancedFocConfig>() == 128);
-const _: () = assert!(size_of::<FocAdvancedRuntimeConfig>() == 144);
+const _: () = assert!(size_of::<FocAdvancedRuntimeConfig>() == 148);
 const _: () = assert!(size_of::<FocAdvancedTelemetry>() == 68);
 const _: () = assert!(size_of::<FocAdvancedProbeInput>() == 44);
 
@@ -391,6 +403,11 @@ mod tests {
         assert_eq!(
             config.validation_failure_reason(&params.motor, params.pwm_frequency_hz),
             0
+        );
+        config.minimum_duty = 0.5;
+        assert_eq!(
+            config.validation_failure_reason(&params.motor, params.pwm_frequency_hz),
+            FOC_ADVANCED_REASON_CONFIG_INVALID
         );
     }
 

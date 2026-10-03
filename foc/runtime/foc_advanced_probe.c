@@ -144,8 +144,13 @@ foc_advanced_probe_result_t foc_advanced_probe_complete_commit(
     {
         return FOC_ADVANCED_PROBE_RESULT_INVALID_ARGUMENT;
     }
+    /* `before` is the exact snapshot accepted by complete_control()
+     * immediately before the CCR write.  Re-evaluating all of its safety bits
+     * here duplicated the same gate without covering another instant.  Require
+     * that stage's OK status, retain its epoch identity, and evaluate the new
+     * post-CCR snapshot in full. */
     if ((probe->state != FOC_ADVANCED_PROBE_RUNNING) ||
-        (foc_advanced_probe_registers_are_safe_off(before) == 0U) ||
+        (probe->last_control_status != FOC_STATUS_OK) ||
         (foc_advanced_probe_registers_are_safe_off(after) == 0U))
     {
         ++probe->rejected_tick_count;

@@ -117,7 +117,9 @@ use foc_control::{
     SpeedCommand, SpeedLoop, PRODUCT_CONTRACT_VERSION,
 };
 #[cfg(feature = "advanced-foc")]
-use foc_control::{AdvancedFocInput, AdvancedFocSupervisor, CurrentLoopPolicy};
+use foc_control::{
+    AdvancedFocInput, AdvancedFocSupervisor, AdvancedModulationMode, CurrentLoopPolicy,
+};
 
 /// ABI 版本：主版本占高 16 位，`0x0015_0000` 表示第 21 代；必须与 C 侧宏逐位
 /// 一致，否则 `main.c` 启动自检会拒绝运行。
@@ -3521,6 +3523,7 @@ unsafe fn foc_rust_realtime_step_core(
             controller.observer_hold_recovery_countdown -= 1;
         }
     }
+    let mut observer_seeded_this_tick = false;
     if observer_enabled && observer_active_phase && !controller.observer_acquisition_prepared {
         // 上一拍已经由 startup 把状态推进到 OpenLoopRamp；此时 telemetry 中保存的
         // forced angle 是对齐结束边界的已知角度。必须在第一次 update 前用同拍实测
@@ -3533,6 +3536,7 @@ unsafe fn foc_rust_realtime_step_core(
             current_alpha_beta,
         );
         controller.observer_acquisition_prepared = true;
+        observer_seeded_this_tick = true;
         // Keep the ramp-trained observer alive for one full retry interval before
         // forcing a clean high-speed acquisition. With the old immediate reset the
         // useful phase/variance state collected during Rev-Up was always discarded at
@@ -3896,8 +3900,10 @@ unsafe fn foc_rust_realtime_step_core(
         startup.current_reference
     };
 
-    // The observer or motion outer loop may own one scheduled slot while the
-    // power stage holds the last valid PWM command for that carrier period.
+    // The alignment-boundary observer seed/update, a divided observer update,
+    // or the motion outer loop may own one scheduled slot while the power stage
+    // holds the last valid PWM command for that carrier period.  The boundary
+    // slot avoids stacking seed + SMO/PLL + advanced policy + current loop.
     // Motion always uses this deterministic 1-in-N slot: its new Id/Iq reference
     // enters the current loop on the next 12 kHz tick, avoiding an outer-loop +
     // inverse-Park/SVPWM WCET spike for 83.3 us of bounded reference latency.
@@ -3913,13 +3919,16 @@ unsafe fn foc_rust_realtime_step_core(
     // previous values while the observer fields are refreshed; the snapshot is
     // therefore mixed-age by field.
     //
-    // 观测器分频为 1 时不会因 observer 单独保持；motion 外环到期仍固定保持一拍。
-    // With observer divider 1 only a due motion outer-loop tick takes the hold slot.
+    // 观测器分频为 1 时只有 alignment 边界首拍会保持；motion 外环到期仍固定保持一拍。
+    // With observer divider 1, only the alignment-boundary seed tick is held;
+    // a due motion outer-loop tick also always takes the hold slot.
     #[cfg(feature = "motion-control")]
     let motion_outer_slot = precomputed_current_frame.is_some();
     #[cfg(not(feature = "motion-control"))]
     let motion_outer_slot = false;
-    if (observer_due && controller.runtime_config.observer_update_divider > 1) || motion_outer_slot
+    if (observer_seeded_this_tick && controller.state == FocState::OpenLoopRamp)
+        || (observer_due && controller.runtime_config.observer_update_divider > 1)
+        || motion_outer_slot
     {
         let pwm = controller.previous_pwm;
         output.duty_a = pwm.duty_a;
@@ -3961,6 +3970,11 @@ unsafe fn foc_rust_realtime_step_core(
     // in this target ABI; those features are rejected during target configure
     // until an explicit per-tick request path exists.
     #[cfg(feature = "advanced-foc")]
+    let advanced_first_decision = controller.advanced_config.algorithm.enabled_features != 0
+        && controller.advanced_telemetry.status_flags == 0;
+    #[cfg(feature = "advanced-foc")]
+    let mut advanced_region_slot = false;
+    #[cfg(feature = "advanced-foc")]
     let advanced_policy: Option<CurrentLoopPolicy> =
         if controller.advanced_config.algorithm.enabled_features != 0 {
             if !observer_reliable {
@@ -3988,20 +4002,34 @@ unsafe fn foc_rust_realtime_step_core(
                     &mut math,
                 );
                 precomputed_current_frame = Some(frame);
+                let previous_voltage_dq = reference_mode.advanced_probe_input().map_or(
+                    foc_algorithm::Dq {
+                        d: controller.telemetry.vd_command_v,
+                        q: controller.telemetry.vq_command_v,
+                    },
+                    |probe| foc_algorithm::Dq {
+                        d: probe.previous_vd_command_v,
+                        q: probe.previous_vq_command_v,
+                    },
+                );
+                /* The realtime ABI has already checked every external value
+                 * below, and CurrentLoop produced the d/q frame from those
+                 * checked values.  The previous voltage is the sole internal
+                 * telemetry input and can be corrupted independently, so keep
+                 * its explicit finite gate before entering the validated hot
+                 * path. */
+                if !previous_voltage_dq.d.is_finite() || !previous_voltage_dq.q.is_finite() {
+                    controller.advanced_telemetry =
+                        FocAdvancedTelemetry::faulted(FOC_ADVANCED_REASON_INVALID_RUNTIME_INPUT);
+                    controller.fault_flags |= FOC_FAULT_ADVANCED_CONTROL;
+                    controller.state = FocState::Fault;
+                    return FocStatus::HardwareFault;
+                }
                 let advanced_input = AdvancedFocInput {
                     base_reference: controller.current_reference,
                     measured_current_dq: frame.current_dq,
                     current_alpha_beta,
-                    previous_voltage_dq: reference_mode.advanced_probe_input().map_or(
-                        foc_algorithm::Dq {
-                            d: controller.telemetry.vd_command_v,
-                            q: controller.telemetry.vq_command_v,
-                        },
-                        |probe| foc_algorithm::Dq {
-                            d: probe.previous_vd_command_v,
-                            q: probe.previous_vq_command_v,
-                        },
-                    ),
+                    previous_voltage_dq,
                     estimated_electrical_angle_rad: snapshot.rotor.electrical_angle_rad,
                     estimated_electrical_speed_rad_s: observer_feedback.mechanical_speed_rad_s
                         * controller.params.motor.pole_pairs as f32,
@@ -4015,7 +4043,7 @@ unsafe fn foc_rust_realtime_step_core(
                 };
                 let decision = match controller
                     .advanced_foc
-                    .step(&controller.params.motor, advanced_input)
+                    .step_with_validated_input(&controller.params.motor, advanced_input)
                 {
                     Ok(value) => value,
                     Err(error) => {
@@ -4027,9 +4055,15 @@ unsafe fn foc_rust_realtime_step_core(
                         return FocStatus::HardwareFault;
                     }
                 };
+                advanced_region_slot = decision.region_updated;
                 controller.current_reference = decision.current_reference;
                 controller.advanced_telemetry = FocAdvancedTelemetry::from_output(decision);
-                Some(decision.current_loop_policy())
+                let mut policy = decision.current_loop_policy();
+                if decision.modulation_mode != AdvancedModulationMode::Svpwm {
+                    policy.minimum_duty = controller.advanced_config.minimum_duty;
+                    policy.maximum_duty = controller.advanced_config.maximum_duty;
+                }
+                Some(policy)
             }
         } else {
             controller.advanced_telemetry = FocAdvancedTelemetry::disabled();
@@ -4038,6 +4072,22 @@ unsafe fn foc_rust_realtime_step_core(
 
     #[cfg(feature = "advanced-foc")]
     let advanced_policy_applied = advanced_policy.is_some();
+
+    #[cfg(feature = "advanced-foc")]
+    if advanced_first_decision || advanced_region_slot {
+        /* Configuration is committed only while stopped.  Let the first
+         * supervisor decision initialise its hysteresis/region state, publish
+         * telemetry, and hold the previous PWM for one 12 kHz tick.  The next
+         * tick consumes that policy in the current loop.  The same applies to
+         * each divided 1 kHz MTPA/FW/MTPV region slot.  This avoids stacking
+         * slow policy work with Park/PI/inverse-Park without changing a policy
+         * decision or the 12 kHz ISR cadence. */
+        let pwm = controller.previous_pwm;
+        output.duty_a = pwm.duty_a;
+        output.duty_b = pwm.duty_b;
+        output.duty_c = pwm.duty_c;
+        return FocStatus::Ok;
+    }
 
     // 电流环：Park -> dq PI（含抗饱和与圆限幅）-> 逆 Park -> SVPWM，全部由
     // `foc-control` 完成，本层只负责把共享的 Clarke 结果与当前给定传进去。

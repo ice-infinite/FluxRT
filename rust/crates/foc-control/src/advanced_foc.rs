@@ -201,6 +201,10 @@ pub struct AdvancedFocOutput {
     pub region: AdvancedFocRegion,
     pub modulation_mode: AdvancedModulationMode,
     pub active_features: u32,
+    /// A divided MTPA/FW/MTPV operating-region update ran in this tick.  The
+    /// realtime bridge uses this as a scheduling fact and holds the prior PWM;
+    /// it is not part of the public C telemetry ABI.
+    pub region_updated: bool,
     pub current_limited: bool,
     pub hfi_angle_candidate_rad: f32,
     pub hfi_angle_candidate_valid: bool,
@@ -225,6 +229,8 @@ impl AdvancedFocOutput {
                 AdvancedModulationMode::DpwmClampMax => CurrentLoopModulation::DpwmClampMax,
                 AdvancedModulationMode::DpwmClampMin => CurrentLoopModulation::DpwmClampMin,
             },
+            minimum_duty: 0.0,
+            maximum_duty: 0.0,
             vector_anti_windup: self.active_features
                 & (ADV_FOC_FIELD_WEAKENING
                     | ADV_FOC_MTPV
@@ -443,8 +449,29 @@ impl AdvancedFocSupervisor {
         if !self.configured {
             return Err(AdvancedFocError::NotConfigured);
         }
-        if !input_is_valid(&input) || !motor_is_valid(motor) {
+        /* Motor identity/ranges were already validated transactionally by
+         * configure(), and the configured controller does not permit them to
+         * mutate while running.  Rechecking those immutable fields at 12 kHz
+         * added no runtime safety; per-tick sensor/command input stays checked. */
+        if !input_is_valid(&input) {
             return Err(AdvancedFocError::InvalidInput);
+        }
+
+        self.step_with_validated_input(motor, input)
+    }
+
+    /// Executes the same policy body after the bridge has already validated
+    /// every source used to assemble [`AdvancedFocInput`].  The public
+    /// simulation/API entry [`AdvancedFocSupervisor::step`] remains defensive;
+    /// this entry exists only to avoid duplicating the complete finite/range
+    /// scan inside the 12 kHz target path.
+    pub fn step_with_validated_input(
+        &mut self,
+        motor: &MotorParameters,
+        input: AdvancedFocInput,
+    ) -> Result<AdvancedFocOutput, AdvancedFocError> {
+        if !self.configured {
+            return Err(AdvancedFocError::NotConfigured);
         }
 
         let mut output = AdvancedFocOutput {
@@ -458,7 +485,10 @@ impl AdvancedFocSupervisor {
         }
 
         if input.closed_loop_active {
-            self.update_operating_region(motor, &input);
+            output.region_updated = self.update_operating_region(motor, &input)
+                && (self.config.enabled_features
+                    & (ADV_FOC_MTPA | ADV_FOC_FIELD_WEAKENING | ADV_FOC_MTPV)
+                    != 0);
             output.current_reference = self.held_reference;
             output.region = self.region;
             output.active_features |= match self.region {
@@ -474,8 +504,12 @@ impl AdvancedFocSupervisor {
             self.mtpv_active = false;
             self.weakening.reset();
         }
+        /* Telemetry needs only a comparison, not the magnitude itself.  The
+         * squared form is equivalent for the validated non-negative limit and
+         * avoids one square root in every 12 kHz advanced tick. */
+        let limited_threshold = self.config.current_limit_a + f32::EPSILON;
         output.current_limited =
-            current_magnitude(input.base_reference) > self.config.current_limit_a + f32::EPSILON;
+            current_magnitude_squared(input.base_reference) > limited_threshold * limited_threshold;
 
         if self.config.enabled_features & ADV_FOC_DECOUPLING != 0 && input.closed_loop_active {
             let omega = input.estimated_electrical_speed_rad_s;
@@ -489,14 +523,25 @@ impl AdvancedFocSupervisor {
             output.active_features |= ADV_FOC_DECOUPLING;
         }
 
-        let prior_modulation = voltage_magnitude(input.previous_voltage_dq)
-            / (input.dc_bus_voltage_v / SQRT_3).max(f32::MIN_POSITIVE);
+        /* Hysteresis only compares a non-negative modulation magnitude against
+         * non-negative thresholds.  Compare their squares to keep the exact
+         * decision semantics without paying for a per-tick square root. */
+        let linear_voltage = (input.dc_bus_voltage_v / SQRT_3).max(f32::MIN_POSITIVE);
+        let prior_modulation_squared = (input.previous_voltage_dq.d * input.previous_voltage_dq.d
+            + input.previous_voltage_dq.q * input.previous_voltage_dq.q)
+            / (linear_voltage * linear_voltage);
         if self.config.enabled_features & ADV_FOC_OVERMODULATION != 0 {
             if self.overmodulation_active {
-                if prior_modulation <= self.config.overmodulation_exit_modulation {
+                if prior_modulation_squared
+                    <= self.config.overmodulation_exit_modulation
+                        * self.config.overmodulation_exit_modulation
+                {
                     self.overmodulation_active = false;
                 }
-            } else if prior_modulation >= self.config.overmodulation_entry_modulation {
+            } else if prior_modulation_squared
+                >= self.config.overmodulation_entry_modulation
+                    * self.config.overmodulation_entry_modulation
+            {
                 self.overmodulation_active = true;
             }
         } else {
@@ -510,10 +555,14 @@ impl AdvancedFocSupervisor {
         } else {
             if self.config.enabled_features & ADV_FOC_DPWM != 0 {
                 if self.dpwm_active {
-                    if prior_modulation <= self.config.dpwm_exit_modulation {
+                    if prior_modulation_squared
+                        <= self.config.dpwm_exit_modulation * self.config.dpwm_exit_modulation
+                    {
                         self.dpwm_active = false;
                     }
-                } else if prior_modulation >= self.config.dpwm_entry_modulation {
+                } else if prior_modulation_squared
+                    >= self.config.dpwm_entry_modulation * self.config.dpwm_entry_modulation
+                {
                     self.dpwm_active = true;
                 }
             } else {
@@ -529,19 +578,27 @@ impl AdvancedFocSupervisor {
             output.active_features |= ADV_FOC_DPWM;
         }
 
-        self.update_hfi(&input, &mut output);
-        self.update_flying_start(&input, &mut output);
+        if self.config.enabled_features & ADV_FOC_HFI != 0 {
+            self.update_hfi(&input, &mut output);
+        }
+        if self.config.enabled_features & ADV_FOC_FLYING_START != 0 {
+            self.update_flying_start(&input, &mut output);
+        }
         Ok(output)
     }
 
-    fn update_operating_region(&mut self, motor: &MotorParameters, input: &AdvancedFocInput) {
+    fn update_operating_region(
+        &mut self,
+        motor: &MotorParameters,
+        input: &AdvancedFocInput,
+    ) -> bool {
         let due = self.region_counter == 0;
         self.region_counter += 1;
         if self.region_counter >= self.config.region_update_divider {
             self.region_counter = 0;
         }
         if !due {
-            return;
+            return false;
         }
 
         let mut reference = limit_current(input.base_reference, self.config.current_limit_a);
@@ -635,14 +692,23 @@ impl AdvancedFocSupervisor {
             }
         }
         self.held_reference = limit_current(reference, self.config.current_limit_a);
+        true
     }
 
     fn update_hfi(&mut self, input: &AdvancedFocInput, output: &mut AdvancedFocOutput) {
-        let active = self.config.enabled_features & ADV_FOC_HFI != 0
-            && input.allow_voltage_injection
+        if self.config.enabled_features & ADV_FOC_HFI == 0 {
+            /* A configuration transaction resets the supervisor before HFI can
+             * later be enabled, so a permanently disabled feature needs no
+             * per-tick filter rewrite. */
+            return;
+        }
+        let active = input.allow_voltage_injection
             && input.estimated_electrical_speed_rad_s.abs()
                 <= self.config.hfi_max_electrical_speed_rad_s;
         if !active {
+            /* When HFI is configured but temporarily not requested, retain the
+             * original semantics: track the latest current sample so a future
+             * enable does not interpret the whole idle interval as response. */
             self.hfi.reset();
             self.hfi_alpha_hpf.reset(input.current_alpha_beta.alpha);
             self.hfi_beta_hpf.reset(input.current_alpha_beta.beta);
@@ -677,10 +743,22 @@ impl AdvancedFocSupervisor {
     }
 
     fn update_flying_start(&mut self, input: &AdvancedFocInput, output: &mut AdvancedFocOutput) {
-        if self.config.enabled_features & ADV_FOC_FLYING_START == 0 || !input.request_flying_start {
-            self.flying_start_state = FlyingStartState::Idle;
-            self.flying_start_stable = 0;
-            self.flying_start_elapsed = 0;
+        if self.config.enabled_features & ADV_FOC_FLYING_START == 0 {
+            return;
+        }
+        if !input.request_flying_start {
+            if self.flying_start_state != FlyingStartState::Idle
+                || self.flying_start_stable != 0
+                || self.flying_start_elapsed != 0
+            {
+                self.flying_start_state = FlyingStartState::Idle;
+                self.flying_start_stable = 0;
+                self.flying_start_elapsed = 0;
+            }
+            output.flying_start_state = FlyingStartState::Idle;
+            output.flying_start_angle_rad = self.flying_start_angle_rad;
+            output.flying_start_speed_rad_s = self.flying_start_speed_rad_s;
+            return;
         } else if self.flying_start_state != FlyingStartState::Captured
             && self.flying_start_state != FlyingStartState::Failed
         {
@@ -756,7 +834,11 @@ fn alpha_beta_magnitude(value: AlphaBeta) -> f32 {
 }
 
 fn current_magnitude(value: CurrentCommand) -> f32 {
-    libm::sqrtf(value.id_ref_a * value.id_ref_a + value.iq_ref_a * value.iq_ref_a)
+    libm::sqrtf(current_magnitude_squared(value))
+}
+
+fn current_magnitude_squared(value: CurrentCommand) -> f32 {
+    value.id_ref_a * value.id_ref_a + value.iq_ref_a * value.iq_ref_a
 }
 
 fn limit_current(value: CurrentCommand, limit: f32) -> CurrentCommand {

@@ -1013,7 +1013,9 @@ static void foc_platform_motion_probe_snapshot(
                                   TIM_CCER_CC2E |
                                   TIM_CCER_CC3E;
 
-    (void)memset(snapshot, 0, sizeof(*snapshot));
+    /* Every field in the fixed 32-byte snapshot is assigned below.  Do not
+     * clear the object first: the redundant stores execute several times per
+     * probe tick and add noise to the very WCET path this guard measures. */
     snapshot->control_armed = g_foc_control_armed;
     snapshot->power_safety_state = g_foc_power_safety.state;
     snapshot->fault_epoch = g_foc_power_safety.fault_epoch;
@@ -1233,14 +1235,16 @@ fail_closed:
 
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_ADVANCED_CONTROL_CANDIDATE)
-static void foc_platform_advanced_probe_snapshot(
+static inline void foc_platform_advanced_probe_snapshot(
     foc_advanced_probe_register_snapshot_t *snapshot)
 {
     const uint32_t channel_mask = TIM_CCER_CC1E |
                                   TIM_CCER_CC2E |
                                   TIM_CCER_CC3E;
 
-    (void)memset(snapshot, 0, sizeof(*snapshot));
+    /* Every field is assigned below.  A preceding 32-byte memset performed
+     * three times per ISR added probe overhead without initializing any byte
+     * that the explicit hardware snapshot did not immediately overwrite. */
     snapshot->control_armed = g_foc_control_armed;
     snapshot->power_safety_state = g_foc_power_safety.state;
     snapshot->fault_epoch = g_foc_power_safety.fault_epoch;
@@ -1255,12 +1259,24 @@ static void foc_platform_advanced_probe_snapshot(
 }
 
 static foc_advanced_probe_result_t foc_platform_advanced_probe_commit_isr(
-    const foc_output_t *output)
+    const foc_output_t *output,
+    foc_status_t control_status)
 {
     foc_advanced_probe_register_snapshot_t before;
     foc_advanced_probe_register_snapshot_t after;
+    foc_advanced_probe_result_t result;
 
+    /* This is both the post-Rust and immediately-pre-CCR snapshot.  No hardware
+     * write exists between those two logical gates, so taking two identical
+     * snapshots only inflated the measured ISR. */
     foc_platform_advanced_probe_snapshot(&before);
+    result = foc_advanced_probe_complete_control(&g_foc_advanced_probe,
+                                                 control_status,
+                                                 &before);
+    if (result != FOC_ADVANCED_PROBE_RESULT_OK)
+    {
+        return result;
+    }
     TIM1->CCR1 = (uint32_t)(output->duty_a *
                             (float)FOC_PWM_PERIOD_TICKS + 0.5f);
     TIM1->CCR2 = (uint32_t)(output->duty_b *
@@ -1334,20 +1350,13 @@ static foc_status_t foc_platform_advanced_probe_step_isr(
     g_foc_advanced_probe.decision_signature *= 16777619UL;
     ++g_foc_advanced_probe.decision_samples;
 
-    foc_platform_advanced_probe_snapshot(&snapshot);
-    probe_result = foc_advanced_probe_complete_control(
-        &g_foc_advanced_probe, control_status, &snapshot);
-    if ((probe_result != FOC_ADVANCED_PROBE_RESULT_OK) ||
-        (control_status != FOC_STATUS_OK))
-    {
-        goto fail_closed;
-    }
-    if (!(output.duty_a >= g_foc_platform_config.minimum_duty &&
+    if ((control_status == FOC_STATUS_OK) &&
+        (!(output.duty_a >= g_foc_platform_config.minimum_duty &&
           output.duty_a <= g_foc_platform_config.maximum_duty) ||
         !(output.duty_b >= g_foc_platform_config.minimum_duty &&
           output.duty_b <= g_foc_platform_config.maximum_duty) ||
         !(output.duty_c >= g_foc_platform_config.minimum_duty &&
-          output.duty_c <= g_foc_platform_config.maximum_duty))
+          output.duty_c <= g_foc_platform_config.maximum_duty)))
     {
         (void)foc_advanced_probe_fail(
             &g_foc_advanced_probe,
@@ -1357,7 +1366,8 @@ static foc_status_t foc_platform_advanced_probe_step_isr(
         goto fail_closed;
     }
 
-    probe_result = foc_platform_advanced_probe_commit_isr(&output);
+    probe_result = foc_platform_advanced_probe_commit_isr(&output,
+                                                          control_status);
     if ((probe_result == FOC_ADVANCED_PROBE_RESULT_OK) ||
         (probe_result == FOC_ADVANCED_PROBE_RESULT_COMPLETE))
     {
@@ -4975,6 +4985,40 @@ uint32_t foc_platform_trace_is_enabled(void)
 #else
     return 0U;
 #endif
+}
+
+uint32_t foc_platform_realtime_work_active(void)
+{
+#if defined(FOC_TARGET_STM32G431)
+    if (g_foc_control_armed != 0U)
+    {
+        return 1U;
+    }
+#endif
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    if (g_foc_advanced_probe_active != 0U)
+    {
+        return 1U;
+    }
+#endif
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_MOTION_CONTROL_CANDIDATE)
+    if (g_foc_motion_probe.state == FOC_MOTION_PROBE_RUNNING)
+    {
+        return 1U;
+    }
+#endif
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+    if (g_foc_lsi_session_running != 0U)
+    {
+        return 1U;
+    }
+#endif
+    return 0U;
 }
 
 uint32_t foc_platform_trace_pop(foc_trace_sample_t *sample)

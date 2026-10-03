@@ -81,6 +81,9 @@ static void test_safety_and_fault_epoch_fail_closed(void)
                FOC_ADVANCED_PROBE_RESULT_OK);
         assert(foc_advanced_probe_start(&probe, 1U, 11U, &before) ==
                FOC_ADVANCED_PROBE_RESULT_OK);
+        assert(foc_advanced_probe_complete_control(
+                   &probe, FOC_STATUS_OK, &before) ==
+               FOC_ADVANCED_PROBE_RESULT_OK);
         after.fault_epoch = 12U;
         assert(foc_advanced_probe_complete_commit(
                    &probe, &before, &after) ==

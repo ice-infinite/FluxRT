@@ -76,7 +76,7 @@ fn run_mode(mode: u32, ticks: u32) -> (u32, FocAdvancedTelemetry) {
         electrical_angle_rad: 0.35,
         mechanical_speed_rad_s: 150.0,
         previous_vd_command_v: 0.0,
-        previous_vq_command_v: 7.3,
+        previous_vq_command_v: 7.6,
         phase_current_a: 0.10,
         phase_current_b: -0.04,
         phase_current_c: -0.06,
@@ -86,7 +86,7 @@ fn run_mode(mode: u32, ticks: u32) -> (u32, FocAdvancedTelemetry) {
         phase_current_a: probe.phase_current_a,
         phase_current_b: probe.phase_current_b,
         phase_current_c: probe.phase_current_c,
-        dc_bus_voltage: 12.3,
+        dc_bus_voltage: 13.0,
         electrical_angle_rad: probe.electrical_angle_rad,
     };
     let mut output = FocOutput::default();
@@ -98,14 +98,24 @@ fn run_mode(mode: u32, ticks: u32) -> (u32, FocAdvancedTelemetry) {
     unsafe {
         assert_eq!(foc_rust_init(&mut context), FocStatus::Ok);
         assert_eq!(foc_rust_default_st_config(&mut runtime), FocStatus::Ok);
+        // Match the STM32G431 Advanced Lab target schedule: SMO/PLL owns an
+        // alternating 6 kHz slot while the current ISR remains at 12 kHz.
+        runtime.observer_update_divider = 2;
         assert_eq!(foc_rust_configure(&mut context, &runtime), FocStatus::Ok);
         assert_eq!(
             foc_rust_default_advanced_config(&mut context, &mut advanced),
             FocStatus::Ok
         );
         advanced.algorithm.enabled_features = features;
-        advanced.algorithm.region_update_divider = 1;
+        // Match the target's production operating-region schedule.  The
+        // default is 1 kHz at a 12 kHz current loop; the fast current path
+        // holds the most recent MTPA/FW/MTPV decision between those slots.
+        // G431 Advanced Lab uses the configuration's minimum bounded MTPV
+        // sweep; the generic implementation remains tunable through 64 steps.
+        advanced.algorithm.mtpv_search_steps = 8;
         advanced.platform_capabilities = capabilities;
+        advanced.minimum_duty = 0.03;
+        advanced.maximum_duty = 0.97;
         assert_eq!(
             foc_rust_configure_advanced(&mut context, &advanced),
             FocStatus::Ok

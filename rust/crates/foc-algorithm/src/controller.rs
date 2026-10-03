@@ -271,6 +271,15 @@ impl PiState {
         desired_output: f32,
     ) -> f32 {
         self.error = reference - feedback;
+        self.track_output_from_last_error(param, desired_output)
+    }
+
+    /// Back-calculates the PI state using the error already stored by the
+    /// immediately preceding [`PiState::update`].  Vector-circle saturation in
+    /// the FOC current loop uses this entry to avoid recomputing the same d/q
+    /// errors while preserving `preload_output`'s clamp order exactly.
+    #[inline]
+    pub fn track_output_from_last_error(&mut self, param: &PiParam, desired_output: f32) -> f32 {
         let proportional = param.kp * self.error;
         self.output = clamp(desired_output, param.out_min, param.out_max);
         self.integrator = clamp(
@@ -1181,6 +1190,14 @@ mod tests {
         let mut s = PiState::default();
         assert_near(s.preload_output(&p, 10.0, 10.0, 0.8), 0.8, 1e-6);
         assert_near(s.update(&p, 10.0, 10.0), 0.8, 1e-6);
+
+        let mut regular = PiState::default();
+        let _ = regular.update(&p, 0.7, -0.2);
+        let mut tracked = regular;
+        let regular_output = regular.preload_output(&p, 0.7, -0.2, -0.45);
+        let tracked_output = tracked.track_output_from_last_error(&p, -0.45);
+        assert_eq!(tracked, regular);
+        assert_eq!(tracked_output, regular_output);
     }
 
     /// 锁定 C 版 `Controller_PD` 的参考向量：`derivative_alpha=1.0` 表示不滤波，

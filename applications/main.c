@@ -127,6 +127,10 @@ static foc_platform_diagnostics_t g_foc_cfg_diagnostics;
 static foc_production_profile_report_t g_foc_profile_report;
 static foc_production_profile_status_t g_foc_profile_status =
     FOC_PROFILE_INVALID_ARGUMENT;
+/* A command sets this before opening a bounded realtime evidence window and
+ * clears it only after its final report.  The platform activity gate below is
+ * the steady-state guard; this flag also closes the start/finish race. */
+static volatile uint32_t g_foc_management_log_inhibit;
 #if defined(FLUXRT_TRACE_BUILD)
 /* 实际生效的 trace 采样率 [Hz]，即 PWM 频率整除分频器后的结果，非请求值。
  * Effective trace rate in Hz: the PWM frequency divided by the integer divider,
@@ -1660,8 +1664,10 @@ static int foc_advanced_wcet(int argc, char **argv)
     uint32_t capabilities = 0U;
     uint32_t started_ms;
     uint32_t timeout_ms;
+    uint32_t saved_observer_update_divider;
     foc_status_t status;
     foc_status_t finish_status;
+    foc_status_t restore_status;
     int result = -1;
 
     if ((argc > 3) ||
@@ -1719,8 +1725,17 @@ static int foc_advanced_wcet(int argc, char **argv)
         return -1;
     }
     probe_config.algorithm.enabled_features = features;
-    probe_config.algorithm.region_update_divider = 1U;
+    /* Keep the production 1 kHz operating-region slot from the default
+     * configuration.  Forcing this divider to one would execute the bounded
+     * MTPA/MTPV search on every 12 kHz current-loop tick, which is neither the
+     * deployed schedule nor a valid end-to-end WCET model. */
+    /* A 24-segment MTPV sweep does not fit the G431's 83.3 us ISR even in its
+     * isolated region slot.  Eight is the validated configuration lower bound;
+     * the generic library remains tunable up to 64 for faster targets. */
+    probe_config.algorithm.mtpv_search_steps = 8U;
     probe_config.platform_capabilities = capabilities;
+    probe_config.minimum_duty = g_foc_platform_config.minimum_duty;
+    probe_config.maximum_duty = g_foc_platform_config.maximum_duty;
 
     (void)memset(&probe_input, 0, sizeof(probe_input));
     probe_input.struct_size = sizeof(probe_input);
@@ -1730,11 +1745,31 @@ static int foc_advanced_wcet(int argc, char **argv)
     probe_input.electrical_angle_rad = 0.35f;
     probe_input.mechanical_speed_rad_s = 150.0f;
     probe_input.previous_vd_command_v = 0.0f;
-    probe_input.previous_vq_command_v = 7.3f;
+    /* 13 V nominal bus gives a 7.505 V linear SVPWM radius.  Keep this
+     * deliberately above it so modes 6/7 actually exercise overmodulation on
+     * both PC and target instead of depending on a mismatched 12.3 V fixture. */
+    probe_input.previous_vq_command_v = 7.6f;
     probe_input.phase_current_a = 0.10f;
     probe_input.phase_current_b = -0.04f;
     probe_input.phase_current_c = -0.06f;
 
+    g_foc_management_log_inhibit = 1U;
+    /* G431 Advanced Lab uses the existing alternating observer slot: SMO/PLL
+     * runs at 6 kHz while the current ISR remains at 12 kHz.  This is a target
+     * scheduling choice, not a generic Rust algorithm default. */
+    saved_observer_update_divider =
+        g_foc_runtime_config.observer_update_divider;
+    g_foc_runtime_config.observer_update_divider = 2U;
+    status = foc_rust_configure(&g_foc_controller, &g_foc_runtime_config);
+    if (status != FOC_STATUS_OK)
+    {
+        g_foc_runtime_config.observer_update_divider =
+            saved_observer_update_divider;
+        (void)foc_rust_configure(&g_foc_controller, &g_foc_runtime_config);
+        rt_kprintf("FADV,schedule,%u\n", (unsigned int)status);
+        g_foc_management_log_inhibit = 0U;
+        return -1;
+    }
     started_ms = (uint32_t)rt_tick_get_millisecond();
     timeout_ms = (requested_ticks / 12U) + 2000U;
     status = foc_platform_advanced_candidate_probe_start(
@@ -1747,6 +1782,10 @@ static int foc_advanced_wcet(int argc, char **argv)
     {
         rt_kprintf("FADV,start,%u\n", (unsigned int)status);
         (void)foc_platform_advanced_candidate_probe_finish();
+        g_foc_runtime_config.observer_update_divider =
+            saved_observer_update_divider;
+        (void)foc_rust_configure(&g_foc_controller, &g_foc_runtime_config);
+        g_foc_management_log_inhibit = 0U;
         return -1;
     }
 
@@ -1798,9 +1837,19 @@ static int foc_advanced_wcet(int argc, char **argv)
                   FOC_ADVANCED_STATUS_FAULTED)) ==
                 FOC_ADVANCED_STATUS_CONFIGURED))) ? 0 : -1;
     finish_status = foc_platform_advanced_candidate_probe_finish();
+    g_foc_runtime_config.observer_update_divider =
+        saved_observer_update_divider;
+    restore_status = foc_rust_configure(&g_foc_controller,
+                                        &g_foc_runtime_config);
+    if ((finish_status == FOC_STATUS_OK) &&
+        (restore_status != FOC_STATUS_OK))
+    {
+        finish_status = restore_status;
+    }
     rt_kprintf("FADV,end,%u,%u\n",
                (unsigned int)((result == 0) ? 0U : 1U),
                (unsigned int)finish_status);
+    g_foc_management_log_inhibit = 0U;
     return ((finish_status == FOC_STATUS_OK) && (result == 0)) ? 0 : -1;
 }
 MSH_CMD_EXPORT(foc_advanced_wcet, -);
@@ -2410,6 +2459,15 @@ int main(void)
         rust_status = foc_rust_default_advanced_config(
             &g_foc_controller, &g_foc_advanced_config);
     }
+    if (rust_status == FOC_STATUS_OK)
+    {
+        /* Bind the hardware-independent advanced policy to this board's
+         * validated PWM/minimum-pulse window before any feature can be enabled. */
+        g_foc_advanced_config.minimum_duty =
+            g_foc_platform_config.minimum_duty;
+        g_foc_advanced_config.maximum_duty =
+            g_foc_platform_config.maximum_duty;
+    }
     if ((rust_status == FOC_STATUS_OK) &&
         ((g_foc_advanced_config.struct_size != sizeof(g_foc_advanced_config)) ||
          (g_foc_advanced_config.abi_version != FOC_ADVANCED_ABI_VERSION) ||
@@ -2638,12 +2696,16 @@ int main(void)
                        (unsigned int)trace_sample.voltage_limited);
         }
 #endif
-        /* 心跳每 5 s 一次，且只在 trace 关闭时发送：FTR 流量与心跳混在同一串口上
-         * 会互相插入，使离线解析难以按行切分。
-         * The heartbeat fires every 5 s and only while trace is off: interleaving
-         * FTR traffic with the heartbeat on the same UART makes line-based offline
-         * parsing unreliable. */
+        /* 心跳只在 trace 和实时工作窗口都关闭时发送。板端 UART 后端可能短暂
+         * 屏蔽中断；让 ALV 与 12 kHz 控制/探针并发会污染 WCET，甚至触发正确的
+         * deadline 关断。命令侧 inhibit 关闭 start/finish 竞争，平台门覆盖正式
+         * arm、motion/advanced 探针和 Ls(I) 实时事务。
+         * Heartbeats are emitted only outside trace and realtime work windows.
+         * Some board UART backends briefly mask IRQs, so concurrent ALV output
+         * would contaminate WCET and can legitimately trip the deadline guard. */
         if (((now_ms - heartbeat_ms) >= 5000U) &&
+            (g_foc_management_log_inhibit == 0U) &&
+            (foc_platform_realtime_work_active() == 0U) &&
 #if defined(FLUXRT_TRACE_BUILD)
             (foc_platform_trace_is_enabled() == 0U))
 #else
