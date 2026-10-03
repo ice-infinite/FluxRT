@@ -163,6 +163,101 @@ static void test_invalid_configuration_is_rejected(void)
                0U) == FOC_ADVANCED_POWER_TRIAL_RESULT_INVALID_ENVELOPE);
 }
 
+static void test_transient_observer_loss_restarts_acceptance_window(void)
+{
+    foc_advanced_power_trial_t trial;
+    foc_advanced_power_trial_snapshot_t closed = trial_snapshot(
+        FOC_STATE_CLOSED_LOOP, 1U, 1U, 0U, 0U);
+    foc_advanced_power_trial_snapshot_t decoupling = trial_snapshot(
+        FOC_STATE_CLOSED_LOOP,
+        1U,
+        1U,
+        FOC_ADVANCED_FEATURE_DECOUPLING,
+        FOC_ADVANCED_STATUS_CONFIGURED);
+    uint32_t index;
+
+    prepare_and_arm(&trial, FOC_ADVANCED_POWER_TRIAL_MODE_BASIC);
+    assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(foc_advanced_power_trial_validate_control(&trial, &closed) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    for (index = 0U; index < 6U; ++index)
+    {
+        assert(foc_advanced_power_trial_record_commit(&trial) ==
+               FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    }
+    assert(trial.active_ticks == 6U);
+    closed.observer_reliable = 0U;
+    assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(foc_advanced_power_trial_validate_control(&trial, &closed) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(trial.state == FOC_ADVANCED_POWER_TRIAL_STARTUP);
+    assert(trial.result == FOC_ADVANCED_POWER_TRIAL_RESULT_NONE);
+    assert(trial.active_ticks == 0U);
+
+    closed.observer_reliable = 1U;
+    assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(foc_advanced_power_trial_validate_control(&trial, &closed) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(trial.state == FOC_ADVANCED_POWER_TRIAL_ACTIVE);
+    assert(trial.first_active_tick == 3U);
+    for (index = 0U; index < FOC_ADVANCED_POWER_TRIAL_ACTIVE_TICKS; ++index)
+    {
+        assert(foc_advanced_power_trial_record_commit(&trial) ==
+               (((index + 1U) == FOC_ADVANCED_POWER_TRIAL_ACTIVE_TICKS) ?
+                    FOC_ADVANCED_POWER_TRIAL_ACTION_COMPLETE_STOP :
+                    FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE));
+    }
+    assert(trial.state == FOC_ADVANCED_POWER_TRIAL_COMPLETE);
+    assert(trial.result == FOC_ADVANCED_POWER_TRIAL_RESULT_OK);
+
+    prepare_and_arm(&trial, FOC_ADVANCED_POWER_TRIAL_MODE_DECOUPLING);
+    assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(foc_advanced_power_trial_validate_control(
+               &trial, &decoupling) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(foc_advanced_power_trial_record_commit(&trial) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    decoupling.observer_reliable = 0U;
+    decoupling.status_flags |= FOC_ADVANCED_STATUS_BASIC_FALLBACK |
+                                 FOC_ADVANCED_REASON_OBSERVER_UNRELIABLE;
+    assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(foc_advanced_power_trial_validate_control(
+               &trial, &decoupling) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(trial.state == FOC_ADVANCED_POWER_TRIAL_STARTUP);
+    assert(trial.active_ticks == 0U);
+
+    decoupling.observer_reliable = 1U;
+    decoupling.status_flags = FOC_ADVANCED_STATUS_CONFIGURED;
+    assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(foc_advanced_power_trial_validate_control(
+               &trial, &decoupling) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(trial.state == FOC_ADVANCED_POWER_TRIAL_ACTIVE);
+
+    decoupling.observer_reliable = 0U;
+    assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(foc_advanced_power_trial_validate_control(
+               &trial, &decoupling) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(trial.state == FOC_ADVANCED_POWER_TRIAL_STARTUP);
+    decoupling.closed_loop_active = 0U;
+    assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
+    assert(foc_advanced_power_trial_validate_control(
+               &trial, &decoupling) ==
+           FOC_ADVANCED_POWER_TRIAL_ACTION_FAULT_STOP);
+    assert(trial.result ==
+           FOC_ADVANCED_POWER_TRIAL_RESULT_OBSERVER_FALLBACK);
+}
+
 static void test_fault_injections_fail_closed(void)
 {
     foc_advanced_power_trial_t trial;
@@ -193,9 +288,7 @@ static void test_fault_injections_fail_closed(void)
     assert(trial.active_ticks == 0U);
     assert(foc_advanced_power_trial_record_commit(&trial) ==
            FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
-    decoupling.observer_reliable = 0U;
-    decoupling.status_flags |= FOC_ADVANCED_STATUS_BASIC_FALLBACK |
-                                 FOC_ADVANCED_REASON_OBSERVER_UNRELIABLE;
+    decoupling.closed_loop_active = 0U;
     assert(foc_advanced_power_trial_begin_tick(&trial, 7U, 2U) ==
            FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE);
     assert(foc_advanced_power_trial_validate_control(
@@ -234,6 +327,7 @@ int main(void)
 {
     test_basic_and_decoupling_complete_at_exact_window();
     test_invalid_configuration_is_rejected();
+    test_transient_observer_loss_restarts_acceptance_window();
     test_fault_injections_fail_closed();
     puts("foc_advanced_power_trial_tests: PASS");
     return 0;

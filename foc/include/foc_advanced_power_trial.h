@@ -97,8 +97,10 @@ foc_advanced_power_trial_action_t foc_advanced_power_trial_begin_tick(
     uint32_t fault_epoch,
     uint32_t deadline_miss_count);
 /* Validate the compact coherent controller/Advanced snapshot before PWM
- * commit.  This may enter
- * ACTIVE but deliberately does not count a tick.  The platform must call
+ * commit.  This may enter ACTIVE but deliberately does not count a tick.
+ * A transient observer reliability drop while closed-loop remains active
+ * restarts the consecutive acceptance window; it does not override the
+ * controller's bounded observer-loss timeout.  The platform must call
  * record_commit only after the physical output transaction is accepted. */
 foc_advanced_power_trial_action_t foc_advanced_power_trial_validate_control(
     foc_advanced_power_trial_t *trial,

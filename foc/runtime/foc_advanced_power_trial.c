@@ -196,13 +196,27 @@ foc_advanced_power_trial_action_t foc_advanced_power_trial_validate_control(
         return foc_advanced_power_trial_stop(
             trial, FOC_ADVANCED_POWER_TRIAL_RESULT_ADVANCED_FAULT);
     }
-    if ((snapshot->closed_loop_active == 0U) ||
-        (snapshot->observer_reliable == 0U))
+    if (snapshot->closed_loop_active == 0U)
     {
-        if (trial->state == FOC_ADVANCED_POWER_TRIAL_ACTIVE)
+        if ((trial->state == FOC_ADVANCED_POWER_TRIAL_ACTIVE) ||
+            (trial->first_active_tick != 0U))
         {
             return foc_advanced_power_trial_stop(
                 trial, FOC_ADVANCED_POWER_TRIAL_RESULT_OBSERVER_FALLBACK);
+        }
+        return FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE;
+    }
+    if (snapshot->observer_reliable == 0U)
+    {
+        /* The controller owns the bounded observer-loss timeout.  A transient
+         * reliability drop while it still owns closed-loop angle must not
+         * create a stricter one-tick trip here.  Restart the consecutive
+         * acceptance window; sustained loss still reaches us as a closed-loop
+         * fallback, fault epoch change, or total transaction timeout. */
+        if (trial->state == FOC_ADVANCED_POWER_TRIAL_ACTIVE)
+        {
+            trial->state = FOC_ADVANCED_POWER_TRIAL_STARTUP;
+            trial->active_ticks = 0U;
         }
         return FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE;
     }
