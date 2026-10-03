@@ -118,6 +118,10 @@ static const foc_phase_voltage_model_t g_foc_phase_voltage_nominal_model =
  * Same-tick timing statistics; written by the ISR, read by the RT-Thread thread. */
 static foc_realtime_timing_stats_t g_foc_timing_stats;
 
+#define FOC_CONTROL_START_AUTHORITY_GENERIC  (0U)
+#define FOC_CONTROL_START_AUTHORITY_MOTION   (1U)
+#define FOC_CONTROL_START_AUTHORITY_ADVANCED (2U)
+
 #if defined(FOC_TARGET_STM32G431)
 #include "rtconfig.h"
 #include "stm32g4xx_hal.h"
@@ -361,11 +365,19 @@ static volatile uint16_t g_foc_bus_max_raw;
 /* 绑定的 Rust 控制器上下文；由 foc_platform_bind_controller() 设置一次。
  * Bound Rust controller context; set once by foc_platform_bind_controller(). */
 static foc_rust_context_t *g_foc_controller;
+
+static foc_status_t foc_platform_control_start_internal(
+    float target_speed_rpm,
+    uint32_t candidate_authority);
+
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_ADVANCED_CONTROL_CANDIDATE)
 static foc_advanced_probe_t g_foc_advanced_probe;
 static foc_advanced_probe_input_t g_foc_advanced_probe_input;
-static foc_advanced_telemetry_t g_foc_advanced_probe_telemetry;
+/* The no-power probe and powered owner are mutually exclusive.  Sharing their
+ * latest telemetry preserves the Advanced-Lab heap gate on the 32 KiB target. */
+static foc_advanced_telemetry_t g_foc_advanced_telemetry;
+static foc_advanced_power_trial_t g_foc_advanced_power_trial;
 static volatile uint32_t g_foc_advanced_probe_active;
 static float g_foc_advanced_probe_nominal_bus_voltage_v;
 
@@ -403,10 +415,6 @@ static volatile uint32_t g_foc_motion_command_ready;
 static volatile uint32_t g_foc_motion_probe_execute_motion;
 static float g_foc_motion_probe_nominal_bus_voltage_v;
 #define FOC_MOTION_PROBE_WARMUP_TICKS       (12U)
-
-static foc_status_t foc_platform_control_start_internal(
-    float target_speed_rpm,
-    uint32_t allow_motion_candidate);
 
 /* Mask only the consuming ADC IRQ.  The priority-0 timer Break interrupt stays
  * deliverable, and the timer's asynchronous Break action is never masked. */
@@ -873,6 +881,11 @@ static __attribute__((noinline)) void foc_platform_latch_fault_fast(
 #endif
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    foc_advanced_power_trial_fail(
+        &g_foc_advanced_power_trial,
+        FOC_ADVANCED_POWER_TRIAL_RESULT_PLATFORM_FAULT,
+        g_foc_power_safety.fault_epoch,
+        g_foc_diagnostics.deadline_miss_count);
     if (g_foc_advanced_probe.state == FOC_ADVANCED_PROBE_RUNNING)
     {
         (void)foc_advanced_probe_fail(
@@ -1331,22 +1344,22 @@ static foc_status_t foc_platform_advanced_probe_step_isr(
         &g_foc_advanced_probe_input,
         &output,
         0,
-        &g_foc_advanced_probe_telemetry);
+        &g_foc_advanced_telemetry);
     ++g_foc_control_sequence;
 
     /* FNV-1a over discrete decisions gives a deterministic per-tick signature
      * without requiring bit-identical target/PC floating-point duties. */
     g_foc_advanced_probe.decision_signature ^=
-        g_foc_advanced_probe_telemetry.active_features;
+        g_foc_advanced_telemetry.active_features;
     g_foc_advanced_probe.decision_signature *= 16777619UL;
     g_foc_advanced_probe.decision_signature ^=
-        g_foc_advanced_probe_telemetry.region;
+        g_foc_advanced_telemetry.region;
     g_foc_advanced_probe.decision_signature *= 16777619UL;
     g_foc_advanced_probe.decision_signature ^=
-        g_foc_advanced_probe_telemetry.modulation_mode;
+        g_foc_advanced_telemetry.modulation_mode;
     g_foc_advanced_probe.decision_signature *= 16777619UL;
     g_foc_advanced_probe.decision_signature ^=
-        g_foc_advanced_probe_telemetry.status_flags;
+        g_foc_advanced_telemetry.status_flags;
     g_foc_advanced_probe.decision_signature *= 16777619UL;
     ++g_foc_advanced_probe.decision_samples;
 
@@ -2614,12 +2627,13 @@ foc_status_t foc_platform_init(void)
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_ADVANCED_CONTROL_CANDIDATE)
     (void)foc_advanced_probe_init(&g_foc_advanced_probe);
+    (void)foc_advanced_power_trial_init(&g_foc_advanced_power_trial);
     g_foc_advanced_probe_active = 0U;
     g_foc_advanced_probe_nominal_bus_voltage_v = 0.0f;
     (void)memset(&g_foc_advanced_probe_input, 0,
                  sizeof(g_foc_advanced_probe_input));
-    (void)memset(&g_foc_advanced_probe_telemetry, 0,
-                 sizeof(g_foc_advanced_probe_telemetry));
+    (void)memset(&g_foc_advanced_telemetry, 0,
+                 sizeof(g_foc_advanced_telemetry));
 #endif
     g_foc_bus_min_raw = foc_platform_bus_voltage_to_raw(
         g_foc_platform_config.minimum_bus_voltage_v);
@@ -3221,7 +3235,8 @@ foc_status_t foc_platform_motion_candidate_torque_trial_start(
     {
         return FOC_STATUS_NOT_CONFIGURED;
     }
-    status = foc_platform_control_start_internal(startup_target_speed_rpm, 1U);
+    status = foc_platform_control_start_internal(
+        startup_target_speed_rpm, FOC_CONTROL_START_AUTHORITY_MOTION);
     if (status != FOC_STATUS_OK)
     {
         foc_motion_torque_trial_fail(
@@ -3373,7 +3388,7 @@ foc_status_t foc_platform_advanced_candidate_probe_get_status(
     }
     key = foc_platform_advanced_enter_critical();
     result = foc_advanced_probe_get_status(&g_foc_advanced_probe, status);
-    *telemetry = g_foc_advanced_probe_telemetry;
+    *telemetry = g_foc_advanced_telemetry;
     foc_platform_advanced_exit_critical(key);
     return (result == FOC_ADVANCED_PROBE_RESULT_OK) ?
         FOC_STATUS_OK : FOC_STATUS_NOT_CONFIGURED;
@@ -3409,6 +3424,192 @@ foc_status_t foc_platform_advanced_candidate_probe_finish(void)
     foc_platform_advanced_exit_critical(key);
     return status;
 #else
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_advanced_candidate_power_trial_start(
+    foc_advanced_power_trial_mode_t mode,
+    const foc_runtime_config_t *active_realtime_config)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    foc_runtime_config_t trial_runtime_config;
+    foc_advanced_runtime_config_t advanced_config;
+    foc_advanced_power_trial_result_t trial_result;
+    foc_status_t status;
+    uint32_t key;
+
+    if ((active_realtime_config == 0) || (g_foc_controller == 0) ||
+        ((mode != FOC_ADVANCED_POWER_TRIAL_MODE_BASIC) &&
+         (mode != FOC_ADVANCED_POWER_TRIAL_MODE_DECOUPLING)))
+    {
+        return FOC_STATUS_INVALID_ARGUMENT;
+    }
+    if ((g_foc_control_armed != 0U) ||
+        (g_foc_advanced_probe_active != 0U) ||
+        (g_foc_power_safety.state != FOC_POWER_SAFETY_DISABLED))
+    {
+        return FOC_STATUS_DISABLED;
+    }
+
+    key = foc_platform_advanced_enter_critical();
+    foc_platform_disable_power_fast();
+    TIM1->CCR1 = 0U;
+    TIM1->CCR2 = 0U;
+    TIM1->CCR3 = 0U;
+    (void)foc_advanced_power_trial_init(&g_foc_advanced_power_trial);
+    (void)memset(&g_foc_advanced_telemetry, 0,
+                 sizeof(g_foc_advanced_telemetry));
+
+    /* The boot production profile deliberately keeps closed loop disabled.
+     * This exact-token owner creates a private, bounded candidate instead of
+     * weakening that persistent profile or requiring a preceding foc_cfg
+     * mutation.  The caller-owned base configuration is restored on every
+     * exit path. */
+    trial_runtime_config = *active_realtime_config;
+    trial_runtime_config.closed_loop_enable = 1U;
+    trial_runtime_config.startup_final_speed_rpm =
+        FOC_ADVANCED_POWER_TRIAL_TARGET_SPEED_RPM;
+
+    /* Re-applying the base transaction resets every previous advanced policy
+     * before this trial builds its one-bit allow-listed candidate. */
+    status = foc_rust_configure(g_foc_controller, &trial_runtime_config);
+    if (status == FOC_STATUS_OK)
+    {
+        status = foc_rust_default_advanced_config(g_foc_controller,
+                                                  &advanced_config);
+    }
+    if (status == FOC_STATUS_OK)
+    {
+        advanced_config.algorithm.enabled_features =
+            (mode == FOC_ADVANCED_POWER_TRIAL_MODE_DECOUPLING) ?
+                FOC_ADVANCED_FEATURE_DECOUPLING : 0U;
+        advanced_config.platform_capabilities = 0U;
+        advanced_config.minimum_duty = g_foc_platform_config.minimum_duty;
+        advanced_config.maximum_duty = g_foc_platform_config.maximum_duty;
+        status = foc_rust_configure_advanced(g_foc_controller,
+                                             &advanced_config);
+    }
+    if (status == FOC_STATUS_OK)
+    {
+        trial_result = foc_advanced_power_trial_prepare(
+            &g_foc_advanced_power_trial,
+            mode,
+            &trial_runtime_config,
+            &advanced_config,
+            g_foc_power_safety.fault_epoch,
+            0U);
+        status = (trial_result == FOC_ADVANCED_POWER_TRIAL_RESULT_OK) ?
+            FOC_STATUS_OK : FOC_STATUS_NOT_CONFIGURED;
+    }
+    if (status == FOC_STATUS_OK)
+    {
+        trial_result = foc_advanced_power_trial_mark_armed(
+            &g_foc_advanced_power_trial);
+        status = (trial_result == FOC_ADVANCED_POWER_TRIAL_RESULT_OK) ?
+            FOC_STATUS_OK : FOC_STATUS_NOT_CONFIGURED;
+    }
+    foc_platform_advanced_exit_critical(key);
+
+    if (status == FOC_STATUS_OK)
+    {
+        status = foc_platform_control_start_internal(
+            FOC_ADVANCED_POWER_TRIAL_TARGET_SPEED_RPM,
+            FOC_CONTROL_START_AUTHORITY_ADVANCED);
+    }
+    if (status != FOC_STATUS_OK)
+    {
+        foc_advanced_runtime_config_t disabled_config;
+
+        key = foc_platform_advanced_enter_critical();
+        foc_platform_disable_power_fast();
+        foc_advanced_power_trial_fail(
+            &g_foc_advanced_power_trial,
+            FOC_ADVANCED_POWER_TRIAL_RESULT_PLATFORM_FAULT,
+            g_foc_power_safety.fault_epoch,
+            g_foc_diagnostics.deadline_miss_count);
+        foc_rust_stop(g_foc_controller);
+        if (foc_rust_configure(g_foc_controller,
+                               active_realtime_config) == FOC_STATUS_OK &&
+            foc_rust_default_advanced_config(g_foc_controller,
+                                             &disabled_config) == FOC_STATUS_OK)
+        {
+            (void)foc_rust_configure_advanced(g_foc_controller,
+                                              &disabled_config);
+        }
+        foc_platform_advanced_exit_critical(key);
+    }
+    return status;
+#else
+    (void)mode;
+    (void)active_realtime_config;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_advanced_candidate_power_trial_get_status(
+    foc_advanced_power_trial_status_t *status,
+    foc_advanced_telemetry_t *telemetry)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    foc_advanced_power_trial_result_t result;
+    uint32_t key;
+
+    if ((status == 0) || (telemetry == 0))
+    {
+        return FOC_STATUS_INVALID_ARGUMENT;
+    }
+    key = foc_platform_advanced_enter_critical();
+    result = foc_advanced_power_trial_get_status(
+        &g_foc_advanced_power_trial, status);
+    *telemetry = g_foc_advanced_telemetry;
+    foc_platform_advanced_exit_critical(key);
+    return (result == FOC_ADVANCED_POWER_TRIAL_RESULT_OK) ?
+        FOC_STATUS_OK : FOC_STATUS_NOT_CONFIGURED;
+#else
+    (void)status;
+    (void)telemetry;
+    return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+foc_status_t foc_platform_advanced_candidate_power_trial_finish(
+    const foc_runtime_config_t *restore_realtime_config)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    foc_advanced_runtime_config_t disabled_config;
+    foc_status_t status;
+    uint32_t key = foc_platform_advanced_enter_critical();
+
+    foc_advanced_power_trial_abort(&g_foc_advanced_power_trial);
+    foc_platform_disable_power_fast();
+    TIM1->CCR1 = 0U;
+    TIM1->CCR2 = 0U;
+    TIM1->CCR3 = 0U;
+    foc_rust_stop(g_foc_controller);
+    status = (restore_realtime_config != 0) ?
+        foc_rust_configure(g_foc_controller, restore_realtime_config) :
+        FOC_STATUS_INVALID_ARGUMENT;
+    if (status == FOC_STATUS_OK)
+    {
+        status = foc_rust_default_advanced_config(g_foc_controller,
+                                                  &disabled_config);
+    }
+    if (status == FOC_STATUS_OK)
+    {
+        status = foc_rust_configure_advanced(g_foc_controller,
+                                             &disabled_config);
+    }
+    foc_platform_advanced_exit_critical(key);
+    return status;
+#else
+    (void)restore_realtime_config;
     return FOC_STATUS_NOT_CONFIGURED;
 #endif
 }
@@ -3643,6 +3844,11 @@ void ADC1_2_IRQHandler(void)
     foc_motion_torque_trial_action_t torque_trial_action =
         FOC_MOTION_TORQUE_TRIAL_ACTION_CONTINUE;
 #endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    foc_advanced_power_trial_action_t advanced_trial_action =
+        FOC_ADVANCED_POWER_TRIAL_ACTION_CONTINUE;
+#endif
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
     foc_lsi_raw_sample_t lsi_raw_sample = {0};
     foc_lsi_capture_record_result_t lsi_capture_result =
@@ -3828,6 +4034,23 @@ void ADC1_2_IRQHandler(void)
                 FOC_RUST_FAULT_MOTION_CONTROL);
         }
 #endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+        if (g_foc_control_armed != 0U)
+        {
+            advanced_trial_action = foc_advanced_power_trial_begin_tick(
+                &g_foc_advanced_power_trial,
+                g_foc_power_safety.fault_epoch,
+                g_foc_diagnostics.deadline_miss_count);
+            if (advanced_trial_action ==
+                FOC_ADVANCED_POWER_TRIAL_ACTION_FAULT_STOP)
+            {
+                foc_platform_latch_fault_fast(
+                    FOC_POWER_FAULT_CONTROL,
+                    FOC_RUST_FAULT_ADVANCED_CONTROL);
+            }
+        }
+#endif
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
         if (peak > trip_counts)
         {
@@ -3977,6 +4200,18 @@ void ADC1_2_IRQHandler(void)
                     telemetry_output = &telemetry;
                 }
 #endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+                /* The bounded owner needs a coherent base telemetry snapshot
+                 * on every candidate tick, independently of trace sampling. */
+                if ((g_foc_advanced_power_trial.state ==
+                     FOC_ADVANCED_POWER_TRIAL_STARTUP) ||
+                    (g_foc_advanced_power_trial.state ==
+                     FOC_ADVANCED_POWER_TRIAL_ACTIVE))
+                {
+                    telemetry_output = &telemetry;
+                }
+#endif
                 control_cycle_start = DWT->CYCCNT;
                 control_executed = 1U;
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
@@ -4039,6 +4274,51 @@ void ADC1_2_IRQHandler(void)
                 ++g_foc_control_sequence;
                 control_cycle_end = DWT->CYCCNT;
                 g_foc_diagnostics.last_control_status = control_status;
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+                if (((g_foc_advanced_power_trial.state ==
+                      FOC_ADVANCED_POWER_TRIAL_STARTUP) ||
+                     (g_foc_advanced_power_trial.state ==
+                      FOC_ADVANCED_POWER_TRIAL_ACTIVE)) &&
+                    (control_status == FOC_STATUS_OK))
+                {
+                    foc_status_t advanced_status =
+                        foc_rust_get_advanced_telemetry(
+                            g_foc_controller,
+                            &g_foc_advanced_telemetry);
+                    if (advanced_status == FOC_STATUS_OK)
+                    {
+                        advanced_trial_action =
+                            foc_advanced_power_trial_validate_control(
+                                &g_foc_advanced_power_trial,
+                                &telemetry,
+                                &g_foc_advanced_telemetry);
+                    }
+                    else
+                    {
+                        foc_advanced_power_trial_fail(
+                            &g_foc_advanced_power_trial,
+                            FOC_ADVANCED_POWER_TRIAL_RESULT_ADVANCED_FAULT,
+                            g_foc_power_safety.fault_epoch,
+                            g_foc_diagnostics.deadline_miss_count);
+                        advanced_trial_action =
+                            FOC_ADVANCED_POWER_TRIAL_ACTION_FAULT_STOP;
+                    }
+                }
+#endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+                if (advanced_trial_action ==
+                    FOC_ADVANCED_POWER_TRIAL_ACTION_FAULT_STOP)
+                {
+                    ++g_foc_diagnostics.realtime_error_count;
+                    g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_CONTROL_ERROR;
+                    foc_platform_latch_fault_fast(
+                        FOC_POWER_FAULT_CONTROL,
+                        FOC_RUST_FAULT_ADVANCED_CONTROL);
+                }
+                else
+#endif
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_MOTION_CONTROL_CANDIDATE)
                 if ((motion_call_used != 0U) &&
@@ -4131,6 +4411,16 @@ void ADC1_2_IRQHandler(void)
                     {
                         ++g_foc_diagnostics.realtime_step_count;
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+                        if (g_foc_advanced_power_trial.state ==
+                            FOC_ADVANCED_POWER_TRIAL_ACTIVE)
+                        {
+                            advanced_trial_action =
+                                foc_advanced_power_trial_record_commit(
+                                    &g_foc_advanced_power_trial);
+                        }
+#endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_MOTION_CONTROL_CANDIDATE)
                         if (torque_trial_action ==
                             FOC_MOTION_TORQUE_TRIAL_ACTION_COMPLETE_STOP)
@@ -4140,6 +4430,16 @@ void ADC1_2_IRQHandler(void)
                              * scheduling cannot extend the 100 ms window. */
                             g_foc_motion_runtime_enabled = 0U;
                             g_foc_motion_command_ready = 0U;
+                            foc_platform_disable_power_fast();
+                        }
+#endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+                        if (advanced_trial_action ==
+                            FOC_ADVANCED_POWER_TRIAL_ACTION_COMPLETE_STOP)
+                        {
+                            /* Commit the 1,200th accepted tick, then cut the
+                             * physical path in this same ADC ISR. */
                             foc_platform_disable_power_fast();
                         }
 #endif
@@ -4262,6 +4562,11 @@ void ADC1_2_IRQHandler(void)
 #endif
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+                foc_advanced_power_trial_fail(
+                    &g_foc_advanced_power_trial,
+                    FOC_ADVANCED_POWER_TRIAL_RESULT_DEADLINE_MISSED,
+                    g_foc_power_safety.fault_epoch,
+                    g_foc_diagnostics.deadline_miss_count);
                 if ((g_foc_advanced_probe.state ==
                      FOC_ADVANCED_PROBE_RUNNING) ||
                     (g_foc_advanced_probe.state ==
@@ -4544,13 +4849,13 @@ foc_status_t foc_platform_apply_output(const foc_output_t *output)
  */
 static foc_status_t foc_platform_control_start_internal(
     float target_speed_rpm,
-    uint32_t allow_motion_candidate)
+    uint32_t candidate_authority)
 {
 #if defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD)
     /* Calibration/Identification 都在编译期禁用普通 arm。即使应用层或未来脚本
      * 误调用 start，平台层仍先执行硬关断再拒绝，保证不存在绕过 Shell 的路径。 */
     (void)target_speed_rpm;
-    (void)allow_motion_candidate;
+    (void)candidate_authority;
     foc_platform_emergency_stop();
     return FOC_STATUS_DISABLED;
 #elif defined(FOC_TARGET_STM32G431)
@@ -4582,7 +4887,7 @@ static foc_status_t foc_platform_control_start_internal(
     /* This dedicated image has exactly one arm authority: the fixed-envelope
      * Torque coordinator.  Generic foc_start is rejected even before a motion
      * route exists, so no Shell/API ordering can bypass the bounded trial. */
-    if (allow_motion_candidate == 0U)
+    if (candidate_authority != FOC_CONTROL_START_AUTHORITY_MOTION)
     {
         return FOC_STATUS_DISABLED;
     }
@@ -4593,7 +4898,21 @@ static foc_status_t foc_platform_control_start_internal(
         return FOC_STATUS_NOT_CONFIGURED;
     }
 #else
-    (void)allow_motion_candidate;
+    (void)candidate_authority;
+#endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    /* Advanced Lab also has one arm authority.  Generic foc_start and the
+     * no-power probe cannot bypass the bounded P5.4A coordinator. */
+    if (candidate_authority != FOC_CONTROL_START_AUTHORITY_ADVANCED)
+    {
+        return FOC_STATUS_DISABLED;
+    }
+    if (g_foc_advanced_power_trial.state !=
+        FOC_ADVANCED_POWER_TRIAL_STARTUP)
+    {
+        return FOC_STATUS_NOT_CONFIGURED;
+    }
 #endif
     status = foc_platform_read_feedback(&feedback);
     if (status != FOC_STATUS_OK)
@@ -4715,14 +5034,15 @@ static foc_status_t foc_platform_control_start_internal(
     return FOC_STATUS_OK;
 #else
     (void)target_speed_rpm;
-    (void)allow_motion_candidate;
+    (void)candidate_authority;
     return FOC_STATUS_NOT_CONFIGURED;
 #endif
 }
 
 foc_status_t foc_platform_control_start(float target_speed_rpm)
 {
-    return foc_platform_control_start_internal(target_speed_rpm, 0U);
+    return foc_platform_control_start_internal(
+        target_speed_rpm, FOC_CONTROL_START_AUTHORITY_GENERIC);
 }
 
 void foc_platform_control_stop(void)
@@ -4734,6 +5054,10 @@ void foc_platform_control_stop(void)
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_MOTION_CONTROL_CANDIDATE)
     foc_motion_torque_trial_abort(&g_foc_motion_torque_trial);
+#endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+    foc_advanced_power_trial_abort(&g_foc_advanced_power_trial);
 #endif
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
     if (g_foc_lsi_session_running != 0U)

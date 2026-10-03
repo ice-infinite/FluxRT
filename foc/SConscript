@@ -65,6 +65,7 @@ if GetDepend('FOC_MOTION_CONTROL_CANDIDATE'):
     src.append('runtime/foc_motion_torque_trial.c')
 if GetDepend('FOC_ADVANCED_CONTROL_CANDIDATE'):
     src.append('runtime/foc_advanced_probe.c')
+    src.append('runtime/foc_advanced_power_trial.c')
 if GetDepend('FOC_EXTERNAL_IO_FRAMEWORK'):
     src.append('runtime/foc_external_io.c')
     src.append('runtime/foc_external_input_port.c')

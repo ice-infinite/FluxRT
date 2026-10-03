@@ -1853,6 +1853,102 @@ static int foc_advanced_wcet(int argc, char **argv)
     return ((finish_status == FOC_STATUS_OK) && (result == 0)) ? 0 : -1;
 }
 MSH_CMD_EXPORT(foc_advanced_wcet, -);
+
+/* foc_advanced_trial P54-BASIC-100MS
+ *
+ * The first P5.4 powered gate exposes one exact token and only the feature=0
+ * baseline.  There is deliberately no caller-controlled speed, current,
+ * feature mask or duration.  The decoupling mode exists behind the platform
+ * contract but receives a Shell token only after this baseline is accepted. */
+static int foc_advanced_trial(int argc, char **argv)
+{
+    foc_advanced_power_trial_status_t trial;
+    foc_advanced_telemetry_t advanced;
+    foc_realtime_timing_stats_t timing;
+    foc_platform_diagnostics_t diagnostics;
+    foc_status_t status;
+    foc_status_t finish_status;
+    uint32_t started_ms;
+    int result = -1;
+
+    if ((argc != 2) || (strcmp(argv[1], "P54-BASIC-100MS") != 0))
+    {
+        rt_kprintf("FADVP,token\n");
+        return -1;
+    }
+    (void)memset(&trial, 0, sizeof(trial));
+    (void)memset(&advanced, 0, sizeof(advanced));
+    g_foc_management_log_inhibit = 1U;
+    status = foc_platform_advanced_candidate_power_trial_start(
+        FOC_ADVANCED_POWER_TRIAL_MODE_BASIC,
+        &g_foc_runtime_config);
+    if (status != FOC_STATUS_OK)
+    {
+        (void)foc_platform_advanced_candidate_power_trial_get_status(
+            &trial, &advanced);
+        finish_status =
+            foc_platform_advanced_candidate_power_trial_finish(
+                &g_foc_runtime_config);
+        rt_kprintf("FADVP,start=%u,state=%u,result=%u,finish=%u\n",
+                   (unsigned int)status,
+                   (unsigned int)trial.state,
+                   (unsigned int)trial.result,
+                   (unsigned int)finish_status);
+        g_foc_management_log_inhibit = 0U;
+        return -1;
+    }
+
+    started_ms = (uint32_t)rt_tick_get_millisecond();
+    do
+    {
+        rt_thread_mdelay(1);
+        status = foc_platform_advanced_candidate_power_trial_get_status(
+            &trial, &advanced);
+        if ((status != FOC_STATUS_OK) ||
+            (trial.state == FOC_ADVANCED_POWER_TRIAL_COMPLETE) ||
+            (trial.state == FOC_ADVANCED_POWER_TRIAL_FAILED) ||
+            (trial.state == FOC_ADVANCED_POWER_TRIAL_ABORTED))
+        {
+            break;
+        }
+    } while ((uint32_t)((uint32_t)rt_tick_get_millisecond() - started_ms) <
+             16000U);
+
+    (void)foc_platform_get_timing(&timing);
+    (void)foc_platform_get_diagnostics(&diagnostics);
+    finish_status = foc_platform_advanced_candidate_power_trial_finish(
+        &g_foc_runtime_config);
+    rt_kprintf("FADVP,state=%u,result=%u,ticks=%u/%u,first=%u,"
+               "epoch=%u/%u,miss=%u/%u,features=%02x,status=%08x,"
+               "wcet=%u,ctrl=%u,diagmiss=%u,finish=%u\n",
+               (unsigned int)trial.state,
+               (unsigned int)trial.result,
+               (unsigned int)trial.active_ticks,
+               (unsigned int)trial.total_ticks,
+               (unsigned int)trial.first_active_tick,
+               (unsigned int)trial.expected_fault_epoch,
+               (unsigned int)trial.observed_fault_epoch,
+               (unsigned int)trial.initial_deadline_miss_count,
+               (unsigned int)trial.observed_deadline_miss_count,
+               (unsigned int)trial.last_active_features,
+               (unsigned int)trial.last_advanced_status_flags,
+               (unsigned int)timing.wcet.total_cycles,
+               (unsigned int)timing.peak_control_cycles,
+               (unsigned int)diagnostics.deadline_miss_count,
+               (unsigned int)finish_status);
+    result = ((status == FOC_STATUS_OK) &&
+              (trial.state == FOC_ADVANCED_POWER_TRIAL_COMPLETE) &&
+              (trial.result == FOC_ADVANCED_POWER_TRIAL_RESULT_OK) &&
+              (trial.active_ticks ==
+               FOC_ADVANCED_POWER_TRIAL_ACTIVE_TICKS) &&
+              (trial.last_active_features == 0U) &&
+              (trial.last_advanced_status_flags == 0U) &&
+              (diagnostics.deadline_miss_count == 0U) &&
+              (finish_status == FOC_STATUS_OK)) ? 0 : -1;
+    g_foc_management_log_inhibit = 0U;
+    return result;
+}
+MSH_CMD_EXPORT(foc_advanced_trial, -);
 #endif
 
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \

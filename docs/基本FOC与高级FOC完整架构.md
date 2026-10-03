@@ -105,9 +105,9 @@ FOC输出；输入非有限、平台能力丢失、supervisor失败或PWM非法�
 ## 6. 配置与 ABI
 
 - 全局 bridge：V21 / `0x00150000`；V19 的 88 B 逐拍输入布局不变；
-- 高级子 ABI：V1 / `0x00010000`；
+- 高级子 ABI：V2 / `0x00020000`；
 - `foc_advanced_algorithm_config_t`：128 B；
-- `foc_advanced_runtime_config_t`：144 B；
+- `foc_advanced_runtime_config_t`：148 B，新增平台有效`minimum_duty/maximum_duty`窗口；
 - `foc_advanced_telemetry_t`：68 B；
 - 配置顺序：`foc_rust_configure()` 基础参数 →
   `foc_rust_default_advanced_config()` → 修改字段 →
@@ -124,6 +124,35 @@ FOC输出；输入非有限、平台能力丢失、supervisor失败或PWM非法�
 
 能力位表示平台实现具备相应机制，不表示参数已审批。当前目标 ABI 仍拒绝 HFI 和飞车启动，
 因为尚无逐拍显式请求通道；这两项不能通过伪造 capability 绕过。
+
+### 6.1 P5.4A 目标有界 owner
+
+高级算法 supervisor 与“谁能打开功率输出”是两层不同所有权。P5.4A 增加
+`foc_advanced_power_trial` 硬件中立状态机，STM32G431 平台负责把它绑定到真实启动、ISR和
+关断寄存器：
+
+```text
+Shell精确token
+  -> Advanced平台authority
+  -> 私有闭环/582 rpm trial配置
+  -> 正常startup + observer获取
+  -> ClosedLoop且observer可靠
+  -> 1200拍active窗
+  -> ISR同拍关闭Gate/MOE/CCER
+  -> 恢复Advanced disabled和Basic runtime
+```
+
+- Generic、Motion、Advanced 使用三个独立 start authority；Advanced Lab 的普通
+  `foc_start` 不能 arm；
+- Shell 当前只开放 `P54-BASIC-100MS`，不接受转速、电流、feature mask或时长参数；
+- 状态机内部允许 feature=0 和单独 dq 解耦，但解耦 token 必须等基线 S5 通过后另行开放；
+- startup 获取阶段允许 observer 暂未可靠；进入 active 后一旦回退立即停机；fault epoch、
+  deadline miss、Advanced fault、超时和非法输出同样 fail-closed；
+- 正常/非锁存退出恢复调用者 Basic 配置；若硬件或控制故障已经锁存，故障保持 sticky，
+  owner 不会为了恢复配置而自动清故障，后续必须走显式安全恢复流程。
+
+这套 owner 只建立了可测试的实机事务边界。S4 断主电源通过不代表 S5 powered、参数准确或
+高级功能收益已经成立。
 
 ## 7. 文件落位
 
