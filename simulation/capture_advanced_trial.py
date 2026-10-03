@@ -2,8 +2,10 @@
 """Capture exactly one bounded P5.4 Advanced trial without losing its final line.
 
 The command and token are intentionally fixed.  A real run requires both
-``--allow-motor-run`` and ``--confirm-safe-setup``; every exit path sends two
-``foc_stop`` commands, requests final status and writes the raw log.
+``--allow-motor-run`` and ``--confirm-safe-setup``.  The mutually exclusive
+``--no-power-proof`` mode requires a bus voltage at or below 1 V and verifies
+the firmware's exact low-bus refusal.  Every exit path sends two ``foc_stop``
+commands, requests final status and writes the raw log.
 """
 
 from __future__ import annotations
@@ -35,6 +37,11 @@ def parse_args() -> argparse.Namespace:
         "--confirm-safe-setup",
         action="store_true",
         help="confirm 12.3 V, <=2 A, unloaded/free rotor and immediate power cut",
+    )
+    parser.add_argument(
+        "--no-power-proof",
+        action="store_true",
+        help="require <=1 V bus and accept only the fixed low-bus rejection",
     )
     return parser.parse_args()
 
@@ -72,7 +79,9 @@ def collect_for(
     return lines
 
 
-def parse_preflight(lines: list[str]) -> dict[str, int | bool]:
+def parse_preflight(
+    lines: list[str], *, expect_powered: bool = True
+) -> dict[str, int | bool]:
     text = "\n".join(lines)
     fadc = next((line for line in reversed(lines) if "FADC," in line), "")
     try:
@@ -82,14 +91,19 @@ def parse_preflight(lines: list[str]) -> dict[str, int | bool]:
     except (ValueError, IndexError):
         bus_raw = -1
         bus_mv = -1
-    safe = (
+    common_safe = (
         "FSTAT,disabled," in text
         and "FOC st=0 rf=00000000 duty=0/0/0" in text
         and "FFAULT,00000000,00000000,0,0" in text
         and re.search(r"\bmiss=0(?:\s|$)", text) is not None
-        and 10000 <= bus_mv <= 15000
     )
-    return {"safe": safe, "bus_raw": bus_raw, "bus_mv": bus_mv}
+    bus_safe = 10000 <= bus_mv <= 15000 if expect_powered else 0 <= bus_mv <= 1000
+    return {
+        "safe": common_safe and bus_safe,
+        "bus_raw": bus_raw,
+        "bus_mv": bus_mv,
+        "expect_powered": expect_powered,
+    }
 
 
 def parse_completion(line: str) -> dict[str, str] | None:
@@ -175,7 +189,11 @@ def write_outputs(
 
 def main() -> int:
     args = parse_args()
-    if not args.allow_motor_run or not args.confirm_safe_setup:
+    if args.no_power_proof and (args.allow_motor_run or args.confirm_safe_setup):
+        raise SystemExit("--no-power-proof is mutually exclusive with powered authorization")
+    if not args.no_power_proof and (
+        not args.allow_motor_run or not args.confirm_safe_setup
+    ):
         raise SystemExit(
             "refusing motor run without --allow-motor-run and --confirm-safe-setup"
         )
@@ -192,7 +210,12 @@ def main() -> int:
     completion_line = ""
     completion: dict[str, str] | None = None
     error_text = ""
-    preflight: dict[str, int | bool] = {"safe": False, "bus_raw": -1, "bus_mv": -1}
+    preflight: dict[str, int | bool] = {
+        "safe": False,
+        "bus_raw": -1,
+        "bus_mv": -1,
+        "expect_powered": not args.no_power_proof,
+    }
     final_status: list[str] = []
 
     try:
@@ -204,7 +227,9 @@ def main() -> int:
                 collect_for(port, 0.25, raw, "preflight-stop")
                 send(port, "foc_status")
                 preflight_lines = collect_for(port, 1.0, raw, "preflight-status")
-                preflight = parse_preflight(preflight_lines)
+                preflight = parse_preflight(
+                    preflight_lines, expect_powered=not args.no_power_proof
+                )
                 if not bool(preflight["safe"]):
                     raise RuntimeError(f"unsafe preflight: {preflight}")
                 send(port, TRIAL_COMMAND)
@@ -219,6 +244,13 @@ def main() -> int:
     shutdown_safe = shutdown_output_safe(final_status)
     if not error_text and not shutdown_safe:
         error_text = "cleanup status did not prove st=0 and duty=0/0/0"
+    if (
+        not error_text
+        and args.no_power_proof
+        and completion is not None
+        and (completion.get("start") != "2" or completion.get("result") != "9")
+    ):
+        error_text = "no-power proof did not return start=2,result=9"
 
     document: dict[str, object] = {
         "schema_version": 1,
@@ -227,6 +259,7 @@ def main() -> int:
         "port": args.port,
         "baud": args.baud,
         "timeout_s": args.timeout_s,
+        "mode": "no-power-proof" if args.no_power_proof else "powered",
         "command": TRIAL_COMMAND,
         "preflight": preflight,
         "completion_line": completion_line,

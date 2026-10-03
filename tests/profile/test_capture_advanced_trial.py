@@ -24,7 +24,12 @@ class AdvancedTrialCaptureTests(unittest.TestCase):
         ]
         self.assertEqual(
             capture_tool.parse_preflight(lines),
-            {"safe": True, "bus_raw": 953, "bus_mv": 12288},
+            {
+                "safe": True,
+                "bus_raw": 953,
+                "bus_mv": 12288,
+                "expect_powered": True,
+            },
         )
         for index in range(4):
             altered = lines.copy()
@@ -44,6 +49,23 @@ class AdvancedTrialCaptureTests(unittest.TestCase):
                 "safe"
             ]
         )
+
+    def test_no_power_preflight_requires_at_most_one_volt(self) -> None:
+        base = [
+            "FSTAT,disabled,x",
+            "FOC f=0 miss=0",
+            "FOC st=0 rf=00000000 duty=0/0/0",
+            "FFAULT,00000000,00000000,0,0",
+        ]
+        low = capture_tool.parse_preflight(
+            base + ["FADC,1/2/3,1/2/3,3,39,2045"], expect_powered=False
+        )
+        high = capture_tool.parse_preflight(
+            base + ["FADC,1/2/3,1/2/3,100,1290,2045"], expect_powered=False
+        )
+        self.assertTrue(low["safe"])
+        self.assertFalse(high["safe"])
+        self.assertFalse(low["expect_powered"])
 
     def test_normal_completion_is_parsed_without_changing_values(self) -> None:
         parsed = capture_tool.parse_completion(
