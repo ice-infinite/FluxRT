@@ -375,9 +375,19 @@ static foc_status_t foc_platform_control_start_internal(
 static foc_advanced_probe_t g_foc_advanced_probe;
 static foc_advanced_probe_input_t g_foc_advanced_probe_input;
 /* The no-power probe and powered owner are mutually exclusive.  Sharing their
- * latest telemetry preserves the Advanced-Lab heap gate on the 32 KiB target. */
-static foc_advanced_telemetry_t g_foc_advanced_telemetry;
-static foc_advanced_power_trial_snapshot_t g_foc_advanced_power_trial_snapshot;
+ * latest telemetry/snapshot preserves the Advanced-Lab heap gate on the 32 KiB
+ * target.  The powered management API reconstructs its two published words
+ * from the owner state, so it never interprets the compact union member as full
+ * telemetry. */
+typedef union
+{
+    foc_advanced_telemetry_t telemetry;
+    foc_advanced_power_trial_snapshot_t power_trial_snapshot;
+} foc_advanced_shared_status_t;
+_Static_assert(sizeof(foc_advanced_shared_status_t) ==
+               sizeof(foc_advanced_telemetry_t),
+               "Advanced shared status must not grow target BSS");
+static foc_advanced_shared_status_t g_foc_advanced_shared_status;
 static foc_advanced_power_trial_t g_foc_advanced_power_trial;
 static volatile uint32_t g_foc_advanced_probe_active;
 static float g_foc_advanced_probe_nominal_bus_voltage_v;
@@ -1345,22 +1355,22 @@ static foc_status_t foc_platform_advanced_probe_step_isr(
         &g_foc_advanced_probe_input,
         &output,
         0,
-        &g_foc_advanced_telemetry);
+        &g_foc_advanced_shared_status.telemetry);
     ++g_foc_control_sequence;
 
     /* FNV-1a over discrete decisions gives a deterministic per-tick signature
      * without requiring bit-identical target/PC floating-point duties. */
     g_foc_advanced_probe.decision_signature ^=
-        g_foc_advanced_telemetry.active_features;
+        g_foc_advanced_shared_status.telemetry.active_features;
     g_foc_advanced_probe.decision_signature *= 16777619UL;
     g_foc_advanced_probe.decision_signature ^=
-        g_foc_advanced_telemetry.region;
+        g_foc_advanced_shared_status.telemetry.region;
     g_foc_advanced_probe.decision_signature *= 16777619UL;
     g_foc_advanced_probe.decision_signature ^=
-        g_foc_advanced_telemetry.modulation_mode;
+        g_foc_advanced_shared_status.telemetry.modulation_mode;
     g_foc_advanced_probe.decision_signature *= 16777619UL;
     g_foc_advanced_probe.decision_signature ^=
-        g_foc_advanced_telemetry.status_flags;
+        g_foc_advanced_shared_status.telemetry.status_flags;
     g_foc_advanced_probe.decision_signature *= 16777619UL;
     ++g_foc_advanced_probe.decision_samples;
 
@@ -2633,8 +2643,8 @@ foc_status_t foc_platform_init(void)
     g_foc_advanced_probe_nominal_bus_voltage_v = 0.0f;
     (void)memset(&g_foc_advanced_probe_input, 0,
                  sizeof(g_foc_advanced_probe_input));
-    (void)memset(&g_foc_advanced_telemetry, 0,
-                 sizeof(g_foc_advanced_telemetry));
+    (void)memset(&g_foc_advanced_shared_status, 0,
+                 sizeof(g_foc_advanced_shared_status));
 #endif
     g_foc_bus_min_raw = foc_platform_bus_voltage_to_raw(
         g_foc_platform_config.minimum_bus_voltage_v);
@@ -3389,7 +3399,7 @@ foc_status_t foc_platform_advanced_candidate_probe_get_status(
     }
     key = foc_platform_advanced_enter_critical();
     result = foc_advanced_probe_get_status(&g_foc_advanced_probe, status);
-    *telemetry = g_foc_advanced_telemetry;
+    *telemetry = g_foc_advanced_shared_status.telemetry;
     foc_platform_advanced_exit_critical(key);
     return (result == FOC_ADVANCED_PROBE_RESULT_OK) ?
         FOC_STATUS_OK : FOC_STATUS_NOT_CONFIGURED;
@@ -3461,8 +3471,8 @@ foc_status_t foc_platform_advanced_candidate_power_trial_start(
     TIM1->CCR2 = 0U;
     TIM1->CCR3 = 0U;
     (void)foc_advanced_power_trial_init(&g_foc_advanced_power_trial);
-    (void)memset(&g_foc_advanced_telemetry, 0,
-                 sizeof(g_foc_advanced_telemetry));
+    (void)memset(&g_foc_advanced_shared_status, 0,
+                 sizeof(g_foc_advanced_shared_status));
 
     /* The boot production profile deliberately keeps closed loop disabled.
      * This exact-token owner creates a private, bounded candidate instead of
@@ -3567,7 +3577,11 @@ foc_status_t foc_platform_advanced_candidate_power_trial_get_status(
     key = foc_platform_advanced_enter_critical();
     result = foc_advanced_power_trial_get_status(
         &g_foc_advanced_power_trial, status);
-    *telemetry = g_foc_advanced_telemetry;
+    (void)memset(telemetry, 0, sizeof(*telemetry));
+    telemetry->struct_size = sizeof(*telemetry);
+    telemetry->abi_version = FOC_ADVANCED_ABI_VERSION;
+    telemetry->active_features = status->last_active_features;
+    telemetry->status_flags = status->last_advanced_status_flags;
     foc_platform_advanced_exit_critical(key);
     return (result == FOC_ADVANCED_POWER_TRIAL_RESULT_OK) ?
         FOC_STATUS_OK : FOC_STATUS_NOT_CONFIGURED;
@@ -4280,13 +4294,13 @@ void ADC1_2_IRQHandler(void)
                     foc_status_t advanced_status =
                         foc_rust_get_advanced_power_trial_snapshot(
                             g_foc_controller,
-                            &g_foc_advanced_power_trial_snapshot);
+                            &g_foc_advanced_shared_status.power_trial_snapshot);
                     if (advanced_status == FOC_STATUS_OK)
                     {
                         advanced_trial_action =
                             foc_advanced_power_trial_validate_control(
                                 &g_foc_advanced_power_trial,
-                                &g_foc_advanced_power_trial_snapshot);
+                                &g_foc_advanced_shared_status.power_trial_snapshot);
                     }
                     else
                     {
