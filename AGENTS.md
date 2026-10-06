@@ -70,3 +70,35 @@ When Git is available:
 Use the smallest relevant checks after each step. Structural or firmware changes should normally
 run `test.ps1` and the appropriate target build; documentation-only changes require link and path
 validation. Record exactly what ran and what did not run.
+
+## Mandatory post-change review (standing rule)
+
+**Re-read this section after any context compaction; it is a standing user instruction, not a
+one-off.**
+
+After writing any code, before claiming the step is done, review your own change from every angle
+and **report the review explicitly** — a bare "reviewed it" is not acceptable. Walk at least these
+seven checks and state the outcome of each:
+
+1. **Logic correctness** — does the change do what it claims on every path, including the failure
+   paths? Are there off-by-one, ordering or sequence-domain mistakes?
+2. **Consistency with callers and callees** — do the units, sequence counters, status codes and
+   ownership expectations still match on both sides of every boundary touched?
+3. **No regression of existing behaviour** — *this is the highest priority.* Prove it, do not
+   assume it: prefer a diff that is additions-only, confirm no unrelated branch was modified, and
+   where the change could plausibly interact with existing paths, **re-run those paths on the
+   target** and record the result. A change that fixes something by breaking something else is a
+   failure, not progress.
+4. **ABI and layout drift** — no field reordering, no size or offset change without an explicit
+   version decision and a static assertion.
+5. **Safety invariants intact** — the change must not weaken the arm gate, the hardware fault
+   checks, the fail-closed paths or the single-writer rules. State which invariants were checked.
+6. **Failure paths fail closed** — every new error branch must clear output, latch or refuse, and
+   must not silently continue.
+7. **Test coverage** — new paths need new coverage; existing coverage must still pass. Record what
+   ran and what did not run.
+
+If a check cannot be satisfied, say so plainly and stop rather than declaring success. When a
+probe or measurement change turns out to be ineffective, remove it from the diff instead of
+leaving dead or misleading code behind.
+
