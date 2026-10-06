@@ -10,7 +10,7 @@ int main(void)
     assert(FOC_SENSORLESS_INPUT_KNOWN_MASK == 0x0FU);
     assert(sizeof(foc_sensorless_runtime_config_t) == 144U);
     assert(sizeof(foc_sensorless_realtime_input_t) == 48U);
-    assert(sizeof(foc_sensorless_realtime_output_t) == 144U);
+    assert(sizeof(foc_sensorless_realtime_output_t) == 148U);
     /* V3 appended chain_cycles; the earlier offsets are unchanged. */
     assert(FOC_SENSORLESS_OUTPUT_VERSION == 3U);
     assert(offsetof(foc_sensorless_realtime_output_t, chain_cycles) == 84U);
@@ -31,14 +31,18 @@ int main(void)
     assert(offsetof(foc_sensorless_realtime_output_t, tail_setup_cycles) == 132U);
     assert(offsetof(foc_sensorless_realtime_output_t, reference_cycles) == 136U);
     assert(offsetof(foc_sensorless_realtime_output_t, tail_finish_cycles) == 140U);
-    assert(sizeof(foc_probe_decomp_tick_t) == 34U);
+    assert(offsetof(foc_sensorless_realtime_output_t, core_total_cycles) == 144U);
+    assert(sizeof(foc_probe_decomp_tick_t) == 42U);
     assert(sizeof(foc_sensorless_voltage_input_t) == 48U);
     assert(sizeof(foc_sensorless_voltage_output_t) == 44U);
     assert(sizeof(foc_sensorless_composite_input_t) == 44U);
-    /* V2 appended chain_status; the earlier offsets are unchanged. */
-    assert(FOC_SENSORLESS_COMPOSITE_OUTPUT_VERSION == 2U);
-    assert(sizeof(foc_sensorless_composite_output_t) == 28U);
+    /* V2 added chain_status; V4 added the combined-entry attribution. */
+    assert(FOC_SENSORLESS_COMPOSITE_OUTPUT_VERSION == 4U);
+    assert(sizeof(foc_sensorless_composite_output_t) == 40U);
     assert(offsetof(foc_sensorless_composite_output_t, chain_status) == 24U);
+    assert(offsetof(foc_sensorless_composite_output_t, entry_setup_cycles) == 28U);
+    assert(offsetof(foc_sensorless_composite_output_t, entry_chain_cycles) == 32U);
+    assert(offsetof(foc_sensorless_composite_output_t, entry_core_cycles) == 36U);
     assert(offsetof(foc_sensorless_composite_output_t,
                     applied_injection_beta_v) == 20U);
     assert(offsetof(foc_sensorless_realtime_input_t,

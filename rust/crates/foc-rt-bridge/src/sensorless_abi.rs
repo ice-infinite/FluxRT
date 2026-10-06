@@ -31,7 +31,7 @@ pub const FOC_SENSORLESS_COMPOSITE_INPUT_VERSION: u32 = 1;
 /// indistinguishable on hardware; the chain's own status now travels out with
 /// the frame that failed.  The field is appended so V1 readers keep their
 /// offsets.
-pub const FOC_SENSORLESS_COMPOSITE_OUTPUT_VERSION: u32 = 2;
+pub const FOC_SENSORLESS_COMPOSITE_OUTPUT_VERSION: u32 = 4;
 pub const FOC_SENSORLESS_CONTEXT_CAPACITY: usize = 512;
 
 /// Free-running cycle counter supplied by the target platform.
@@ -275,6 +275,11 @@ pub struct FocSensorlessRealtimeOutput {
     pub tail_setup_cycles: u32,
     pub reference_cycles: u32,
     pub tail_finish_cycles: u32,
+    /// The whole `step_core` call measured from inside it, entry mark to final
+    /// mark.  `control − chain` estimates the same span across the FFI boundary,
+    /// so publishing both makes the attribution auditable rather than merely
+    /// self-consistent.  Zero unless timing was requested.
+    pub core_total_cycles: u32,
 }
 
 #[repr(C)]
@@ -347,6 +352,15 @@ pub struct FocSensorlessCompositeOutput {
     /// that never reached the chain because an envelope or ledger check
     /// rejected the tick first.
     pub chain_status: u32,
+    /// V4 measurement fields.  Attribution of the whole combined entry, taken at
+    /// its own boundaries: entry to the chain call, the chain call itself, and
+    /// the shared core call.  Together with the platform's total these must
+    /// account for every cycle of the entry, which is what makes the deeper
+    /// attribution auditable instead of merely self-consistent.  Zero unless
+    /// timing was requested; no control path may read them.
+    pub entry_setup_cycles: u32,
+    pub entry_chain_cycles: u32,
+    pub entry_core_cycles: u32,
 }
 
 #[repr(C, align(8))]
@@ -426,12 +440,12 @@ const _: () = assert!(size_of::<FocSensorlessFusionConfig>() == 40);
 const _: () = assert!(size_of::<FocSensorlessRuntimeConfig>() == 144);
 const _: () = assert!(size_of::<FocSensorlessConfigureGuard>() == 28);
 const _: () = assert!(size_of::<FocSensorlessRealtimeInput>() == 48);
-const _: () = assert!(size_of::<FocSensorlessRealtimeOutput>() == 144);
+const _: () = assert!(size_of::<FocSensorlessRealtimeOutput>() == 148);
 const _: () = assert!(size_of::<SensorlessAbiContext>() <= FOC_SENSORLESS_CONTEXT_CAPACITY);
 const _: () = assert!(size_of::<FocSensorlessVoltageInput>() == 48);
 const _: () = assert!(size_of::<FocSensorlessVoltageOutput>() == 44);
 const _: () = assert!(size_of::<FocSensorlessCompositeInput>() == 44);
-const _: () = assert!(size_of::<FocSensorlessCompositeOutput>() == 28);
+const _: () = assert!(size_of::<FocSensorlessCompositeOutput>() == 40);
 const _: () =
     assert!(align_of::<SensorlessAbiContext>() <= align_of::<FocSensorlessContextStorage>());
 

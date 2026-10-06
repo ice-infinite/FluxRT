@@ -60,6 +60,14 @@ typedef struct
     uint16_t tail_setup;
     uint16_t reference;
     uint16_t tail_finish;
+    /* The whole step_core call as measured from inside it, for auditing the
+     * attribution against the caller's `control − chain`. */
+    uint16_t core_total;
+    /* Attribution of the combined entry itself: entry to the chain call, the
+     * chain call, and the shared core call. */
+    uint16_t entry_setup;
+    uint16_t entry_chain;
+    uint16_t entry_core;
 } foc_probe_decomp_tick_t;
 
 /* Copies up to `capacity` ticks into the caller's array and returns the number

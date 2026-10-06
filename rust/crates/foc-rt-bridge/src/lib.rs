@@ -392,6 +392,11 @@ pub(crate) struct CoreTiming {
     pub reference_cycles: u32,
     /// After that evaluation: telemetry assembly, the output snapshot and flags.
     pub tail_finish_cycles: u32,
+    /// The whole `step_core` call as measured from the inside, entry mark to
+    /// final mark.  `control − chain` is an independent estimate of the same
+    /// span computed across the FFI boundary; the two must agree, so publishing
+    /// both is what makes the attribution auditable rather than self-consistent.
+    pub total_cycles: u32,
 }
 
 /// Diagnostic-only entry used by the stopped-state C benchmark to measure the
@@ -3135,6 +3140,10 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
     sensorless_output: *mut FocSensorlessRealtimeOutput,
     composite_output: *mut FocSensorlessCompositeOutput,
 ) -> FocStatus {
+    // Taken before anything else so the entry attribution covers the whole call,
+    // including the three output-state resets below, which are themselves a
+    // measurable share of the entry.
+    let entry_mark = composite_mark_cycles();
     let Some(output) = (unsafe { output.as_mut() }) else {
         return FocStatus::InvalidArgument;
     };
@@ -3253,6 +3262,12 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
         foc_rust_sensorless_step(sensorless_context, &sensorless_input, sensorless_output)
     };
     let chain_end_cycles = composite_mark_cycles();
+    // Entry attribution: everything before the chain call is its own span, and
+    // the chain call is the next one.
+    {
+        composite_output.entry_setup_cycles = chain_start_cycles.wrapping_sub(entry_mark);
+        composite_output.entry_chain_cycles = chain_end_cycles.wrapping_sub(chain_start_cycles);
+    }
     /* V2: publish the chain's own verdict.  Everything below collapses a chain
      * rejection into FocStatus::HardwareFault, so without this the rejecting
      * check is indistinguishable on the target.  A frame that never reached the
@@ -3312,6 +3327,7 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
         applied_injection: foc_algorithm::AlphaBeta::default(),
         injection_limited: false,
     };
+    let core_start_cycles = composite_mark_cycles();
     let status = unsafe {
         foc_rust_realtime_step_core(
             controller,
@@ -3322,6 +3338,10 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
             core_timing_out,
         )
     };
+    let core_end_cycles = composite_mark_cycles();
+    // The third entry span: the shared core call.  The remainder of the entry
+    // after this mark is the completion path below.
+    composite_output.entry_core_cycles = core_end_cycles.wrapping_sub(core_start_cycles);
     if status != FocStatus::Ok {
         zero_output(output);
         if status == FocStatus::HardwareFault || controller.state == FocState::Fault {
@@ -3341,6 +3361,7 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
         sensorless_output.tail_setup_cycles = core_timing.tail_setup_cycles;
         sensorless_output.reference_cycles = core_timing.reference_cycles;
         sensorless_output.tail_finish_cycles = core_timing.tail_finish_cycles;
+        sensorless_output.core_total_cycles = core_timing.total_cycles;
     }
     if frame.injection_limited {
         composite_output.status_flags |= FOC_SENSORLESS_COMPOSITE_OUTPUT_INJECTION_LIMITED;
@@ -4345,11 +4366,12 @@ unsafe fn foc_rust_realtime_step_core(
         };
         startup.current_reference
     };
-    // Attribution boundary: the control law and its output shaping end here.
-    #[cfg(feature = "sensorless-foc")]
-    if timing.is_some() {
-        mark_after_reference = Some(composite_mark_cycles());
-    }
+    // NOTE: the boundary that ends the control law is NOT here.  On the
+    // composite path `force_reference()` is false (lib.rs:3669) and
+    // `startup.phase` is not ClosedLoop, so this evaluation takes the else
+    // branch and costs ~81 cycles.  The real current-loop precompute and
+    // regulation happen further down, after the policy is resolved.  The
+    // `mark_after_reference` mark is therefore taken there.
 
     // The alignment-boundary observer seed/update, a divided observer update,
     // or the motion outer loop may own one scheduled slot while the power stage
@@ -4650,6 +4672,15 @@ unsafe fn foc_rust_realtime_step_core(
                 &mut math,
             )
     };
+    // Attribution boundary: the control law ends here.  Everything from
+    // `mark_reference` to this point is the real work of the frame -- the
+    // current-loop precompute (Park), the regulation, the final vector limit and
+    // SVPWM -- regardless of which reference branch ran above.  What follows is
+    // output validation, feed-forward and the telemetry snapshot.
+    #[cfg(feature = "sensorless-foc")]
+    if timing.is_some() {
+        mark_after_reference = Some(composite_mark_cycles());
+    }
     #[cfg(feature = "sensorless-foc")]
     reference_mode.record_sensorless_application(control);
     // 输出合法性检查：非有限或超出 `[0,1]` 一律锁存 `FOC_FAULT_ALGORITHM_OUTPUT`
@@ -4749,6 +4780,10 @@ unsafe fn foc_rust_realtime_step_core(
         sink.tail_setup_cycles = reference.wrapping_sub(startup);
         sink.reference_cycles = after_reference.wrapping_sub(reference);
         sink.tail_finish_cycles = end.wrapping_sub(after_reference);
+        // The span measured entirely inside this call.  If this disagrees with
+        // the caller's `control − chain`, one of the two spans is wrong and the
+        // attribution above cannot be trusted.
+        sink.total_cycles = end.wrapping_sub(entry);
     }
     FocStatus::Ok
 }

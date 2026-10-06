@@ -34,7 +34,7 @@ extern "C" {
  * FOC_STATUS_HARDWARE_FAULT, so the rejecting check cannot otherwise be told
  * apart on the target.  Zero means the frame never reached the chain because an
  * envelope or ledger check rejected the tick first. */
-#define FOC_SENSORLESS_COMPOSITE_OUTPUT_VERSION (2UL)
+#define FOC_SENSORLESS_COMPOSITE_OUTPUT_VERSION (4UL)
 #define FOC_SENSORLESS_CONTEXT_CAPACITY         (512UL)
 
 #define FOC_SENSORLESS_CAP_SYNCHRONIZED_CURRENT_SAMPLE (1UL << 0)
@@ -230,6 +230,10 @@ typedef struct
     uint32_t tail_setup_cycles;
     uint32_t reference_cycles;
     uint32_t tail_finish_cycles;
+    /* The whole step_core call measured from inside it.  `control − chain`
+     * estimates the same span across the FFI boundary, so publishing both makes
+     * the attribution auditable rather than merely self-consistent. */
+    uint32_t core_total_cycles;
 } foc_sensorless_realtime_output_t;
 
 /* Deterministic N+1 voltage-composition transaction.  The caller supplies the
@@ -297,6 +301,13 @@ typedef struct
     float applied_injection_alpha_v;
     float applied_injection_beta_v;
     uint32_t chain_status;
+    /* V4 measurement: attribution of the whole combined entry at its own
+     * boundaries -- entry to the chain call, the chain call, and the shared core
+     * call.  With the platform's total these must account for every cycle of the
+     * entry.  Zero unless timing was requested; no control path may read them. */
+    uint32_t entry_setup_cycles;
+    uint32_t entry_chain_cycles;
+    uint32_t entry_core_cycles;
 } foc_sensorless_composite_output_t;
 
 #if defined(_MSC_VER)
@@ -349,7 +360,7 @@ _Static_assert(sizeof(foc_sensorless_configure_guard_t) == 28U,
                "sensorless configure guard ABI mismatch");
 _Static_assert(sizeof(foc_sensorless_realtime_input_t) == 48U,
                "sensorless realtime input ABI mismatch");
-_Static_assert(sizeof(foc_sensorless_realtime_output_t) == 144U,
+_Static_assert(sizeof(foc_sensorless_realtime_output_t) == 148U,
                "sensorless realtime output ABI mismatch");
 _Static_assert(sizeof(foc_sensorless_voltage_input_t) == 48U,
                "sensorless voltage input ABI mismatch");
@@ -357,7 +368,7 @@ _Static_assert(sizeof(foc_sensorless_voltage_output_t) == 44U,
                "sensorless voltage output ABI mismatch");
 _Static_assert(sizeof(foc_sensorless_composite_input_t) == 44U,
                "sensorless composite input ABI mismatch");
-_Static_assert(sizeof(foc_sensorless_composite_output_t) == 28U,
+_Static_assert(sizeof(foc_sensorless_composite_output_t) == 40U,
                "sensorless composite output ABI mismatch");
 _Static_assert(sizeof(foc_sensorless_context_t) == FOC_SENSORLESS_CONTEXT_CAPACITY,
                "sensorless context capacity mismatch");
