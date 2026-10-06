@@ -198,6 +198,19 @@ typedef struct
      * be split into chain cost and shared-core cost without instrumenting every
      * stage.  No control path may read it as state. */
     uint32_t chain_cycles;
+    /* V3 measurement split of chain_cycles: HFI update, fusion supervisor,
+     * high-frequency current separator.  All are 0 unless the caller asked for
+     * timing, and no control path may read them as state. */
+    uint32_t chain_hfi_cycles;
+    uint32_t chain_fusion_cycles;
+    uint32_t chain_separator_cycles;
+    /* V3 measurement: the remainder of chain_cycles after the split above,
+     * i.e. entry checks and output preparation, the sequence and ledger
+     * validations, the publish, and the fused-speed tail. */
+    uint32_t abi_prepare_cycles;
+    uint32_t abi_checks_cycles;
+    uint32_t abi_publish_cycles;
+    uint32_t abi_tail_cycles;
 } foc_sensorless_realtime_output_t;
 
 /* Deterministic N+1 voltage-composition transaction.  The caller supplies the
@@ -317,7 +330,7 @@ _Static_assert(sizeof(foc_sensorless_configure_guard_t) == 28U,
                "sensorless configure guard ABI mismatch");
 _Static_assert(sizeof(foc_sensorless_realtime_input_t) == 48U,
                "sensorless realtime input ABI mismatch");
-_Static_assert(sizeof(foc_sensorless_realtime_output_t) == 88U,
+_Static_assert(sizeof(foc_sensorless_realtime_output_t) == 116U,
                "sensorless realtime output ABI mismatch");
 _Static_assert(sizeof(foc_sensorless_voltage_input_t) == 48U,
                "sensorless voltage input ABI mismatch");

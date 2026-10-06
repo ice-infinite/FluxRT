@@ -34,6 +34,31 @@ pub const FOC_SENSORLESS_COMPOSITE_INPUT_VERSION: u32 = 1;
 pub const FOC_SENSORLESS_COMPOSITE_OUTPUT_VERSION: u32 = 2;
 pub const FOC_SENSORLESS_CONTEXT_CAPACITY: usize = 512;
 
+/// Free-running cycle counter supplied by the target platform.
+///
+/// The bridge never reads a peripheral register itself: the platform injects
+/// this exactly as it injects the CORDIC accelerators, and host builds do not
+/// define the symbol at all.  It is read only when a caller asks for timing, so
+/// a production frame pays nothing.  The platform documents it as safe to call
+/// from the ADC ISR: it does not block, allocate or re-enter Rust.
+#[cfg(all(feature = "sensorless-foc", target_os = "none"))]
+extern "C" {
+    fn foc_platform_probe_cycles() -> u32;
+}
+
+#[cfg(all(feature = "sensorless-foc", target_os = "none"))]
+#[inline(always)]
+pub(crate) fn composite_mark_cycles() -> u32 {
+    // SAFETY: see the contract on the extern declaration above.
+    unsafe { foc_platform_probe_cycles() }
+}
+
+#[cfg(not(all(feature = "sensorless-foc", target_os = "none")))]
+#[inline(always)]
+pub(crate) fn composite_mark_cycles() -> u32 {
+    0
+}
+
 pub const FOC_SENSORLESS_CAP_SYNCHRONIZED_CURRENT_SAMPLE: u32 = 1 << 0;
 pub const FOC_SENSORLESS_CAP_CALIBRATED_ALPHA_BETA_CURRENT: u32 = 1 << 1;
 pub const FOC_SENSORLESS_CAP_NEXT_PWM_VOLTAGE_INJECTION: u32 = 1 << 2;
@@ -217,6 +242,20 @@ pub struct FocSensorlessRealtimeOutput {
     /// measured frame can be split into chain cost and core cost without
     /// instrumenting every stage; the platform measures the frame as a whole.
     pub chain_cycles: u32,
+    /// V3 measurement fields.  Split of `chain_cycles` into the HFI update, the
+    /// fusion supervisor and the high-frequency current separator, so the trim
+    /// decision knows which part of the chain is worth decimating.  All are 0
+    /// unless timing was requested and no control path may read them as state.
+    pub chain_hfi_cycles: u32,
+    pub chain_fusion_cycles: u32,
+    pub chain_separator_cycles: u32,
+    /// V3 measurement fields.  The remainder of `chain_cycles` after the three
+    /// split points above: entry checks and output preparation, the sequence and
+    /// ledger validations, and the final publish plus fused-speed update.
+    pub abi_prepare_cycles: u32,
+    pub abi_checks_cycles: u32,
+    pub abi_publish_cycles: u32,
+    pub abi_tail_cycles: u32,
 }
 
 #[repr(C)]
@@ -368,7 +407,7 @@ const _: () = assert!(size_of::<FocSensorlessFusionConfig>() == 40);
 const _: () = assert!(size_of::<FocSensorlessRuntimeConfig>() == 144);
 const _: () = assert!(size_of::<FocSensorlessConfigureGuard>() == 28);
 const _: () = assert!(size_of::<FocSensorlessRealtimeInput>() == 48);
-const _: () = assert!(size_of::<FocSensorlessRealtimeOutput>() == 88);
+const _: () = assert!(size_of::<FocSensorlessRealtimeOutput>() == 116);
 const _: () = assert!(size_of::<SensorlessAbiContext>() <= FOC_SENSORLESS_CONTEXT_CAPACITY);
 const _: () = assert!(size_of::<FocSensorlessVoltageInput>() == 48);
 const _: () = assert!(size_of::<FocSensorlessVoltageOutput>() == 44);
@@ -710,6 +749,7 @@ pub unsafe extern "C" fn foc_rust_sensorless_step(
     let Some(output) = (unsafe { output.as_mut() }) else {
         return FocSensorlessStatus::InvalidArgument;
     };
+    let entry_mark = composite_mark_cycles();
     prepare_output(output, 0);
     let context = match context_mut(storage) {
         Ok(value) => value,
@@ -718,6 +758,11 @@ pub unsafe extern "C" fn foc_rust_sensorless_step(
     let Some(input) = (unsafe { input.as_ref() }) else {
         return FocSensorlessStatus::InvalidArgument;
     };
+    /* Both prepare_output calls carry their weight: the first guarantees a fully
+     * defined output on every early-return path, the second stamps the real
+     * sequence.  This window is therefore context/pointer/input resolution plus
+     * the first memset, and it is where the call-boundary cost shows up. */
+    let mark_prepare = composite_mark_cycles();
     prepare_output(output, input.sample_sequence);
     if context.fault_latched {
         output.status_flags = FOC_SENSORLESS_OUTPUT_FAULT_LATCHED;
@@ -780,10 +825,16 @@ pub unsafe extern "C" fn foc_rust_sensorless_step(
         alpha: input.measured_current_alpha_a,
         beta: input.measured_current_beta_a,
     };
+    /* Everything from the sequence/ledger validation down to the separator:
+     * entry checks, both output preparations and the input validation. */
+    let mark_checks = composite_mark_cycles();
+    let separator_start = composite_mark_cycles();
     let high_frequency_current = context
         .separator
         .update(measured, context.current_low_pass_alpha);
-    let chain = context.chain.step(
+    let separator_end = composite_mark_cycles();
+    let mut chain_timing = foc_control::SensorlessChainTiming::default();
+    let chain = context.chain.step_measured(
         &context.config,
         SensorlessChainInput {
             request_reset: input.input_flags & FOC_SENSORLESS_INPUT_RESET != 0,
@@ -794,8 +845,26 @@ pub unsafe extern "C" fn foc_rust_sensorless_step(
             bemf_valid: input.input_flags & FOC_SENSORLESS_INPUT_BEMF_VALID != 0,
             bemf_electrical_speed_rad_s: input.bemf_electrical_speed_rad_s,
         },
+        composite_mark_cycles,
+        &mut chain_timing,
     );
+    let mark_chain = composite_mark_cycles();
+    chain_timing.separator_cycles = separator_end.wrapping_sub(separator_start);
+    output.chain_hfi_cycles = chain_timing.hfi_cycles;
+    output.chain_fusion_cycles = chain_timing.fusion_cycles;
+    output.chain_separator_cycles = chain_timing.separator_cycles;
     publish_chain_output(output, chain, high_frequency_current);
+    let mark_publish = composite_mark_cycles();
+    /* The tail runs after the publish: fused-speed update, publish_chain_output,
+     * status flags and the ledger carry-forward.  Taken here so the split covers
+     * the whole call rather than stopping at the publish. */
+    let mark_tail = composite_mark_cycles();
+    /* Attribute the wrapper itself: this is the part of `chain_cycles` that is
+     * not the separator, the HFI update or the fusion supervisor. */
+    output.abi_checks_cycles = mark_checks.wrapping_sub(mark_prepare);
+    output.abi_prepare_cycles = mark_prepare.wrapping_sub(entry_mark);
+    output.abi_publish_cycles = mark_publish.wrapping_sub(mark_chain);
+    output.abi_tail_cycles = mark_tail.wrapping_sub(mark_publish);
     if chain.failure != SensorlessChainFailure::None {
         context.fault_latched = true;
         output.injection_alpha_v = 0.0;

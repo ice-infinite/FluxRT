@@ -94,6 +94,25 @@ impl SensorlessChainConfig {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// Measurement-only split of one chain step, in free-running cycle counts.
+///
+/// The chain costs about 7,080 cycles of a 12,750-cycle frame, so deciding
+/// whether its work can be decimated needs to know *which* part is expensive.
+/// The caller injects a counter and reads this back; the values are diagnostics
+/// and no control decision may depend on them.
+pub struct SensorlessChainTiming {
+    /// From entry to the end of the stage match, i.e. the HFI update (or the
+    /// polarity step) plus the surrounding bookkeeping.
+    pub hfi_cycles: u32,
+    /// The fusion supervisor, which advances the angle/speed estimate.
+    pub fusion_cycles: u32,
+    /// The high-frequency current separator, which runs in the ABI layer just
+    /// before this step.  Filled by the caller, not here.
+    pub separator_cycles: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SensorlessChainInput {
     pub request_reset: bool,
     pub injection_permitted: bool,
@@ -144,6 +163,22 @@ impl SensorlessAngleChain {
         config: &SensorlessChainConfig,
         input: SensorlessChainInput,
     ) -> SensorlessChainOutput {
+        // The counter is injected rather than read here so this crate keeps
+        // touching no peripheral register; see `SensorlessChainTiming`.
+        self.step_measured(config, input, || 0, &mut SensorlessChainTiming::default())
+    }
+
+    /// [`Self::step`] with the measurement split filled in.  `mark` must be a
+    /// free-running cycle counter; callers that do not measure pass `|| 0`.
+    pub fn step_measured(
+        &mut self,
+        config: &SensorlessChainConfig,
+        input: SensorlessChainInput,
+        mark: fn() -> u32,
+        timing: &mut SensorlessChainTiming,
+    ) -> SensorlessChainOutput {
+        *timing = SensorlessChainTiming::default();
+        let entry = mark();
         if input.request_reset {
             self.reset();
             return self.output(AlphaBeta::default(), HfiPolarityFailure::None, false);
@@ -236,6 +271,7 @@ impl SensorlessAngleChain {
             SensorlessChainStage::Failed => {}
         }
 
+        let after_stage = mark();
         let fusion = self.fusion.step(
             &config.fusion,
             SensorlessFusionInput {
@@ -249,6 +285,9 @@ impl SensorlessAngleChain {
             },
         );
         let output = self.output_with_fusion(voltage, polarity_failure, hfi_valid, fusion);
+        let after_fusion = mark();
+        timing.hfi_cycles = after_stage.wrapping_sub(entry);
+        timing.fusion_cycles = after_fusion.wrapping_sub(after_stage);
         let tracking_reacquisition_expired = self.tracking_samples
             >= config
                 .fusion

@@ -2694,9 +2694,7 @@ MSH_CMD_EXPORT(foc_sensorless_wcet, -);
  * one-off cold-start cost from the recurring one. */
 static int foc_sensorless_wcet_decomp(int argc, char **argv)
 {
-    static uint16_t totals[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
-    static uint16_t controls[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
-    static uint16_t chains[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
+    static foc_probe_decomp_tick_t ticks[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
     uint32_t limit = FOC_SENSORLESS_PROBE_DECOMP_TICKS;
     uint32_t count;
     uint32_t index;
@@ -2715,17 +2713,24 @@ static int foc_sensorless_wcet_decomp(int argc, char **argv)
     {
         limit = FOC_SENSORLESS_PROBE_DECOMP_TICKS;
     }
-    count = foc_platform_sensorless_probe_decomp_copy(totals, controls, chains, limit);
+    count = foc_platform_sensorless_probe_decomp_copy(ticks, limit);
     rt_kprintf("FSLD,n=%u,deadline=%u\n",
                (unsigned int)count,
                (unsigned int)FOC_DEFAULT_ISR_DEADLINE_CYCLES);
     for (index = 0U; index < count; ++index)
     {
-        rt_kprintf("FSLD,%u,%u,%u,%u\n",
+        rt_kprintf("FSLD,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
                    (unsigned int)index,
-                   (unsigned int)totals[index],
-                   (unsigned int)controls[index],
-                   (unsigned int)chains[index]);
+                   (unsigned int)ticks[index].total,
+                   (unsigned int)ticks[index].control,
+                   (unsigned int)ticks[index].chain,
+                   (unsigned int)ticks[index].separator,
+                   (unsigned int)ticks[index].hfi,
+                   (unsigned int)ticks[index].fusion,
+                   (unsigned int)ticks[index].abi_prepare,
+                   (unsigned int)ticks[index].abi_checks,
+                   (unsigned int)ticks[index].abi_publish,
+                   (unsigned int)ticks[index].abi_tail);
     }
     return 0;
 }

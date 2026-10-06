@@ -359,30 +359,12 @@ extern "C" {
 // attribute a measured frame to its parts when the platform asks for it.
 //
 // This is the same dependency-injection shape as the CORDIC block above: the
-// algorithm library never reads a peripheral register, and the host builds do
-// not define this at all.  The hook is compiled for the target only, and it is
-// read exclusively on the composite entry's `FOC_SENSORLESS_COMPOSITE_TIMING_
-// REQUESTED` path -- never on a production frame.  A read is a few cycles, two
-// per measured frame, which is far below the resolution being attributed.
-#[cfg(all(feature = "sensorless-foc", target_os = "none"))]
-extern "C" {
-    fn foc_platform_probe_cycles() -> u32;
-}
-
-#[cfg(all(feature = "sensorless-foc", target_os = "none"))]
-#[inline(always)]
-fn composite_mark_cycles() -> u32 {
-    // SAFETY: the platform guarantees this is a lock-free counter read that does
-    // not block, allocate or re-enter Rust; it is documented to be callable from
-    // the ADC ISR.
-    unsafe { foc_platform_probe_cycles() }
-}
-
-#[cfg(not(all(feature = "sensorless-foc", target_os = "none")))]
-#[inline(always)]
-fn composite_mark_cycles() -> u32 {
-    0
-}
+// algorithm library never reads a peripheral register, and host builds do not
+// define the symbol at all.  It is defined next to the sensorless ABI, which is
+// its main consumer; the combined entry reads it as well so a frame can be split
+// into chain cost and core cost without instrumenting every stage.
+#[cfg(feature = "sensorless-foc")]
+use crate::sensorless_abi::composite_mark_cycles;
 
 /// Diagnostic-only entry used by the stopped-state C benchmark to measure the
 /// portable fast `sin/cos` implementation in the same firmware image as CORDIC.

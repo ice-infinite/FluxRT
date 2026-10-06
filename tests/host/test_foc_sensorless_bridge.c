@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include "foc_sensorless_bridge.h"
+#include "foc_sensorless_platform.h"
 
 int main(void)
 {
@@ -9,10 +10,18 @@ int main(void)
     assert(FOC_SENSORLESS_INPUT_KNOWN_MASK == 0x0FU);
     assert(sizeof(foc_sensorless_runtime_config_t) == 144U);
     assert(sizeof(foc_sensorless_realtime_input_t) == 48U);
-    assert(sizeof(foc_sensorless_realtime_output_t) == 88U);
+    assert(sizeof(foc_sensorless_realtime_output_t) == 116U);
     /* V3 appended chain_cycles; the earlier offsets are unchanged. */
     assert(FOC_SENSORLESS_OUTPUT_VERSION == 3U);
     assert(offsetof(foc_sensorless_realtime_output_t, chain_cycles) == 84U);
+    assert(offsetof(foc_sensorless_realtime_output_t, chain_hfi_cycles) == 88U);
+    assert(offsetof(foc_sensorless_realtime_output_t, chain_fusion_cycles) == 92U);
+    assert(offsetof(foc_sensorless_realtime_output_t, chain_separator_cycles) == 96U);
+    assert(offsetof(foc_sensorless_realtime_output_t, abi_prepare_cycles) == 100U);
+    assert(offsetof(foc_sensorless_realtime_output_t, abi_checks_cycles) == 104U);
+    assert(offsetof(foc_sensorless_realtime_output_t, abi_publish_cycles) == 108U);
+    assert(offsetof(foc_sensorless_realtime_output_t, abi_tail_cycles) == 112U);
+    assert(sizeof(foc_probe_decomp_tick_t) == 20U);
     assert(sizeof(foc_sensorless_voltage_input_t) == 48U);
     assert(sizeof(foc_sensorless_voltage_output_t) == 44U);
     assert(sizeof(foc_sensorless_composite_input_t) == 44U);
