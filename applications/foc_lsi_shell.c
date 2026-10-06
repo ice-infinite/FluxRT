@@ -333,4 +333,116 @@ static int foc_lsi_shell_start(int argc, char **argv)
 }
 MSH_CMD_EXPORT_ALIAS(foc_lsi_shell_start, foc_lsi_start, -);
 
+static int foc_lsi_shell_break_test(int argc, char **argv)
+{
+    foc_lsi_break_test_result_t result;
+    foc_status_t status;
+
+    if ((argc != 2) || (rt_strcmp(argv[1], "B2G1") != 0))
+    {
+        rt_kprintf("foc_lsi_break_test B2G1\n");
+        return -1;
+    }
+    status = foc_platform_lsi_break2_self_test(
+        FOC_LSI_BREAK_TEST_CONFIRMATION, &result);
+    rt_kprintf("FLSI_BREAK,%u,%u,%08x,%08x,%08x,%08x,%08x,%08x,"
+               "%08x,%08x,%u,%u,%u,%u\n",
+               (unsigned int)result.version,
+               (unsigned int)status,
+               (unsigned int)result.before_sr,
+               (unsigned int)result.before_bdtr,
+               (unsigned int)result.armed_bdtr,
+               (unsigned int)result.event_sr,
+               (unsigned int)result.event_bdtr,
+               (unsigned int)result.rearm_facts,
+               (unsigned int)result.after_sr,
+               (unsigned int)result.after_bdtr,
+               (unsigned int)result.gate_low_before,
+               (unsigned int)result.gate_low_after,
+               (unsigned int)result.phase_outputs_before,
+               (unsigned int)result.phase_outputs_after);
+    return (status == FOC_STATUS_OK) ? 0 : -1;
+}
+MSH_CMD_EXPORT_ALIAS(foc_lsi_shell_break_test, foc_lsi_break_test, -);
+
+static int foc_lsi_shell_break_external_test(int argc, char **argv)
+{
+    foc_lsi_break_external_test_result_t result;
+    foc_status_t status;
+
+    if ((argc != 2) || (rt_strcmp(argv[1], "B2X1") != 0))
+    {
+        rt_kprintf("foc_lsi_break_ext_test B2X1\n");
+        return -1;
+    }
+    status = foc_platform_lsi_break2_external_self_test(
+        FOC_LSI_BREAK_EXTERNAL_CONFIRMATION, &result);
+    rt_kprintf("FLSI_BREAK_EXT,%u,%u,%08x,%08x,%08x,%08x,%08x,%08x,"
+               "%08x,%08x,%u,%u,%u,%u,%u,%u,%u,%u\n",
+               (unsigned int)result.version,
+               (unsigned int)status,
+               (unsigned int)result.before_sr,
+               (unsigned int)result.before_bdtr,
+               (unsigned int)result.armed_bdtr,
+               (unsigned int)result.event_sr,
+               (unsigned int)result.event_bdtr,
+               (unsigned int)result.rearm_facts,
+               (unsigned int)result.after_sr,
+               (unsigned int)result.after_bdtr,
+               (unsigned int)result.line_high_before,
+               (unsigned int)result.line_low_event,
+               (unsigned int)result.line_high_after,
+               (unsigned int)result.stimulus_restored,
+               (unsigned int)result.gate_low_before,
+               (unsigned int)result.gate_low_after,
+               (unsigned int)result.phase_outputs_before,
+               (unsigned int)result.phase_outputs_after);
+    return (status == FOC_STATUS_OK) ? 0 : -1;
+}
+MSH_CMD_EXPORT_ALIAS(foc_lsi_shell_break_external_test,
+                     foc_lsi_break_ext_test, -);
+
+static int foc_lsi_shell_break_isr_test(int argc, char **argv)
+{
+    foc_lsi_break_isr_test_result_t result;
+    foc_status_t status;
+
+    if ((argc != 2) || (rt_strcmp(argv[1], "B2I1") != 0))
+    {
+        rt_kprintf("foc_lsi_break_isr_test B2I1\n");
+        return -1;
+    }
+    status = foc_platform_lsi_break2_isr_self_test(
+        FOC_LSI_BREAK_ISR_CONFIRMATION, &result);
+    rt_kprintf("FLSI_BREAK_ISR,%u,%u,%08x,%08x,%08x,%08x,%08x,"
+               "%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+               (unsigned int)result.version,
+               (unsigned int)status,
+               (unsigned int)result.before_sr,
+               (unsigned int)result.before_bdtr,
+               (unsigned int)result.armed_bdtr,
+               (unsigned int)result.event_sr,
+               (unsigned int)result.event_bdtr,
+               (unsigned int)result.break_count_before,
+               (unsigned int)result.break_count_after,
+               (unsigned int)result.fault_count_before,
+               (unsigned int)result.fault_count_after,
+               (unsigned int)result.fault_epoch_before,
+               (unsigned int)result.fault_epoch_after,
+               (unsigned int)result.safety_state_after,
+               (unsigned int)result.line_high_before,
+               (unsigned int)result.line_low_event,
+               (unsigned int)result.line_high_after,
+               (unsigned int)result.stimulus_restored,
+               (unsigned int)result.gate_low_before,
+               (unsigned int)result.gate_low_after,
+               (unsigned int)result.phase_outputs_before,
+               (unsigned int)result.phase_outputs_after,
+               (unsigned int)result.break_irq_disabled_after,
+               (unsigned int)result.timer_stopped_after);
+    return (status == FOC_STATUS_OK) ? 0 : -1;
+}
+MSH_CMD_EXPORT_ALIAS(foc_lsi_shell_break_isr_test,
+                     foc_lsi_break_isr_test, -);
+
 #endif

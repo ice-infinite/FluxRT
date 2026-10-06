@@ -1,6 +1,6 @@
 /* AUTO-GENERATED CANDIDATE; DO NOT EDIT.
  * Source: profiles/candidates/rev7-gbm2804h-rsl-flux-screening.json
- * Source SHA-256: 037C3F73ADB83DCBE16C3F07F40A937747A10CA93E8CEE2517BF27FAA9457543
+ * Source SHA-256: C973FA17203D92E9DFF67F7A9D4AA77D1B6207FB54D5827192A8A07495561D71
  * Approval state: UNAPPROVED
  *
  * This fragment is not compiled automatically. A reviewer must verify the
@@ -13,8 +13,8 @@
     7U,
     0x43116001UL,
     0x28041007UL,
-    11U,
-    0xDBD2A17CUL,
+    12U,
+    0x43135055UL,
     0x00000000UL,
-    0x00D488A2UL,
+    0x6BBE88FDUL,
 }

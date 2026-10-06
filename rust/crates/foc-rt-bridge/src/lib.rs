@@ -74,6 +74,8 @@ mod command_abi;
 pub use command_abi::*;
 mod feedback_abi;
 pub use feedback_abi::*;
+mod encoder_realtime_abi;
+pub use encoder_realtime_abi::*;
 #[cfg(feature = "external-inputs")]
 mod input_abi;
 #[cfg(feature = "external-inputs")]
@@ -86,6 +88,10 @@ pub use native_abi::*;
 mod advanced_abi;
 #[cfg(feature = "advanced-foc")]
 pub use advanced_abi::*;
+#[cfg(feature = "sensorless-foc")]
+mod sensorless_abi;
+#[cfg(feature = "sensorless-foc")]
+pub use sensorless_abi::*;
 #[cfg(feature = "power-management")]
 mod power_abi;
 #[cfg(feature = "power-management")]
@@ -103,35 +109,29 @@ use foc_algorithm::{
 };
 #[cfg(any(feature = "fast-math-benchmark", feature = "fast-math-candidate"))]
 use foc_control::FastApproxMath;
-#[cfg(feature = "motion-control")]
-use foc_control::PrecomputedCurrentFrame;
-#[cfg(all(feature = "advanced-foc", not(feature = "motion-control")))]
-use foc_control::PrecomputedCurrentFrame;
 use foc_control::{
     plan_lsi_actuation, st_gbm2804_reference_parameters, ConfigurableObserver, ControlAngleOffsets,
-    ControlMath, ControlParameters, CpuMath, CurrentCommand, CurrentLoop, FeedbackSnapshot,
-    InverterVoltageModel, InverterVoltageModelConfig, LsiActuationConfig, LsiActuationError,
-    LsiActuationInput, LsiActuationPlan, LsiDriveRequest, ObserverBackend,
-    ObserverReliabilityConfig, ObserverVoltageSource, PhaseCurrents, ProductCommand, PwmCommand,
-    RevUpConfig, RevUpPhase, RevUpSequencer, RotorEstimator, RotorFeedback, SmoPllTuning,
-    SpeedCommand, SpeedLoop, PRODUCT_CONTRACT_VERSION,
+    ControlMath, ControlParameters, CpuMath, CurrentCommand, CurrentLoop, CurrentLoopPolicy,
+    FeedbackSnapshot, InverterVoltageModel, InverterVoltageModelConfig, LsiActuationConfig,
+    LsiActuationError, LsiActuationInput, LsiActuationPlan, LsiDriveRequest, ObserverBackend,
+    ObserverReliabilityConfig, ObserverVoltageSource, PhaseCurrents, PrecomputedCurrentFrame,
+    ProductCommand, PwmCommand, RevUpConfig, RevUpPhase, RevUpSequencer, RotorEstimator,
+    RotorFeedback, SmoPllTuning, SpeedCommand, SpeedLoop, PRODUCT_CONTRACT_VERSION,
 };
 #[cfg(feature = "advanced-foc")]
-use foc_control::{
-    AdvancedFocInput, AdvancedFocSupervisor, AdvancedModulationMode, CurrentLoopPolicy,
-};
+use foc_control::{AdvancedFocInput, AdvancedFocSupervisor, AdvancedModulationMode};
 
-/// ABI 版本：主版本占高 16 位，`0x0015_0000` 表示第 21 代；必须与 C 侧宏逐位
+/// ABI 版本：主版本占高 16 位，`0x0016_0000` 表示第 22 代；必须与 C 侧宏逐位
 /// 一致，否则 `main.c` 启动自检会拒绝运行。
 /// ABI version packed as 16-bit halves; must match the C macro bit for bit.
-pub const FOC_RUST_ABI_VERSION: u32 = 0x0015_0000;
+pub const FOC_RUST_ABI_VERSION: u32 = 0x0016_0000;
 pub const FOC_REALTIME_INPUT_VERSION: u32 = 1;
 pub const FOC_LSI_ACTUATION_CONFIG_VERSION: u32 = 1;
 pub const FOC_LSI_ACTUATION_INPUT_VERSION: u32 = 1;
 pub const FOC_LSI_ACTUATION_OUTPUT_VERSION: u32 = 1;
 /// `FocRuntimeConfig` 自身的版本，与 ABI 版本独立演进；C 侧填错会被直接拒绝。
 /// Version of `FocRuntimeConfig`; it evolves independently of the ABI version.
-pub const FOC_RUST_CONFIG_VERSION: u32 = 11;
+pub const FOC_RUST_CONFIG_VERSION: u32 = 12;
 /// C 提供的控制器存储容量 `[bytes]`；高级候选只在对应镜像中额外占 512 B，
 /// 普通/量产镜像仍保留历史 2048 B。
 /// Controller storage capacity supplied by C [bytes]; a compile-time assertion
@@ -157,6 +157,9 @@ pub const FOC_FAULT_PLATFORM_INPUT: u32 = 1 << 4;
 pub const FOC_FAULT_MOTION_CONTROL: u32 = 1 << 5;
 /// The advanced policy supervisor rejected a runtime input or lost its validated state.
 pub const FOC_FAULT_ADVANCED_CONTROL: u32 = 1 << 6;
+/// The combined full-speed sensorless chain rejected a sample, request ledger,
+/// fused angle or final voltage application.
+pub const FOC_FAULT_SENSORLESS_CONTROL: u32 = 1 << 7;
 
 pub const FOC_REALTIME_VALID_PHASE_CURRENTS: u32 = 1 << 0;
 pub const FOC_REALTIME_VALID_DC_BUS_VOLTAGE: u32 = 1 << 1;
@@ -1058,6 +1061,10 @@ pub struct FocRuntimeConfig {
     /// BEMF extraction low-pass coefficient; too small a value is a leading cause
     /// of observer loss of lock.
     pub observer_emf_filter_alpha: f32,
+    /// 反电动势低通群延迟近似的采用比例 `[--]`，范围 `[0,1]`。0 禁用相位超前，
+    /// 0.8 保留 V21 及更早版本的经验补偿。
+    /// Applied fraction of the EMF-filter group-delay estimate `[0,1]`.
+    pub observer_emf_phase_advance_ratio: f32,
     /// PLL 比例增益 `[rad/s per rad]` / PLL proportional gain.
     pub observer_pll_kp: f32,
     /// 强拖捕获阶段的 PLL Kp/Ki 校正比例 `[--]`，范围 `(0, 1]`；不缩放终速前馈。
@@ -1218,7 +1225,7 @@ const _: () = assert!(offset_of!(FocRealtimeInput, phase_voltage_c_v) == 76);
 const _: () = assert!(offset_of!(FocRealtimeInput, electrical_angle_rad) == 80);
 const _: () = assert!(offset_of!(FocRealtimeInput, sensor_temperature_c) == 84);
 const _: () = assert!(align_of::<FocRuntimeConfig>() == 4);
-const _: () = assert!(size_of::<FocRuntimeConfig>() == 296);
+const _: () = assert!(size_of::<FocRuntimeConfig>() == 300);
 const _: () = assert!(size_of::<FocTelemetry>() == 100);
 const _: () = assert!(size_of::<FocLsiActuationConfig>() == 48);
 const _: () = assert!(size_of::<FocLsiActuationInput>() == 52);
@@ -1770,6 +1777,7 @@ fn default_st_runtime_config() -> FocRuntimeConfig {
         k_slide_v: 4.0,
         boundary_a: 0.24,
         emf_filter_alpha: 0.015,
+        emf_phase_advance_ratio: 0.8,
         pll_kp: 40.0,
         acquisition_pll_kp_ratio: 0.60,
         pll_ki: 1_000.0,
@@ -1810,6 +1818,7 @@ fn default_st_runtime_config() -> FocRuntimeConfig {
         observer_smo_k_slide_v: observer.k_slide_v,
         observer_smo_boundary_a: observer.boundary_a,
         observer_emf_filter_alpha: observer.emf_filter_alpha,
+        observer_emf_phase_advance_ratio: observer.emf_phase_advance_ratio,
         observer_pll_kp: observer.pll_kp,
         observer_acquisition_pll_kp_ratio: observer.acquisition_pll_kp_ratio,
         observer_pll_ki: observer.pll_ki,
@@ -1884,9 +1893,9 @@ fn runtime_config_crc32(config: &FocRuntimeConfig) -> u32 {
     const CONFIG_WORDS: usize = size_of::<FocRuntimeConfig>() / size_of::<u32>();
     let mut crc = 0xFFFF_FFFF;
 
-    // SAFETY: FocRuntimeConfig is repr(C), exactly 296 bytes and composed only of
+    // SAFETY: FocRuntimeConfig is repr(C), exactly 300 bytes and composed only of
     // repr(C) four-byte u32/f32 leaves. The compile-time layout assertions above
-    // prove there are exactly 74 initialized words and no padding. Byte views may
+    // prove there are exactly 75 initialized words and no padding. Byte views may
     // alias any initialized object; from_ne_bytes then recovers each logical word.
     let bytes = unsafe {
         core::slice::from_raw_parts(
@@ -1963,6 +1972,7 @@ fn runtime_config_is_valid(config: &FocRuntimeConfig) -> bool {
         k_slide_v: config.observer_smo_k_slide_v,
         boundary_a: config.observer_smo_boundary_a,
         emf_filter_alpha: config.observer_emf_filter_alpha,
+        emf_phase_advance_ratio: config.observer_emf_phase_advance_ratio,
         pll_kp: config.observer_pll_kp,
         acquisition_pll_kp_ratio: config.observer_acquisition_pll_kp_ratio,
         pll_ki: config.observer_pll_ki,
@@ -2142,6 +2152,7 @@ fn configure_runtime(controller: &mut Controller, config: FocRuntimeConfig) {
             k_slide_v: config.observer_smo_k_slide_v,
             boundary_a: config.observer_smo_boundary_a,
             emf_filter_alpha: config.observer_emf_filter_alpha,
+            emf_phase_advance_ratio: config.observer_emf_phase_advance_ratio,
             pll_kp: config.observer_pll_kp,
             acquisition_pll_kp_ratio: config.observer_acquisition_pll_kp_ratio,
             pll_ki: config.observer_pll_ki,
@@ -3049,6 +3060,221 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
     }
 }
 
+#[cfg(feature = "sensorless-foc")]
+#[no_mangle]
+/// Executes the explicit full-speed composition point:
+///
+/// synchronized V19 currents -> HFI/polarity/BEMF fusion -> fused control frame
+/// -> basic current PI + N+1 injection -> one final vector limit -> duty output.
+///
+/// The BEMF sample is the main controller's previous completed observer
+/// telemetry.  This deliberate one-sample delay avoids an algebraic cycle: the
+/// current sample is fused first, then the main observer/current loop advances.
+/// Until the fusion output is reliable the regular forced startup frame remains
+/// in control, while the HFI request is still composed into the next PWM.
+///
+/// This function never grants hardware capability and never touches registers.
+/// The C platform must still prove the capability mask, Break path, software
+/// current trip and deadline before it may commit the returned duty.
+///
+/// # Safety
+///
+/// Both contexts must be initialized, distinct and exclusively owned by this
+/// caller. All non-null input pointers must be readable, all output pointers
+/// writable, aligned and mutually non-overlapping. `telemetry` alone may be
+/// null.
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
+    context: *mut FocRustContextStorage,
+    sensorless_context: *mut FocSensorlessContextStorage,
+    input: *const FocRealtimeInput,
+    composite_input: *const FocSensorlessCompositeInput,
+    output: *mut FocOutput,
+    telemetry: *mut FocTelemetry,
+    sensorless_output: *mut FocSensorlessRealtimeOutput,
+    composite_output: *mut FocSensorlessCompositeOutput,
+) -> FocStatus {
+    let Some(output) = (unsafe { output.as_mut() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    zero_output(output);
+    let Some(sensorless_output) = (unsafe { sensorless_output.as_mut() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    *sensorless_output = FocSensorlessRealtimeOutput::default();
+    let Some(composite_output) = (unsafe { composite_output.as_mut() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    *composite_output = FocSensorlessCompositeOutput {
+        struct_size: core::mem::size_of::<FocSensorlessCompositeOutput>() as u32,
+        version: FOC_SENSORLESS_COMPOSITE_OUTPUT_VERSION,
+        ..FocSensorlessCompositeOutput::default()
+    };
+    let Some(controller) = (unsafe { controller_mut(context) }) else {
+        return FocStatus::InvalidArgument;
+    };
+    let Some(input) = (unsafe { input.as_ref() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    let Some(composite_input) = (unsafe { composite_input.as_ref() }) else {
+        return FocStatus::InvalidArgument;
+    };
+    composite_output.pwm_sequence = input.control_sequence.wrapping_add(1);
+    let composite_finite = composite_input.applied_injection_alpha_v.is_finite()
+        && composite_input.applied_injection_beta_v.is_finite()
+        && composite_input.voltage_limit_v.is_finite()
+        && composite_input.minimum_duty.is_finite()
+        && composite_input.maximum_duty.is_finite();
+    if composite_input.struct_size != core::mem::size_of::<FocSensorlessCompositeInput>() as u32
+        || composite_input.version != FOC_SENSORLESS_COMPOSITE_INPUT_VERSION
+        || composite_input.reserved != 0
+        || composite_input.platform_capabilities & !FOC_SENSORLESS_CAP_KNOWN_MASK != 0
+        || composite_input.input_flags & !FOC_SENSORLESS_INPUT_KNOWN_MASK != 0
+        || composite_input.platform_capabilities & FOC_SENSORLESS_REQUIRED_CAPABILITIES
+            != FOC_SENSORLESS_REQUIRED_CAPABILITIES
+        || composite_input.applied_request_sequence != input.control_sequence
+        || !composite_finite
+        || composite_input.voltage_limit_v <= 0.0
+        || composite_input.minimum_duty < 0.0
+        || composite_input.minimum_duty >= 0.5
+        || composite_input.maximum_duty <= 0.5
+        || composite_input.maximum_duty > 1.0
+    {
+        return FocStatus::InvalidArgument;
+    }
+    if controller.state == FocState::Fault {
+        return FocStatus::HardwareFault;
+    }
+    if !realtime_input_envelope_is_valid(input) {
+        return FocStatus::InvalidArgument;
+    }
+    if input.hardware_fault_flags != 0 {
+        controller.fault_flags |= FOC_FAULT_PLATFORM_INPUT;
+        controller.state = FocState::Fault;
+        return FocStatus::HardwareFault;
+    }
+    if !realtime_tick_contract_is_valid(controller, input) {
+        return FocStatus::InvalidArgument;
+    }
+    controller.last_control_sequence = input.control_sequence;
+    if input.observer_voltage_selection == FOC_REALTIME_OBSERVER_VOLTAGE_UNAVAILABLE
+        || input.observer_voltage_selection == FOC_REALTIME_OBSERVER_VOLTAGE_MEASURED
+    {
+        return FocStatus::NotConfigured;
+    }
+
+    let feedback = input.legacy_feedback();
+    let measured = clarke(Abc {
+        a: feedback.phase_current_a,
+        b: feedback.phase_current_b,
+        c: feedback.phase_current_c,
+    });
+    let bemf_available = composite_input.input_flags & FOC_SENSORLESS_INPUT_BEMF_VALID != 0
+        && controller.telemetry.observer_reliable != 0
+        && controller
+            .telemetry
+            .observer_electrical_angle_rad
+            .is_finite()
+        && controller.telemetry.measured_speed_rpm.is_finite();
+    let sensorless_input = FocSensorlessRealtimeInput {
+        struct_size: core::mem::size_of::<FocSensorlessRealtimeInput>() as u32,
+        version: FOC_SENSORLESS_INPUT_VERSION,
+        sample_sequence: input.control_sequence,
+        applied_request_sequence: composite_input.applied_request_sequence,
+        platform_capabilities: composite_input.platform_capabilities,
+        input_flags: (composite_input.input_flags & !FOC_SENSORLESS_INPUT_BEMF_VALID)
+            | if bemf_available {
+                FOC_SENSORLESS_INPUT_BEMF_VALID
+            } else {
+                0
+            },
+        measured_current_alpha_a: measured.alpha,
+        measured_current_beta_a: measured.beta,
+        applied_injection_alpha_v: composite_input.applied_injection_alpha_v,
+        applied_injection_beta_v: composite_input.applied_injection_beta_v,
+        bemf_angle_rad: if bemf_available {
+            controller.telemetry.observer_electrical_angle_rad
+        } else {
+            0.0
+        },
+        bemf_electrical_speed_rad_s: if bemf_available {
+            controller.telemetry.measured_speed_rpm * PI / 30.0
+                * controller.params.motor.pole_pairs as f32
+        } else {
+            0.0
+        },
+    };
+    let sensorless_status = unsafe {
+        foc_rust_sensorless_step(sensorless_context, &sensorless_input, sensorless_output)
+    };
+    if sensorless_status != FocSensorlessStatus::Ok {
+        controller.fault_flags |= FOC_FAULT_SENSORLESS_CONTROL;
+        controller.state = FocState::Fault;
+        zero_output(output);
+        return FocStatus::HardwareFault;
+    }
+
+    let window_scale = (2.0 * (0.5 - composite_input.minimum_duty))
+        .min(2.0 * (composite_input.maximum_duty - 0.5))
+        .min(1.0);
+    let voltage_limit_v = composite_input
+        .voltage_limit_v
+        .min(feedback.dc_bus_voltage * 0.577_350_26 * window_scale);
+    if !voltage_limit_v.is_finite() || voltage_limit_v <= 0.0 {
+        controller.fault_flags |= FOC_FAULT_SENSORLESS_CONTROL;
+        controller.state = FocState::Fault;
+        return FocStatus::HardwareFault;
+    }
+    let pole_pairs = controller.params.motor.pole_pairs as f32;
+    if pole_pairs <= 0.0 {
+        controller.fault_flags |= FOC_FAULT_SENSORLESS_CONTROL;
+        controller.state = FocState::Fault;
+        return FocStatus::HardwareFault;
+    }
+    let mut frame = SensorlessCompositeFrame {
+        angle_rad: sensorless_output.electrical_angle_rad,
+        mechanical_speed_rad_s: sensorless_output.electrical_speed_rad_s / pole_pairs,
+        angle_reliable: sensorless_output.angle_reliable != 0,
+        fallback_required: sensorless_output.fallback_required != 0,
+        policy: CurrentLoopPolicy {
+            injection_voltage_alpha_beta: foc_algorithm::AlphaBeta {
+                alpha: sensorless_output.injection_alpha_v,
+                beta: sensorless_output.injection_beta_v,
+            },
+            voltage_limit_v,
+            minimum_duty: composite_input.minimum_duty,
+            maximum_duty: composite_input.maximum_duty,
+            vector_anti_windup: true,
+            ..CurrentLoopPolicy::default()
+        },
+        applied_injection: foc_algorithm::AlphaBeta::default(),
+        injection_limited: false,
+    };
+    let status = unsafe {
+        foc_rust_realtime_step_core(
+            controller,
+            &feedback,
+            output,
+            telemetry,
+            RealtimeReferenceMode::SensorlessComposite(&mut frame),
+        )
+    };
+    if status != FocStatus::Ok {
+        zero_output(output);
+        if status == FocStatus::HardwareFault || controller.state == FocState::Fault {
+            controller.fault_flags |= FOC_FAULT_SENSORLESS_CONTROL;
+            controller.state = FocState::Fault;
+        }
+        return status;
+    }
+    composite_output.applied_injection_alpha_v = frame.applied_injection.alpha;
+    composite_output.applied_injection_beta_v = frame.applied_injection.beta;
+    if frame.injection_limited {
+        composite_output.status_flags |= FOC_SENSORLESS_COMPOSITE_OUTPUT_INJECTION_LIMITED;
+    }
+    FocStatus::Ok
+}
+
 #[cfg(feature = "advanced-foc")]
 #[no_mangle]
 /// Diagnostic-only no-power entry for target per-tick/WCET evidence.
@@ -3322,10 +3548,23 @@ unsafe fn foc_rust_realtime_step_with_motion_impl<const FORCE_MOTION_REFERENCE: 
     status
 }
 
+#[cfg(feature = "sensorless-foc")]
+struct SensorlessCompositeFrame {
+    angle_rad: f32,
+    mechanical_speed_rad_s: f32,
+    angle_reliable: bool,
+    fallback_required: bool,
+    policy: CurrentLoopPolicy,
+    applied_injection: foc_algorithm::AlphaBeta,
+    injection_limited: bool,
+}
+
 enum RealtimeReferenceMode<'a> {
     Legacy(core::marker::PhantomData<&'a ()>),
     #[cfg(feature = "advanced-foc")]
     AdvancedProbe(&'a FocAdvancedProbeInput),
+    #[cfg(feature = "sensorless-foc")]
+    SensorlessComposite(&'a mut SensorlessCompositeFrame),
     #[cfg(feature = "motion-control")]
     Motion {
         context: &'a mut MotionAbiContext,
@@ -3349,6 +3588,8 @@ impl RealtimeReferenceMode<'_> {
                 force_motion_reference,
                 ..
             } => *force_motion_reference,
+            #[cfg(feature = "sensorless-foc")]
+            Self::SensorlessComposite(_) => false,
             Self::Legacy(_) => false,
         }
     }
@@ -3365,7 +3606,39 @@ impl RealtimeReferenceMode<'_> {
         match self {
             #[cfg(feature = "advanced-foc")]
             Self::AdvancedProbe(_) => true,
+            #[cfg(feature = "sensorless-foc")]
+            Self::SensorlessComposite(frame) => frame.angle_reliable && !frame.fallback_required,
             _ => false,
+        }
+    }
+
+    #[cfg(feature = "sensorless-foc")]
+    fn sensorless_feedback(&self) -> Option<(RotorFeedback, bool)> {
+        match self {
+            Self::SensorlessComposite(frame) => Some((
+                RotorFeedback {
+                    electrical_angle_rad: frame.angle_rad,
+                    mechanical_speed_rad_s: frame.mechanical_speed_rad_s,
+                },
+                frame.angle_reliable && !frame.fallback_required,
+            )),
+            _ => None,
+        }
+    }
+
+    #[cfg(feature = "sensorless-foc")]
+    fn sensorless_policy(&self) -> Option<CurrentLoopPolicy> {
+        match self {
+            Self::SensorlessComposite(frame) => Some(frame.policy),
+            _ => None,
+        }
+    }
+
+    #[cfg(feature = "sensorless-foc")]
+    fn record_sensorless_application(&mut self, control: foc_control::ControlTelemetry) {
+        if let Self::SensorlessComposite(frame) = self {
+            frame.applied_injection = control.applied_injection_alpha_beta;
+            frame.injection_limited = control.injection_limited;
         }
     }
 }
@@ -3625,17 +3898,17 @@ unsafe fn foc_rust_realtime_step_core(
     // 本拍内部统一用这两个局部量：观测器输出与可靠性在同一拍内不会再变，取局部副本
     // 可以避免中途误读被后续分支改写的字段。
     // Local copies keep the observer result consistent across the branches below.
-    #[cfg(feature = "advanced-foc")]
+    #[cfg(any(feature = "advanced-foc", feature = "sensorless-foc"))]
     let mut observer_feedback = controller.observer_feedback;
-    #[cfg(not(feature = "advanced-foc"))]
+    #[cfg(not(any(feature = "advanced-foc", feature = "sensorless-foc")))]
     let observer_feedback = controller.observer_feedback;
-    #[cfg(feature = "advanced-foc")]
+    #[cfg(any(feature = "advanced-foc", feature = "sensorless-foc"))]
     let mut observer_acquisition_reliable = controller.observer_reliable;
-    #[cfg(not(feature = "advanced-foc"))]
+    #[cfg(not(any(feature = "advanced-foc", feature = "sensorless-foc")))]
     let observer_acquisition_reliable = controller.observer_reliable;
-    #[cfg(feature = "advanced-foc")]
+    #[cfg(any(feature = "advanced-foc", feature = "sensorless-foc"))]
     let mut observer_run_reliable = controller.observer_run_reliable;
-    #[cfg(not(feature = "advanced-foc"))]
+    #[cfg(not(any(feature = "advanced-foc", feature = "sensorless-foc")))]
     let observer_run_reliable = controller.observer_run_reliable;
     #[cfg(feature = "advanced-foc")]
     if let Some(probe) = reference_mode.advanced_probe_input() {
@@ -3645,6 +3918,16 @@ unsafe fn foc_rust_realtime_step_core(
         };
         observer_acquisition_reliable = true;
         observer_run_reliable = true;
+    }
+    #[cfg(feature = "sensorless-foc")]
+    if let Some((feedback, reliable)) = reference_mode.sensorless_feedback() {
+        /* The full-speed chain is the sole angle authority for the combined
+         * entry.  Until fusion is reliable the normal forced startup frame is
+         * retained; once reliable, this exact fused angle is consumed by Park
+         * and inverse Park in the same transaction. */
+        observer_feedback = feedback;
+        observer_acquisition_reliable = reliable;
+        observer_run_reliable = reliable;
     }
     /* 进入交接前必须通过带 64 ms 方差与连续确认计数的严格获取门；一旦已经进入
      * ObserverTransition，则改用运行保持门。若渐变期间继续要求“重新获取”，任一
@@ -3813,7 +4096,6 @@ unsafe fn foc_rust_realtime_step_core(
         }
     };
 
-    #[cfg(any(feature = "motion-control", feature = "advanced-foc"))]
     let mut precomputed_current_frame: Option<PrecomputedCurrentFrame> = None;
 
     // 电流给定的产生 / Producing the current reference:
@@ -3851,6 +4133,13 @@ unsafe fn foc_rust_realtime_step_core(
     controller.current_reference = if startup.phase == RevUpPhase::ClosedLoop || force_reference {
         match &mut reference_mode {
             RealtimeReferenceMode::Legacy(_) => legacy_closed_loop_reference(
+                controller,
+                observer_feedback.mechanical_speed_rad_s,
+                startup.current_reference,
+                dt_s,
+            ),
+            #[cfg(feature = "sensorless-foc")]
+            RealtimeReferenceMode::SensorlessComposite(_) => legacy_closed_loop_reference(
                 controller,
                 observer_feedback.mechanical_speed_rad_s,
                 startup.current_reference,
@@ -3960,9 +4249,14 @@ unsafe fn foc_rust_realtime_step_core(
     let motion_outer_slot = precomputed_current_frame.is_some();
     #[cfg(not(feature = "motion-control"))]
     let motion_outer_slot = false;
-    if (observer_seeded_this_tick && controller.state == FocState::OpenLoopRamp)
-        || (observer_due && controller.runtime_config.observer_update_divider > 1)
-        || motion_outer_slot
+    #[cfg(feature = "sensorless-foc")]
+    let sensorless_composite_active = reference_mode.sensorless_policy().is_some();
+    #[cfg(not(feature = "sensorless-foc"))]
+    let sensorless_composite_active = false;
+    if !sensorless_composite_active
+        && ((observer_seeded_this_tick && controller.state == FocState::OpenLoopRamp)
+            || (observer_due && controller.runtime_config.observer_update_divider > 1)
+            || motion_outer_slot)
     {
         let pwm = controller.previous_pwm;
         output.duty_a = pwm.duty_a;
@@ -4106,6 +4400,8 @@ unsafe fn foc_rust_realtime_step_core(
 
     #[cfg(feature = "advanced-foc")]
     let advanced_policy_applied = advanced_policy.is_some();
+    #[cfg(not(feature = "advanced-foc"))]
+    let advanced_policy: Option<CurrentLoopPolicy> = None;
 
     #[cfg(feature = "advanced-foc")]
     if advanced_first_decision || advanced_region_slot {
@@ -4129,9 +4425,29 @@ unsafe fn foc_rust_realtime_step_core(
     // 电流环看到**完全同一组** αβ，否则两者之间的微小相位差会表现为转矩纹波。
     // The current loop reuses the shared Clarke result so that the observer and the
     // loop see exactly the same αβ.
-    #[cfg(feature = "advanced-foc")]
+    #[cfg(feature = "sensorless-foc")]
+    let sensorless_policy = reference_mode.sensorless_policy();
+    #[cfg(not(feature = "sensorless-foc"))]
+    let sensorless_policy: Option<CurrentLoopPolicy> = None;
+    if advanced_policy.is_some() && sensorless_policy.is_some() {
+        /* Product profiles make these owners mutually exclusive.  Keep this
+         * runtime guard as a second line of defence for all-features Host
+         * builds and manually linked images. */
+        controller.fault_flags |= FOC_FAULT_ADVANCED_CONTROL | FOC_FAULT_SENSORLESS_CONTROL;
+        controller.state = FocState::Fault;
+        return FocStatus::HardwareFault;
+    }
+    let current_policy = sensorless_policy.or(advanced_policy);
+    if current_policy.is_some() && precomputed_current_frame.is_none() {
+        precomputed_current_frame = Some(CurrentLoop::precompute_current_frame_with_math(
+            &snapshot,
+            current_alpha_beta,
+            angle_offsets.park_rad,
+            &mut math,
+        ));
+    }
     let (pwm, control) = if let Some(frame) = precomputed_current_frame {
-        if let Some(policy) = advanced_policy {
+        if let Some(policy) = current_policy {
             controller
                 .current_loop
                 .update_from_precomputed_current_frame_with_policy_and_math(
@@ -4158,12 +4474,6 @@ unsafe fn foc_rust_realtime_step_core(
                     &mut math,
                 )
         }
-    } else if advanced_policy.is_some() {
-        controller.advanced_telemetry =
-            FocAdvancedTelemetry::faulted(FOC_ADVANCED_REASON_SUPERVISOR_STATE);
-        controller.fault_flags |= FOC_FAULT_ADVANCED_CONTROL;
-        controller.state = FocState::Fault;
-        return FocStatus::HardwareFault;
     } else {
         controller
             .current_loop
@@ -4176,41 +4486,8 @@ unsafe fn foc_rust_realtime_step_core(
                 &mut math,
             )
     };
-    #[cfg(all(not(feature = "advanced-foc"), feature = "motion-control"))]
-    let (pwm, control) = if let Some(frame) = precomputed_current_frame {
-        controller
-            .current_loop
-            .update_from_precomputed_current_frame_with_math(
-                &controller.params,
-                &snapshot,
-                controller.current_reference,
-                angle_offsets,
-                frame,
-                &mut math,
-            )
-    } else {
-        controller
-            .current_loop
-            .update_from_alpha_beta_with_angle_offsets_and_math(
-                &controller.params,
-                &snapshot,
-                current_alpha_beta,
-                controller.current_reference,
-                angle_offsets,
-                &mut math,
-            )
-    };
-    #[cfg(all(not(feature = "advanced-foc"), not(feature = "motion-control")))]
-    let (pwm, control) = controller
-        .current_loop
-        .update_from_alpha_beta_with_angle_offsets_and_math(
-            &controller.params,
-            &snapshot,
-            current_alpha_beta,
-            controller.current_reference,
-            angle_offsets,
-            &mut math,
-        );
+    #[cfg(feature = "sensorless-foc")]
+    reference_mode.record_sensorless_application(control);
     // 输出合法性检查：非有限或超出 `[0,1]` 一律锁存 `FOC_FAULT_ALGORITHM_OUTPUT`
     // 并进入 `Fault`。这是"最后一道算法侧防线"——C 侧会把非法占空比直接写进比较
     // 寄存器，所以这里必须在写输出之前拦住。
@@ -4809,6 +5086,182 @@ mod tests {
         context
     }
 
+    #[cfg(feature = "sensorless-foc")]
+    #[test]
+    fn sensorless_composite_uses_one_current_sample_and_closes_n_plus_one_ledger() {
+        let mut context = started_realtime_context();
+        let mut sensorless = FocSensorlessContextStorage {
+            bytes: [0; FOC_SENSORLESS_CONTEXT_CAPACITY],
+        };
+        let mut sensorless_config = FocSensorlessRuntimeConfig::disabled_default();
+        sensorless_config.enabled = 1;
+        sensorless_config.hfi.axis_stable_samples = 64;
+        let guard = FocSensorlessConfigureGuard {
+            struct_size: core::mem::size_of::<FocSensorlessConfigureGuard>() as u32,
+            version: FOC_SENSORLESS_GUARD_VERSION,
+            controller_stopped: 1,
+            outputs_disabled: 1,
+            no_faults: 1,
+            platform_capabilities: FOC_SENSORLESS_REQUIRED_CAPABILITIES,
+            reserved: 0,
+        };
+        unsafe {
+            assert_eq!(
+                foc_rust_sensorless_init(&mut sensorless),
+                FocSensorlessStatus::Ok
+            );
+            assert_eq!(
+                foc_rust_sensorless_configure(&mut sensorless, &sensorless_config, &guard),
+                FocSensorlessStatus::Ok
+            );
+        }
+        let feedback = FocFeedback {
+            phase_current_a: 0.10,
+            phase_current_b: -0.04,
+            phase_current_c: -0.06,
+            dc_bus_voltage: 12.3,
+            electrical_angle_rad: 0.0,
+        };
+        let mut input = realtime_input(feedback);
+        let mut composite_input = FocSensorlessCompositeInput {
+            struct_size: core::mem::size_of::<FocSensorlessCompositeInput>() as u32,
+            version: FOC_SENSORLESS_COMPOSITE_INPUT_VERSION,
+            platform_capabilities: FOC_SENSORLESS_REQUIRED_CAPABILITIES,
+            input_flags: FOC_SENSORLESS_INPUT_INJECTION_PERMITTED | FOC_SENSORLESS_INPUT_BEMF_VALID,
+            applied_request_sequence: 0,
+            reserved: 0,
+            applied_injection_alpha_v: 0.0,
+            applied_injection_beta_v: 0.0,
+            voltage_limit_v: 6.5,
+            minimum_duty: 0.03,
+            maximum_duty: 0.97,
+        };
+        let mut output = FocOutput::default();
+        let mut telemetry = FocTelemetry::default();
+        let mut sensorless_output = FocSensorlessRealtimeOutput::default();
+        let mut composite_output = FocSensorlessCompositeOutput::default();
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step_sensorless(
+                    &mut context,
+                    &mut sensorless,
+                    &input,
+                    &composite_input,
+                    &mut output,
+                    &mut telemetry,
+                    &mut sensorless_output,
+                    &mut composite_output,
+                )
+            },
+            FocStatus::Ok
+        );
+        assert_eq!(sensorless_output.sample_sequence, 0);
+        assert_eq!(sensorless_output.request_apply_sequence, 1);
+        assert_eq!(composite_output.pwm_sequence, 1);
+        assert!((0.03..=0.97).contains(&output.duty_a));
+        assert!((0.03..=0.97).contains(&output.duty_b));
+        assert!((0.03..=0.97).contains(&output.duty_c));
+
+        input.control_sequence = 1;
+        composite_input.applied_request_sequence = 1;
+        composite_input.applied_injection_alpha_v = composite_output.applied_injection_alpha_v;
+        composite_input.applied_injection_beta_v = composite_output.applied_injection_beta_v;
+        if composite_output.status_flags & FOC_SENSORLESS_COMPOSITE_OUTPUT_INJECTION_LIMITED != 0 {
+            composite_input.input_flags |= FOC_SENSORLESS_INPUT_APPLIED_INJECTION_LIMITED;
+        }
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step_sensorless(
+                    &mut context,
+                    &mut sensorless,
+                    &input,
+                    &composite_input,
+                    &mut output,
+                    core::ptr::null_mut(),
+                    &mut sensorless_output,
+                    &mut composite_output,
+                )
+            },
+            FocStatus::Ok
+        );
+        assert_eq!(sensorless_output.sample_sequence, 1);
+        assert_eq!(sensorless_output.request_apply_sequence, 2);
+        assert_eq!(composite_output.pwm_sequence, 2);
+    }
+
+    #[cfg(feature = "sensorless-foc")]
+    #[test]
+    fn sensorless_composite_envelope_failure_is_zero_output() {
+        let mut context = started_realtime_context();
+        let mut sensorless = FocSensorlessContextStorage {
+            bytes: [0; FOC_SENSORLESS_CONTEXT_CAPACITY],
+        };
+        let mut sensorless_config = FocSensorlessRuntimeConfig::disabled_default();
+        sensorless_config.enabled = 1;
+        let guard = FocSensorlessConfigureGuard {
+            struct_size: core::mem::size_of::<FocSensorlessConfigureGuard>() as u32,
+            version: FOC_SENSORLESS_GUARD_VERSION,
+            controller_stopped: 1,
+            outputs_disabled: 1,
+            no_faults: 1,
+            platform_capabilities: FOC_SENSORLESS_REQUIRED_CAPABILITIES,
+            reserved: 0,
+        };
+        unsafe {
+            assert_eq!(
+                foc_rust_sensorless_init(&mut sensorless),
+                FocSensorlessStatus::Ok
+            );
+            assert_eq!(
+                foc_rust_sensorless_configure(&mut sensorless, &sensorless_config, &guard),
+                FocSensorlessStatus::Ok
+            );
+        }
+        let input = realtime_input(FocFeedback {
+            phase_current_a: 0.0,
+            phase_current_b: 0.0,
+            phase_current_c: 0.0,
+            dc_bus_voltage: 12.3,
+            electrical_angle_rad: 0.0,
+        });
+        let composite_input = FocSensorlessCompositeInput {
+            struct_size: core::mem::size_of::<FocSensorlessCompositeInput>() as u32,
+            version: FOC_SENSORLESS_COMPOSITE_INPUT_VERSION,
+            platform_capabilities: FOC_SENSORLESS_REQUIRED_CAPABILITIES,
+            input_flags: FOC_SENSORLESS_INPUT_INJECTION_PERMITTED,
+            applied_request_sequence: 7,
+            reserved: 0,
+            applied_injection_alpha_v: 0.0,
+            applied_injection_beta_v: 0.0,
+            voltage_limit_v: 6.5,
+            minimum_duty: 0.03,
+            maximum_duty: 0.97,
+        };
+        let mut output = FocOutput {
+            duty_a: 0.8,
+            duty_b: 0.7,
+            duty_c: 0.6,
+        };
+        let mut sensorless_output = FocSensorlessRealtimeOutput::default();
+        let mut composite_output = FocSensorlessCompositeOutput::default();
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step_sensorless(
+                    &mut context,
+                    &mut sensorless,
+                    &input,
+                    &composite_input,
+                    &mut output,
+                    core::ptr::null_mut(),
+                    &mut sensorless_output,
+                    &mut composite_output,
+                )
+            },
+            FocStatus::InvalidArgument
+        );
+        assert_eq!(output, FocOutput::default());
+    }
+
     #[cfg(feature = "advanced-foc")]
     #[test]
     fn advanced_abi_is_default_off_transactional_and_capability_gated() {
@@ -5168,7 +5621,7 @@ mod tests {
 
     #[test]
     fn realtime_input_layout_and_legacy_mapping_are_pinned_to_v19() {
-        assert_eq!(FOC_RUST_ABI_VERSION, 0x0015_0000);
+        assert_eq!(FOC_RUST_ABI_VERSION, 0x0016_0000);
         assert_eq!(FOC_REALTIME_INPUT_VERSION, 1);
         assert_eq!(FOC_REALTIME_HW_FAULT_DRIVER, 1 << 0);
         assert_eq!(FOC_REALTIME_HW_FAULT_BREAK, 1 << 1);
@@ -5559,7 +6012,7 @@ mod tests {
 
     #[test]
     fn lsi_ffi_defaults_and_layout_remain_pinned_under_current_bridge() {
-        assert_eq!(FOC_RUST_ABI_VERSION, 0x0015_0000);
+        assert_eq!(FOC_RUST_ABI_VERSION, 0x0016_0000);
         assert_eq!(size_of::<FocLsiActuationConfig>(), 48);
         assert_eq!(size_of::<FocLsiActuationInput>(), 52);
         assert_eq!(size_of::<FocLsiActuationOutput>(), 40);
@@ -5929,7 +6382,7 @@ mod tests {
                 FocStatus::Ok
             );
         }
-        assert_eq!(crc, 0xEDF4_F6CA);
+        assert_eq!(crc, 0x1E9D_6F9B);
 
         let mut changed = runtime;
         changed.observer_pll_kp = f32::from_bits(changed.observer_pll_kp.to_bits() + 1);
@@ -5997,6 +6450,7 @@ mod tests {
             assert!((runtime.startup_final_speed_rpm - 582.0).abs() < 1e-6);
             assert!((runtime.observer_smo_boundary_a - 0.24).abs() < 1e-6);
             assert!((runtime.observer_emf_filter_alpha - 0.015).abs() < 1e-6);
+            assert!((runtime.observer_emf_phase_advance_ratio - 0.8).abs() < 1e-6);
             assert!((runtime.observer_pll_kp - 40.0).abs() < 1e-6);
             assert!((runtime.observer_acquisition_pll_kp_ratio - 0.60).abs() < 1e-6);
             assert!((runtime.observer_pll_ki - 1_000.0).abs() < 1e-6);
@@ -6063,6 +6517,28 @@ mod tests {
                 || (output.duty_b - 0.5).abs() > 1e-6
                 || (output.duty_c - 0.5).abs() > 1e-6
         );
+    }
+
+    #[test]
+    fn emf_phase_advance_ratio_is_bounded_and_zero_is_valid() {
+        let mut context = context();
+        let mut runtime = FocRuntimeConfig::default();
+        unsafe {
+            assert_eq!(foc_rust_init(&mut context), FocStatus::Ok);
+            assert_eq!(foc_rust_default_st_config(&mut runtime), FocStatus::Ok);
+            runtime.observer_emf_phase_advance_ratio = 0.0;
+            assert_eq!(foc_rust_configure(&mut context, &runtime), FocStatus::Ok);
+            runtime.observer_emf_phase_advance_ratio = 1.000_1;
+            assert_eq!(
+                foc_rust_configure(&mut context, &runtime),
+                FocStatus::InvalidArgument
+            );
+            runtime.observer_emf_phase_advance_ratio = f32::NAN;
+            assert_eq!(
+                foc_rust_configure(&mut context, &runtime),
+                FocStatus::InvalidArgument
+            );
+        }
     }
 
     /// 负目标按幅值通过同一安全窗口，并把 Rev-Up 速度与 Iq 同时翻转；Rev-Up

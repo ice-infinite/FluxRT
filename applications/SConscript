@@ -16,6 +16,11 @@ from building import *
 cwd = GetCurrentDir()
 src = Glob('*.c')
 
+if not GetDepend('FOC_AS5600_TRUTH_DIAGNOSTIC'):
+    src = [unit for unit in src
+           if str(unit).replace('\\', '/').split('/')[-1] !=
+           'foc_as5600_shell.c']
+
 # P4.2 motion management is part of the same Diagnostic-only candidate as the
 # C adapter/Rust feature.  Keep the source out of generated default/profile
 # builds altogether so a newly added application file cannot create hidden
@@ -68,7 +73,10 @@ group = DefineGroup(
     'Applications',
     src,
     depend=[''],
-    CPPPATH=[cwd],
+    CPPPATH=[
+        cwd,
+        cwd + '/../foc/platform/stm32g431',
+    ],
 )
 
 Return('group')

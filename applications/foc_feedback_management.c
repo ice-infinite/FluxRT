@@ -469,6 +469,7 @@ foc_feedback_management_result_t foc_feedback_management_begin(
     }
     if ((owner_id == 0U) ||
         ((feedback_mode != FOC_FEEDBACK_MODE_INCREMENTAL_ENCODER) &&
+         (feedback_mode != FOC_FEEDBACK_MODE_ABSOLUTE_ENCODER) &&
          (feedback_mode != FOC_FEEDBACK_MODE_HALL)) ||
         (timeout_ms < FOC_FEEDBACK_MANAGEMENT_MIN_TIMEOUT_MS) ||
         (timeout_ms > FOC_FEEDBACK_MANAGEMENT_MAX_TIMEOUT_MS))

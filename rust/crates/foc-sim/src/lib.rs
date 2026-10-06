@@ -71,10 +71,14 @@ pub mod advanced_contract;
 pub mod dynamic_plant;
 pub mod full_speed;
 pub mod full_speed_contract;
+pub mod hfi_contract;
+pub mod hfi_dynamic_contract;
+pub mod lsi_h2_replay_contract;
 pub mod motion_contract;
 pub mod phase_voltage_path;
 pub mod phase_voltage_sensor;
 pub mod scheduler;
+pub mod sensorless_full_speed_contract;
 pub mod simulation_contract;
 pub use scheduler::{MultiRateScheduler, MultiRateTimingConfig, TimingConfigError};
 

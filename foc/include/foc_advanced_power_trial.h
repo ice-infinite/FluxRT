@@ -17,6 +17,17 @@
 #define FOC_ADVANCED_POWER_TRIAL_ACTIVE_TICKS     (1200UL)
 #define FOC_ADVANCED_POWER_TRIAL_MAX_TOTAL_TICKS  (168000UL)
 #define FOC_ADVANCED_POWER_TRIAL_TARGET_SPEED_RPM (582.0f)
+/* Keep the normal P5.4 envelope forward.  The stripped H3 image is a separate
+ * one-purpose reverse-query candidate: its Shell surface cannot choose the
+ * sign, magnitude, current, feature mask or duration.  startup_final_speed_rpm
+ * remains the positive Rev-Up magnitude; only the signed start command flips. */
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+#define FOC_ADVANCED_POWER_TRIAL_COMMAND_SPEED_RPM \
+    (-FOC_ADVANCED_POWER_TRIAL_TARGET_SPEED_RPM)
+#else
+#define FOC_ADVANCED_POWER_TRIAL_COMMAND_SPEED_RPM \
+    FOC_ADVANCED_POWER_TRIAL_TARGET_SPEED_RPM
+#endif
 
 typedef uint32_t foc_advanced_power_trial_mode_t;
 enum

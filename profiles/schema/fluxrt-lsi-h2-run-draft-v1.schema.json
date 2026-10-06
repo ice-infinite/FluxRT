@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fluxrt.local/schema/fluxrt-lsi-h2-run-draft-v1.schema.json",
+  "title": "FluxRT H2 evidence-bound, unapproved matrix run draft",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "version",
+    "status",
+    "matrix_run",
+    "parameter_approval",
+    "target_capability_approval"
+  ],
+  "properties": {
+    "contract": {"const": "fluxrt-lsi-h2-run-draft"},
+    "version": {"const": 1},
+    "status": {"const": "evidence-bound-unapproved"},
+    "matrix_run": {"type": "object"},
+    "parameter_approval": {"const": "not-granted"},
+    "target_capability_approval": {"const": "not-granted"}
+  }
+}

@@ -50,6 +50,20 @@ typedef struct
     float electrical_velocity_rad_s;
 } foc_incremental_encoder_feedback_port_t;
 
+/* Single-turn absolute encoders such as AS5600 do not have an index pulse.
+ * The platform adapter may unwrap consecutive samples into a best-effort
+ * multi-turn position, but power-cycle persistence remains a product policy. */
+typedef struct
+{
+    foc_feedback_adapter_common_t common;
+    uint32_t calibrated;
+    float mechanical_position_rad;
+    float multi_turn_position_rad;
+    float mechanical_velocity_rad_s;
+    float electrical_angle_rad;
+    float electrical_velocity_rad_s;
+} foc_absolute_encoder_feedback_port_t;
+
 bool foc_feedback_adapt_sensorless(
     const foc_sensorless_feedback_port_t *input,
     foc_feedback_source_sample_t *output);
@@ -58,6 +72,9 @@ bool foc_feedback_adapt_hall(
     foc_feedback_source_sample_t *output);
 bool foc_feedback_adapt_incremental_encoder(
     const foc_incremental_encoder_feedback_port_t *input,
+    foc_feedback_source_sample_t *output);
+bool foc_feedback_adapt_absolute_encoder(
+    const foc_absolute_encoder_feedback_port_t *input,
     foc_feedback_source_sample_t *output);
 
 #endif /* FOC_FEEDBACK_ADAPTER_H */

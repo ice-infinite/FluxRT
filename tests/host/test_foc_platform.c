@@ -51,7 +51,7 @@
  * the application-layer profile transaction and all fail-closed branches; the
  * real CRC algorithm and exact value are independently pinned by Rust tests. */
 static foc_status_t g_profile_crc_stub_status = FOC_STATUS_OK;
-static uint32_t g_profile_crc_stub_value = 0xEDF4F6CAUL;
+static uint32_t g_profile_crc_stub_value = 0x1E9D6F9BUL;
 
 foc_status_t foc_rust_runtime_config_crc32(const foc_runtime_config_t *config,
                                            uint32_t *crc_out)
@@ -78,11 +78,11 @@ static void test_production_profile(void)
     assert(foc_production_profile_record_crc32(&g_foc_production_profile) ==
            g_foc_production_profile.record_crc32);
     assert(foc_production_profile_validate(&g_foc_production_profile,
-                                           0xEDF4F6CAUL,
+                                           0x1E9D6F9BUL,
                                            &report) ==
            FOC_PROFILE_VALID_UNAPPROVED);
     assert(report.approval_flags == 0U);
-    assert(report.computed_record_crc32 == 0x888E4E91UL);
+    assert(report.computed_record_crc32 == 0x3FA513B6UL);
 
     changed = g_foc_production_profile;
     changed.motor_id ^= 1U;
@@ -438,6 +438,9 @@ int main(void)
     foc_realtime_timing_stats_t timing = {0};
     foc_math_benchmark_result_t math_benchmark = {0};
     foc_math_health_t math_health = {0};
+    foc_lsi_break_test_result_t break_test = {0};
+    foc_lsi_break_external_test_result_t break_external_test = {0};
+    foc_lsi_break_isr_test_result_t break_isr_test = {0};
     float sin_value = 1.0f;
     float cos_value = 1.0f;
     float magnitude = 1.0f;
@@ -451,17 +454,17 @@ int main(void)
 
     /* ABI 触发线 / ABI tripwires:
      *   ABI 版本必须与 foc/include/foc_rust_bridge.h 中的 FOC_RUST_ABI_VERSION
-     *   完全一致（当前 0x00150000）；上下文容量必须与静态断言一致；运行时配置 296 B、
+     *   完全一致（当前 0x00160000）；上下文容量必须与静态断言一致；运行时配置 300 B、
      *   遥测 100 B 是 C 与 Rust 双方共同约定的结构体尺寸。改任何一处都必须同时
      *   提升 ABI 版本并更新本测试，否则板上应拒绝启动（见 applications/main.c）。
      *   The ABI version must match FOC_RUST_ABI_VERSION in
-     *   foc/include/foc_rust_bridge.h exactly (currently 0x00150000); the context
-     *   capacity must match its _Static_assert; and 296 B for the runtime
+     *   foc/include/foc_rust_bridge.h exactly (currently 0x00160000); the context
+     *   capacity must match its _Static_assert; and 300 B for the runtime
      *   configuration and 100 B
      *   for telemetry are the struct sizes both sides agreed on. Any change requires
      *   bumping the ABI version and updating this test, otherwise the board must
      *   refuse to start (see applications/main.c). */
-    assert(FOC_RUST_ABI_VERSION == 0x00150000UL);
+    assert(FOC_RUST_ABI_VERSION == 0x00160000UL);
     assert(FOC_REALTIME_INPUT_VERSION == 1UL);
     assert(sizeof(foc_feedback_t) == 20U);
     assert(sizeof(foc_realtime_input_t) == 88U);
@@ -472,7 +475,7 @@ int main(void)
     assert(sizeof(foc_observer_run_reliability_config_t) == 8U);
     assert(sizeof(foc_angle_compensation_config_t) == 8U);
     assert(sizeof(foc_inverter_voltage_model_config_t) == 36U);
-    assert(sizeof(foc_runtime_config_t) == 296U);
+    assert(sizeof(foc_runtime_config_t) == 300U);
     assert(sizeof(foc_telemetry_t) == 100U);
     assert(sizeof(foc_lsi_actuation_config_t) == 48U);
     assert(sizeof(foc_lsi_actuation_input_t) == 52U);
@@ -595,6 +598,21 @@ int main(void)
      * path can arm an unconfigured platform. */
     assert(foc_platform_trial_arm() == FOC_STATUS_NOT_CONFIGURED);
     assert(foc_platform_lsi_start(0x4C534931UL) == FOC_STATUS_DISABLED);
+    assert(foc_platform_lsi_break2_self_test(0x42324731UL, &break_test) ==
+           FOC_STATUS_NOT_CONFIGURED);
+    assert(break_test.version == FOC_LSI_BREAK_TEST_RESULT_VERSION);
+    assert(break_test.after_bdtr == 0U);
+    assert(foc_platform_lsi_break2_external_self_test(
+               0x42325831UL, &break_external_test) ==
+           FOC_STATUS_NOT_CONFIGURED);
+    assert(break_external_test.version ==
+           FOC_LSI_BREAK_EXTERNAL_TEST_RESULT_VERSION);
+    assert(break_external_test.after_bdtr == 0U);
+    assert(foc_platform_lsi_break2_isr_self_test(
+               0x42324931UL, &break_isr_test) ==
+           FOC_STATUS_NOT_CONFIGURED);
+    assert(break_isr_test.version == FOC_LSI_BREAK_ISR_TEST_RESULT_VERSION);
+    assert(break_isr_test.event_bdtr == 0U);
     assert(foc_platform_apply_output(&output) == FOC_STATUS_NOT_CONFIGURED);
     foc_platform_trial_disarm();
     /* 空状态下诊断全 0，尤其是 flags 里不能出现 GATE_SAFE/OUTPUT_ACTIVE 这类

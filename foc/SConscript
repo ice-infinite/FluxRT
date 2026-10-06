@@ -36,6 +36,7 @@ hal_src = os.path.abspath(os.path.join(
 ))
 src = [
     'runtime/foc_arm_diagnostics.c',
+    'runtime/foc_as5600.c',
     'runtime/foc_config_apply_executor.c',
     'runtime/foc_feedback_adapter.c',
     'runtime/foc_lsi_actuation_executor.c',
@@ -50,8 +51,13 @@ src = [
     'runtime/foc_power_safety.c',
     'runtime/foc_pwm_timing.c',
     'runtime/foc_realtime_timing.c',
+    'runtime/foc_time_sync.c',
+    'runtime/foc_time_sync_toggle_plan.c',
+    'runtime/foc_time_sync_wire.c',
     'platform/stm32g431/foc_lsi_preload_sink.c',
     'platform/stm32g431/foc_phase_voltage_platform_adapter.c',
+    'platform/stm32g431/foc_sensorless_stm32g431.c',
+    'platform/stm32g431/foc_time_sync_stm32g431.c',
     'platform/stm32g431/foc_platform_stm32g431.c',
     'platform/stm32g431/foc_math_accel_stm32g431.c',
     os.path.join(hal_src, 'stm32g4xx_hal_adc.c'),
@@ -59,13 +65,20 @@ src = [
     os.path.join(hal_src, 'stm32g4xx_hal_tim.c'),
     os.path.join(hal_src, 'stm32g4xx_hal_tim_ex.c'),
 ]
+if GetDepend('FOC_AS5600_TRUTH_DIAGNOSTIC'):
+    src.append('platform/stm32g431/foc_as5600_stm32g431.c')
+    src.append(os.path.join(hal_src, 'stm32g4xx_hal_i2c.c'))
+if GetDepend('FOC_AS5600_ALIGNMENT_CANDIDATE'):
+    src.append('runtime/foc_as5600_alignment_trial.c')
 if GetDepend('FOC_MOTION_CONTROL_CANDIDATE'):
     src.append('runtime/foc_motion_adapter.c')
     src.append('runtime/foc_motion_dispatcher.c')
     src.append('runtime/foc_motion_probe.c')
     src.append('runtime/foc_motion_torque_trial.c')
-if GetDepend('FOC_ADVANCED_CONTROL_CANDIDATE'):
+if (GetDepend('FOC_ADVANCED_CONTROL_CANDIDATE') or
+        GetDepend('FOC_SENSORLESS_CONTROL_CANDIDATE')):
     src.append('runtime/foc_advanced_probe.c')
+if GetDepend('FOC_ADVANCED_CONTROL_CANDIDATE'):
     src.append('runtime/foc_advanced_power_trial.c')
 if GetDepend('FOC_EXTERNAL_IO_FRAMEWORK'):
     src.append('runtime/foc_external_io.c')

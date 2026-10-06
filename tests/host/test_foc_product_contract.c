@@ -42,7 +42,7 @@ int main(void)
     foc_product_command_t start;
     float recovered_rpm;
 
-    assert(FOC_RUST_ABI_VERSION == 0x00150000UL);
+    assert(FOC_RUST_ABI_VERSION == 0x00160000UL);
     assert(FOC_PRODUCT_CONTRACT_VERSION == 0x00010000UL);
     assert(FOC_AXIS_STATE_FAULT_LATCHED == 6);
     assert(FOC_AXIS_REQUEST_CLOSED_LOOP_CONTROL == 9);

@@ -46,6 +46,10 @@
 #define FLUXRT_BUILD_CAP_MOTION_CANDIDATE       (1UL << 5)
 #define FLUXRT_BUILD_CAP_ADVANCED_FOC_CANDIDATE (1UL << 6)
 #define FLUXRT_BUILD_CAP_POWER_MANAGEMENT_CANDIDATE (1UL << 7)
+#define FLUXRT_BUILD_CAP_SENSORLESS_FOC_CANDIDATE (1UL << 8)
+#define FLUXRT_BUILD_CAP_H3_DYNAMIC_QUERY       (1UL << 9)
+#define FLUXRT_BUILD_CAP_AS5600_TRUTH_DIAGNOSTIC (1UL << 10)
+#define FLUXRT_BUILD_CAP_AS5600_ALIGNMENT_CANDIDATE (1UL << 11)
 
 #if defined(FLUXRT_DIAGNOSTIC_BUILD)
 #if defined(FOC_ADVANCED_CONTROL_CANDIDATE)
@@ -57,6 +61,16 @@
     FLUXRT_BUILD_CAP_ADVANCED_FOC_CANDIDATE
 #else
 #define FLUXRT_ADVANCED_CANDIDATE_CAPABILITY (0UL)
+#endif
+#if defined(FOC_SENSORLESS_CONTROL_CANDIDATE)
+/* The full-speed sensorless target image is a separate no-power timing lab.
+ * It cannot coexist with the larger advanced supervisor, has no generic motor
+ * arm authority, and the real board capability provider remains zero. */
+#define FLUXRT_SENSORLESS_CANDIDATE_BUILD 1
+#define FLUXRT_SENSORLESS_CANDIDATE_CAPABILITY \
+    FLUXRT_BUILD_CAP_SENSORLESS_FOC_CANDIDATE
+#else
+#define FLUXRT_SENSORLESS_CANDIDATE_CAPABILITY (0UL)
 #endif
 #if defined(FOC_POWER_MANAGEMENT_CANDIDATE)
 /* This adds only a default-off management policy. Sensor/brake capabilities
@@ -76,6 +90,40 @@
     (FLUXRT_BUILD_CAP_MOTION_CANDIDATE | \
      FLUXRT_ADVANCED_CANDIDATE_CAPABILITY | \
      FLUXRT_POWER_CANDIDATE_CAPABILITY)
+#elif defined(FOC_AS5600_TRUTH_DIAGNOSTIC)
+/* Direct encoder-truth bring-up keeps normal motor arm compiled out. The
+ * optional alignment subprofile grants only its dedicated fixed-envelope
+ * authority; I2C still runs exclusively from bounded Shell commands. */
+#define FLUXRT_AS5600_TRUTH_BUILD 1
+#define FLUXRT_MOTOR_ARM_DISABLED_BUILD 1
+#if defined(FOC_AS5600_ALIGNMENT_CANDIDATE)
+#define FLUXRT_AS5600_ALIGNMENT_BUILD 1
+#define FLUXRT_BUILD_CAPABILITY_MASK \
+    (FLUXRT_BUILD_CAP_AS5600_TRUTH_DIAGNOSTIC | \
+     FLUXRT_BUILD_CAP_AS5600_ALIGNMENT_CANDIDATE)
+#else
+#define FLUXRT_BUILD_CAPABILITY_MASK \
+    FLUXRT_BUILD_CAP_AS5600_TRUTH_DIAGNOSTIC
+#endif
+#elif defined(FOC_SENSORLESS_CONTROL_CANDIDATE)
+/* S11 measures only the sensorless ABI in the real ADC IRQ with Gate/MOE/CCER
+ * closed. Remove generic tuning/trace surfaces and compile-time disable every
+ * motor-arm path so the measurement image cannot become a drive image. */
+#define FLUXRT_MOTOR_ARM_DISABLED_BUILD 1
+#define FLUXRT_BUILD_CAPABILITY_MASK \
+    FLUXRT_SENSORLESS_CANDIDATE_CAPABILITY
+#elif defined(FOC_H3_DYNAMIC_QUERY_CANDIDATE)
+/* The H3 powered query reuses the already bounded Advanced trial owner.  Keep
+ * only realtime trace and the verified PB6/PB7 synchronisation path so the
+ * evidence image fits the G431RB Flash envelope. */
+#define FLUXRT_H3_TIME_SYNC_BUILD 1
+#define FLUXRT_H3_DYNAMIC_QUERY_BUILD 1
+#define FLUXRT_H3_EDGE_CONTROL_TICK_BUILD 1
+#define FLUXRT_TRACE_BUILD 1
+#define FLUXRT_BUILD_CAPABILITY_MASK \
+    (FLUXRT_BUILD_CAP_REALTIME_TRACE | \
+     FLUXRT_ADVANCED_CANDIDATE_CAPABILITY | \
+     FLUXRT_BUILD_CAP_H3_DYNAMIC_QUERY)
 #else
 #define FLUXRT_RUNTIME_TUNING_BUILD 1
 #define FLUXRT_TRACE_BUILD 1
@@ -85,6 +133,7 @@
     (FLUXRT_BUILD_CAP_RUNTIME_TUNING | FLUXRT_BUILD_CAP_REALTIME_TRACE | \
      FLUXRT_BUILD_CAP_PHASE_VOLTAGE_CAPTURE | FLUXRT_BUILD_CAP_MATH_DIAGNOSTICS | \
      FLUXRT_ADVANCED_CANDIDATE_CAPABILITY | \
+     FLUXRT_SENSORLESS_CANDIDATE_CAPABILITY | \
      FLUXRT_POWER_CANDIDATE_CAPABILITY)
 #endif
 #elif defined(FLUXRT_CALIBRATION_BUILD)
@@ -96,6 +145,7 @@
 #elif defined(FLUXRT_IDENTIFICATION_BUILD)
 /* Identification 只开放 EXP-B3 状态机；普通 foc_start/平台 arm 仍编译期拒绝。 */
 #define FLUXRT_LSI_IDENTIFICATION_BUILD 1
+#define FLUXRT_H3_TIME_SYNC_BUILD 1
 #define FLUXRT_MOTOR_ARM_DISABLED_BUILD 1
 #define FLUXRT_BUILD_CAPABILITY_MASK FLUXRT_BUILD_CAP_LSI_IDENTIFICATION
 #else

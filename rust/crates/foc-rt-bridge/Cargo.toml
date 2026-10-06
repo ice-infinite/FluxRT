@@ -11,6 +11,7 @@ fast-math-benchmark = []
 fast-math-candidate = ["fast-math-benchmark"]
 motion-control = ["foc-control/motion-control"]
 advanced-foc = ["foc-control/advanced-foc"]
+sensorless-foc = ["foc-control/sensorless-foc"]
 power-management = []
 external-inputs = ["dep:foc-input"]
 native-protocol = ["dep:foc-protocol"]
@@ -18,6 +19,11 @@ native-protocol = ["dep:foc-protocol"]
 [lib]
 name = "foc_rt_bridge"
 crate-type = ["staticlib", "rlib"]
+
+[[example]]
+name = "advanced_probe_reference"
+path = "examples/advanced_probe_reference.rs"
+required-features = ["advanced-foc"]
 
 [dependencies]
 foc-algorithm = { path = "../foc-algorithm" }

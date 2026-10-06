@@ -1,0 +1,27 @@
+{
+  "contract": "fluxrt-h3-board-capture",
+  "version": 1,
+  "status": "captured-not-approved",
+  "anchor_count": 20,
+  "first_edge_sequence": 121,
+  "last_edge_sequence": 140,
+  "truth_sample_count": 8292,
+  "loopback": {
+    "valid_count": 20,
+    "timer_tick": 100,
+    "delta_cycles_min": -121,
+    "delta_cycles_max": 49,
+    "delta_cycles_mean": 40.5,
+    "delta_cycles_median": 49.0,
+    "absolute_max_us": 0.711764705882353
+  },
+  "motor_power_enabled": false,
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "anchors.csv": "BFECB70F660DDDE32E01C1DBBDF2FC8302DB3065CA3716D65D26F16702833BED",
+    "raw-anchors.csv": "39C45EC7751DBB4087167E382D39A2AFD9C4AF6540E8BEA503DE9D476C15577C",
+    "truth.csv": "7415D6E6A22F84ED6C037FDDCF462695EBC07D7E2F5037E397702657D0A7E6B0",
+    "raw-lines.csv": "57C88A8E74E68108CB4940C1B3A187269A82A838F5A1CAEA0317DE4D5521A8E6"
+  }
+}

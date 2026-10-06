@@ -15,9 +15,9 @@ _Static_assert(sizeof(foc_production_profile_t) == 40U,
                "production profile layout changed; bump schema and CRC");
 
 /* CM4.4 revision 6: NUCLEO-G431RB + X-NUCLEO-IHM16M1 + GBM2804H-100T.
- * runtime CRC 0xEDF4F6CA covers the ABI-V17/config-V11 bidirectional start and
- * handover candidate proved by the 2026-09-25 unloaded hardware matrix.
- * record CRC 0x888E4E91 covers the first nine words.
+ * runtime CRC 0x1E9D6F9B covers the ABI-V22/config-V12 baseline. V12 adds an
+ * explicit 0.8 EMF phase-advance ratio and preserves the previous control law.
+ * record CRC 0x3FA513B6 covers the first nine words.
  * No approval bit is set: open-loop bring-up remains possible, observer handoff
  * remains impossible in Production until a later reviewed profile changes both
  * CRCs and approval evidence. */
@@ -30,9 +30,9 @@ const foc_production_profile_t g_foc_production_profile =
     FOC_PRODUCTION_PROFILE_BOARD_NUCLEO_G431_IHM16,
     FOC_PRODUCTION_PROFILE_MOTOR_GBM2804H_100T,
     FOC_RUST_CONFIG_VERSION,
-    0xEDF4F6CAUL,
+    0x1E9D6F9BUL,
     0U,
-    0x888E4E91UL,
+    0x3FA513B6UL,
 };
 
 static uint32_t crc32_word(uint32_t crc, uint32_t word)

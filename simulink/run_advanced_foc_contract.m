@@ -19,7 +19,7 @@ n = numel(cases);
 case_id = strings(n, 1);
 values = zeros(n, 15);
 for k = 1:n
-    c = cases(k);
+    if iscell(cases), c = cases{k}; else, c = cases(k); end
     case_id(k) = string(c.id);
     values(k, :) = run_case(doc.motor, doc.config, ...
         double(doc.control_frequency_hz), c);
@@ -59,8 +59,19 @@ flyingAngle = 0; flyingSpeed = 0;
 idRef = double(c.base_id_a); iqRef = double(c.base_iq_a);
 vdff = 0; vqff = 0; injA = 0; injB = 0; hfiValid = 0;
 vLimit = double(c.linear_voltage_utilization)*double(c.dc_bus_voltage_v)/sqrt3;
+warmupSteps=0;
+if isfield(c,'warmup_steps'), warmupSteps=double(c.warmup_steps); end
 
-for step = 1:double(c.steps) %#ok<NASGU>
+for step = 1:(warmupSteps+double(c.steps)) %#ok<NASGU>
+    if step<=warmupSteps
+        previousVd=double(c.warmup_previous_vd_v);
+        previousVq=double(c.warmup_previous_vq_v);
+        electricalSpeed=double(c.warmup_electrical_speed_rad_s);
+    else
+        previousVd=double(c.previous_vd_v);
+        previousVq=double(c.previous_vq_v);
+        electricalSpeed=double(c.electrical_speed_rad_s);
+    end
     idRef = double(c.base_id_a); iqRef = double(c.base_iq_a);
     baseMagnitude = hypot(idRef, iqRef);
     if baseMagnitude > double(p.current_limit_a)
@@ -77,7 +88,7 @@ for step = 1:double(c.steps) %#ok<NASGU>
                 double(p.mtpa_search_steps));
             region=1; active=bitor(active,MTPA);
         end
-        voltageRatio = hypot(double(c.previous_vd_v),double(c.previous_vq_v))/ ...
+        voltageRatio = hypot(previousVd,previousVq)/ ...
             max(double(c.dc_bus_voltage_v)/sqrt3, realmin);
         if bitand(features,FW) ~= 0
             if weakeningActive
@@ -90,7 +101,7 @@ for step = 1:double(c.steps) %#ok<NASGU>
             if weakeningActive
                 fwLimit=double(p.weakening_entry_utilization)*double(c.dc_bus_voltage_v)/sqrt3;
                 targetId=idRef-double(p.weakening_kp_a_per_v)* ...
-                    max(0,hypot(double(c.previous_vd_v),double(c.previous_vq_v))-fwLimit);
+                    max(0,hypot(previousVd,previousVq)-fwLimit);
                 targetId=max(double(p.weakening_id_min_a),min(0,targetId));
                 maximumStep=double(p.weakening_slew_a_per_s)/frequency* ...
                     double(p.region_update_divider);
@@ -98,7 +109,7 @@ for step = 1:double(c.steps) %#ok<NASGU>
                 region=2; active=FW;
             end
         end
-        speed=abs(double(c.electrical_speed_rad_s));
+        speed=abs(electricalSpeed);
         if bitand(features,MTPV) ~= 0
             if mtpvActive
                 if speed <= double(p.mtpv_exit_electrical_speed_rad_s)
@@ -126,7 +137,7 @@ for step = 1:double(c.steps) %#ok<NASGU>
     end
 
     if bitand(features,DECOUPLE) ~= 0 && logical(c.closed_loop_active)
-        omega=double(c.electrical_speed_rad_s); gain=double(p.decoupling_gain);
+        omega=electricalSpeed; gain=double(p.decoupling_gain);
         vdff=-gain*omega*double(m.lq_h)*double(c.measured_iq_a);
         vqff=gain*omega*(double(m.ld_h)*double(c.measured_id_a)+double(m.flux_linkage_wb));
         active=bitor(active,DECOUPLE);
@@ -134,7 +145,7 @@ for step = 1:double(c.steps) %#ok<NASGU>
         vdff=0; vqff=0;
     end
 
-    prior=hypot(double(c.previous_vd_v),double(c.previous_vq_v))/ ...
+    prior=hypot(previousVd,previousVq)/ ...
         max(double(c.dc_bus_voltage_v)/sqrt3,realmin);
     if bitand(features,OVERMOD) ~= 0
         if overmodActive
@@ -173,10 +184,10 @@ for step = 1:double(c.steps) %#ok<NASGU>
         flyingState=0; flyingStable=0; flyingElapsed=0;
     elseif flyingState~=2 && flyingState~=3
         flyingState=1; flyingElapsed=flyingElapsed+1;
-        if logical(c.observer_reliable) && abs(double(c.electrical_speed_rad_s)) >= ...
+        if logical(c.observer_reliable) && abs(electricalSpeed) >= ...
                 double(p.flying_start_min_electrical_speed_rad_s)
             flyingStable=flyingStable+1;
-            flyingAngle=double(c.electrical_angle_rad); flyingSpeed=double(c.electrical_speed_rad_s);
+            flyingAngle=double(c.electrical_angle_rad); flyingSpeed=electricalSpeed;
             if flyingStable >= double(p.flying_start_stable_samples), flyingState=2; end
         else
             flyingStable=0;
@@ -186,6 +197,10 @@ for step = 1:double(c.steps) %#ok<NASGU>
         end
     end
     if flyingState~=0, active=bitor(active,FLYING); end
+end
+if isfield(c,'expected_region'), assert(region==double(c.expected_region)); end
+if isfield(c,'expected_active_features')
+    assert(active==double(c.expected_active_features));
 end
 currentLimited = hypot(double(c.base_id_a),double(c.base_iq_a)) > ...
     double(p.current_limit_a)+eps('single');

@@ -114,6 +114,14 @@ file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_MOTION_CONFIG_LINE
     REGEX "^#define FOC_MOTION_CONTROL_CANDIDATE$")
 file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_ADVANCED_CONFIG_LINE
     REGEX "^#define FOC_ADVANCED_CONTROL_CANDIDATE$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_SENSORLESS_CONFIG_LINE
+    REGEX "^#define FOC_SENSORLESS_CONTROL_CANDIDATE$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_H3_DYNAMIC_CONFIG_LINE
+    REGEX "^#define FOC_H3_DYNAMIC_QUERY_CANDIDATE$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_AS5600_TRUTH_CONFIG_LINE
+    REGEX "^#define FOC_AS5600_TRUTH_DIAGNOSTIC$")
+file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_AS5600_ALIGNMENT_CONFIG_LINE
+    REGEX "^#define FOC_AS5600_ALIGNMENT_CANDIDATE$")
 file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_POWER_CONFIG_LINE
     REGEX "^#define FOC_POWER_MANAGEMENT_CANDIDATE$")
 file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_EXTERNAL_IO_CONFIG_LINE
@@ -127,7 +135,7 @@ file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_INPUT_STEP_DIR_CONFIG_LINE
 file(STRINGS "${CMAKE_SOURCE_DIR}/rtconfig.h" FOC_NATIVE_PROTOCOL_CONFIG_LINE
     REGEX "^#define FLUXRT_PROTOCOL_NATIVE$")
 
-foreach(feature_name IN ITEMS MOTION ADVANCED POWER EXTERNAL_IO INPUT_PWM
+foreach(feature_name IN ITEMS MOTION ADVANCED SENSORLESS H3_DYNAMIC AS5600_TRUTH AS5600_ALIGNMENT POWER EXTERNAL_IO INPUT_PWM
                               INPUT_ANALOG INPUT_STEP_DIR NATIVE_PROTOCOL)
     if(FOC_${feature_name}_CONFIG_LINE)
         set(FOC_${feature_name}_ENABLED ON)
@@ -141,6 +149,10 @@ fluxrt_validate_g431_product_profile(
     PROFILE "${FLUXRT_G431_PRODUCT_PROFILE}"
     BUILD_PROFILE "${FLUXRT_BUILD_PROFILE}"
     ADVANCED "${FOC_ADVANCED_ENABLED}"
+    SENSORLESS "${FOC_SENSORLESS_ENABLED}"
+    H3_DYNAMIC "${FOC_H3_DYNAMIC_ENABLED}"
+    AS5600_TRUTH "${FOC_AS5600_TRUTH_ENABLED}"
+    AS5600_ALIGNMENT "${FOC_AS5600_ALIGNMENT_ENABLED}"
     MOTION "${FOC_MOTION_ENABLED}"
     POWER "${FOC_POWER_ENABLED}"
     EXTERNAL_IO "${FOC_EXTERNAL_IO_ENABLED}"
@@ -221,6 +233,39 @@ elseif(FOC_ADVANCED_CONFIG_LINE)
     message(STATUS "FOC advanced control: Rust candidate ignored outside Diagnostic profile")
 else()
     message(STATUS "FOC advanced control: candidate disabled")
+endif()
+
+if(FLUXRT_BUILD_PROFILE STREQUAL "diagnostic" AND FOC_H3_DYNAMIC_CONFIG_LINE)
+    message(STATUS "FOC H3 dynamic query: bounded Advanced-Lab encoder-truth image enabled")
+elseif(FOC_H3_DYNAMIC_CONFIG_LINE)
+    message(FATAL_ERROR "FOC_H3_DYNAMIC_QUERY_CANDIDATE is Diagnostic-only")
+else()
+    message(STATUS "FOC H3 dynamic query: candidate disabled")
+endif()
+
+if(FLUXRT_BUILD_PROFILE STREQUAL "diagnostic" AND FOC_AS5600_TRUTH_CONFIG_LINE)
+    if(FOC_AS5600_ALIGNMENT_CONFIG_LINE)
+        message(STATUS "FOC AS5600 truth: I2C3 plus one-shot bounded alignment candidate enabled")
+    else()
+        message(STATUS "FOC AS5600 truth: no-power I2C3 diagnostic enabled, motor arm disabled")
+    endif()
+elseif(FOC_AS5600_TRUTH_CONFIG_LINE)
+    message(FATAL_ERROR "FOC_AS5600_TRUTH_DIAGNOSTIC is Diagnostic-only")
+else()
+    message(STATUS "FOC AS5600 truth: diagnostic disabled")
+endif()
+
+# The full-speed sensorless ABI is deliberately a separate Advanced-Lab
+# subprofile. Linking it together with MTPA/MTPV/overmodulation exceeded the
+# G431RB Flash by 8,392 bytes, so the profile validator rejects coexistence and
+# this feature pulls only HFI/polarity/fusion into the Rust archive.
+if(FLUXRT_BUILD_PROFILE STREQUAL "diagnostic" AND FOC_SENSORLESS_CONFIG_LINE)
+    list(APPEND FOC_RUST_FEATURE_ARGS --features sensorless-foc)
+    message(STATUS "FOC sensorless control: no-power full-speed candidate available, motor arm disabled")
+elseif(FOC_SENSORLESS_CONFIG_LINE)
+    message(STATUS "FOC sensorless control: Rust candidate ignored outside Diagnostic profile")
+else()
+    message(STATUS "FOC sensorless control: candidate disabled")
 endif()
 
 # P5.1 power management is deliberately independent from the realtime ISR.

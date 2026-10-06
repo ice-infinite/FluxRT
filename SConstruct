@@ -107,6 +107,8 @@ def rust_library_build():
     # algorithms do not.
     if GetDepend('FOC_MATH_BACKEND_STM32G4_CORDIC'):
         command.extend(['--features', 'stm32g4-cordic'])
+    if GetDepend('FOC_SENSORLESS_CONTROL_CANDIDATE'):
+        command.extend(['--features', 'sensorless-foc'])
     result = subprocess.run(command, cwd=rust_dir, env=rust_env)
     if result.returncode != 0:
         print('Rust FOC static library build failed.')

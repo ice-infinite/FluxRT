@@ -75,6 +75,30 @@ static void encoder_requires_calibration_and_index_quality(void)
     assert((output.quality_flags & FOC_PRODUCT_FEEDBACK_QUALITY_DEGRADED) != 0U);
 }
 
+static void absolute_encoder_requires_calibration_but_not_index(void)
+{
+    foc_absolute_encoder_feedback_port_t input;
+    foc_feedback_source_sample_t output;
+    (void)memset(&input, 0, sizeof(input));
+    input.common = common_input();
+    input.calibrated = 1U;
+    input.mechanical_position_rad = 0.5F;
+    input.multi_turn_position_rad = 6.75F;
+    input.mechanical_velocity_rad_s = 4.0F;
+    input.electrical_angle_rad = 3.5F;
+    input.electrical_velocity_rad_s = 28.0F;
+    assert(foc_feedback_adapt_absolute_encoder(&input, &output));
+    assert(output.mode == FOC_FEEDBACK_MODE_ABSOLUTE_ENCODER);
+    assert(output.valid_flags == FOC_PRODUCT_FEEDBACK_VALID_KNOWN_MASK);
+    assert((output.quality_flags & FOC_PRODUCT_FEEDBACK_QUALITY_CALIBRATED) != 0U);
+    assert((output.quality_flags & FOC_PRODUCT_FEEDBACK_QUALITY_INDEX_FOUND) == 0U);
+
+    input.calibrated = 0U;
+    assert(foc_feedback_adapt_absolute_encoder(&input, &output));
+    assert((output.quality_flags & FOC_PRODUCT_FEEDBACK_QUALITY_CALIBRATED) == 0U);
+    assert((output.quality_flags & FOC_PRODUCT_FEEDBACK_QUALITY_DEGRADED) != 0U);
+}
+
 static void hall_and_invalid_inputs_are_canonical(void)
 {
     foc_hall_feedback_port_t input;
@@ -109,6 +133,7 @@ int main(void)
 {
     sensorless_maps_reliable_and_unavailable_states();
     encoder_requires_calibration_and_index_quality();
+    absolute_encoder_requires_calibration_but_not_index();
     hall_and_invalid_inputs_are_canonical();
     return 0;
 }

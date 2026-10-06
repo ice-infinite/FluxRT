@@ -262,7 +262,7 @@ foc_lsi_state_t foc_lsi_step(foc_lsi_context_t *context,
     {
         foc_lsi_abort(context, FOC_LSI_ABORT_SOFTWARE_TRIP);
     }
-    else if (input->abs_phase_current_a > context->config.current_trip_a)
+    else if (input->abs_phase_current_a >= context->config.current_trip_a)
     {
         foc_lsi_abort(context, FOC_LSI_ABORT_CURRENT_LIMIT);
     }

@@ -12,6 +12,7 @@ crate-type = ["rlib"]
 default = []
 motion-control = []
 advanced-foc = []
+sensorless-foc = []
 
 [dependencies]
 foc-algorithm = { path = "../foc-algorithm" }

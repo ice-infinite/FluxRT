@@ -191,7 +191,7 @@ pub fn plan_lsi_actuation(
     if input.hardware_fault
         || input.software_trip
         || input.capture_full
-        || input.phase_u_current_a.abs() > config.current_trip_a
+        || input.phase_u_current_a.abs() >= config.current_trip_a
     {
         return Err(LsiActuationError::Fault);
     }
@@ -371,7 +371,7 @@ mod tests {
             Err(LsiActuationError::Fault)
         );
         input.bus_voltage_v = 12.3;
-        input.phase_u_current_a = 1.150_1;
+        input.phase_u_current_a = 1.15;
         assert_eq!(
             plan_lsi_actuation(config, input),
             Err(LsiActuationError::Fault)
@@ -405,5 +405,32 @@ mod tests {
             ..LsiActuationConfig::default()
         };
         assert!(!config.is_valid());
+    }
+
+    #[test]
+    fn h2_first_pulse_envelope_rejects_voltage_and_trip_boundaries() {
+        let config = LsiActuationConfig {
+            maximum_perturbation_voltage_v: 0.10,
+            current_trip_a: 0.25,
+            ..LsiActuationConfig::default()
+        };
+        assert!(config.is_valid());
+
+        let mut input = active_input(LsiDriveRequest::PulsePositive, 0.10);
+        input.phase_u_current_a = 0.249;
+        assert!(plan_lsi_actuation(config, input).is_ok());
+
+        input.requested_perturbation_voltage_v = 0.101;
+        assert_eq!(
+            plan_lsi_actuation(config, input),
+            Err(LsiActuationError::InvalidInput)
+        );
+
+        input.requested_perturbation_voltage_v = 0.10;
+        input.phase_u_current_a = 0.25;
+        assert_eq!(
+            plan_lsi_actuation(config, input),
+            Err(LsiActuationError::Fault)
+        );
     }
 }

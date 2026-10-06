@@ -73,7 +73,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Generated production-profile candidate is stal
     (Join-Path $projectDir 'profiles\candidates\rev7-gbm2804h-rsl-flux-screening.json') `
     --output (Join-Path $projectDir 'profiles\generated\rev7-gbm2804h-rsl-flux-screening.inc') `
     --check
-if ($LASTEXITCODE -ne 0) { throw 'Generated V11 screening candidate is stale.' }
+if ($LASTEXITCODE -ne 0) { throw 'Generated V12 screening candidate is stale.' }
 
 & $python (Join-Path $projectDir 'tools\foc_identification_tool.py') analyze `
     (Join-Path $projectDir 'profiles\identification\sessions\a16-screening-20260924.json') `

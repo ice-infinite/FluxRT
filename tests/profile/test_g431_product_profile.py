@@ -11,6 +11,10 @@ class G431ProductProfileTests(unittest.TestCase):
     def run_probe(self, profile: str, build_profile: str = "diagnostic", **features):
         values = {
             "ADVANCED": "OFF",
+            "SENSORLESS": "OFF",
+            "H3_DYNAMIC": "OFF",
+            "AS5600_TRUTH": "OFF",
+            "AS5600_ALIGNMENT": "OFF",
             "MOTION": "OFF",
             "POWER": "OFF",
             "EXTERNAL_IO": "OFF",
@@ -42,7 +46,14 @@ class G431ProductProfileTests(unittest.TestCase):
     def test_valid_measured_envelopes(self):
         cases = (
             ("basic-drive", {}),
+            ("basic-drive", {"AS5600_TRUTH": True}),
+            (
+                "basic-drive",
+                {"AS5600_TRUTH": True, "AS5600_ALIGNMENT": True},
+            ),
             ("advanced-lab", {"ADVANCED": True}),
+            ("advanced-lab", {"SENSORLESS": True}),
+            ("advanced-lab", {"ADVANCED": True, "H3_DYNAMIC": True}),
             ("motion-lab", {"MOTION": True}),
             ("power-lab", {"POWER": True}),
             (
@@ -59,11 +70,19 @@ class G431ProductProfileTests(unittest.TestCase):
             with self.subTest(build_profile=build_profile):
                 self.assert_valid("basic-drive", build_profile)
         self.assert_rejected("advanced-lab", "production", ADVANCED=True)
+        self.assert_rejected("advanced-lab", "production", SENSORLESS=True)
 
     def test_feature_cannot_escape_its_envelope(self):
         self.assert_rejected("basic-drive", ADVANCED=True)
+        self.assert_rejected("basic-drive", SENSORLESS=True)
+        self.assert_rejected("basic-drive", ADVANCED=True, H3_DYNAMIC=True)
+        self.assert_rejected("advanced-lab", H3_DYNAMIC=True)
         self.assert_rejected("advanced-lab", POWER=True)
+        self.assert_rejected("advanced-lab", ADVANCED=True, SENSORLESS=True)
         self.assert_rejected("connected-lab", EXTERNAL_IO=True, MOTION=True)
+        self.assert_rejected("advanced-lab", AS5600_TRUTH=True)
+        self.assert_rejected("basic-drive", AS5600_ALIGNMENT=True)
+        self.assert_rejected("basic-drive", "production", AS5600_TRUTH=True)
 
     def test_protocol_and_input_require_external_io_master(self):
         self.assert_rejected("connected-lab", NATIVE=True)

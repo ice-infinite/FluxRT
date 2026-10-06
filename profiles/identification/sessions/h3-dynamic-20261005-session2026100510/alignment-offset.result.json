@@ -1,0 +1,26 @@
+{
+  "contract": "fluxrt-h3-alignment-offset-result",
+  "version": 1,
+  "status": "alignment-offset-candidate-not-approved",
+  "motor_id": "DengFOC-M0-AS5600-on-G431",
+  "alignment_state": 3,
+  "alignment_sample_count": 75,
+  "selected_tail_sample_count": 20,
+  "selected_first_sequence": 80,
+  "selected_last_sequence": 99,
+  "forced_electrical_angle_mean_rad": 0.0,
+  "maximum_forced_angle_deviation_rad": 0.0,
+  "additive_time_map_offset_rad": 0.9658690300185839,
+  "as5600_subtractive_offset_rad": 5.3173162771610025,
+  "maximum_candidate_deviation_rad": 0.006277734500794274,
+  "calculation_inputs": [
+    "forced_electrical_angle_rad",
+    "truth_mechanical_angle_rad",
+    "controller_state",
+    "pole_pairs",
+    "mechanical_direction"
+  ],
+  "observer_angle_used": false,
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted"
+}

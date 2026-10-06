@@ -342,6 +342,12 @@ pub struct SmoPllTuning {
     /// 反电势一阶低通系数，无量纲 `(0, 1]`；过小会造成相位滞后并阻止锁定（见上）。
     /// EMF low-pass coefficient, dimensionless `(0, 1]`; too small prevents lock.
     pub emf_filter_alpha: f32,
+    /// 一阶反电势低通群延迟近似的采用比例 `[--]`，范围 `[0, 1]`。`0` 关闭
+    /// 相位超前，`0.8` 保留既有经验补偿；它必须由带独立轴端真值的实验整定，不能
+    /// 根据观测器自身相位误差自证。
+    /// Applied fraction of the first-order EMF-filter group-delay estimate `[0,1]`.
+    /// Zero disables the phase advance and 0.8 preserves the legacy heuristic.
+    pub emf_phase_advance_ratio: f32,
     /// PLL 比例增益，量纲 `[rad/s per rad]`；决定锁定速度与相位裕度。
     /// PLL proportional gain; sets lock-in speed and phase margin.
     pub pll_kp: f32,
@@ -390,6 +396,7 @@ impl SmoPllTuning {
             // the wrong PLL attractor; 0.03 reduces the speed-window variance while
             // retaining adequate phase margin at the 582 rpm handover point.
             emf_filter_alpha: 0.03,
+            emf_phase_advance_ratio: 0.8,
             pll_kp: 80.0,
             acquisition_pll_kp_ratio: 0.5,
             pll_ki: 1_000.0,
@@ -411,6 +418,8 @@ impl SmoPllTuning {
             && self.boundary_a > 0.0
             && self.emf_filter_alpha.is_finite()
             && (0.0001..=1.0).contains(&self.emf_filter_alpha)
+            && self.emf_phase_advance_ratio.is_finite()
+            && (0.0..=1.0).contains(&self.emf_phase_advance_ratio)
             && self.pll_kp.is_finite()
             && self.pll_kp >= 0.0
             && self.acquisition_pll_kp_ratio.is_finite()
@@ -596,6 +605,11 @@ pub struct SmoPllEstimator {
     /// 捕获阶段 PLL Kp/Ki 相对运行增益的配置比例。
     /// Configured acquisition/run PLL correction-gain ratio.
     acquisition_pll_kp_ratio: f32,
+    /// 反电势低通等效补偿延迟 `[s]`；由配置比例、滤波系数与采样周期在构造时
+    /// 预计算，快环只做一次乘法，避免每拍重复除法。
+    /// Effective EMF-filter compensation delay `[s]`, precomputed at construction
+    /// so the fast loop avoids repeating the same division every sample.
+    emf_phase_advance_delay_s: f32,
     /// 启动捕获方向：-1/0/1；只限制 PLL 速度下/上界，不修改 BEMF 矢量。
     /// Acquisition direction (-1/0/1), applied only to the PLL speed bounds.
     acquisition_direction: i8,
@@ -628,16 +642,20 @@ fn bemf_angle_for_direction(raw_bemf_angle_rad: f32, direction: i8) -> f32 {
 ///
 /// 对 `emf += alpha * (sliding - emf)`，低频群延迟约为
 /// `Ts * (1-alpha) / alpha`。离 0 Hz 越远，该线性近似会高估真实相移，因此使用
-/// 0.8 的保守系数并限幅到 1.2 rad；这仍显著小于 pi/2，不会把错误方向翻转成
-/// 看似正确的方向。`alpha=1` 时没有滤波延迟，补偿严格为 0。
+/// 可配置采用比例并限幅到 1.2 rad；这仍显著小于 pi/2，不会把错误方向翻转成
+/// 看似正确的方向。`alpha=1` 或采用比例为 0 时补偿严格为 0。
 #[inline]
-fn emf_filter_phase_advance_rad(omega_rad_s: f32, alpha: f32, ts: f32) -> f32 {
-    const DELAY_RATIO: f32 = 0.8;
+fn emf_filter_phase_advance_delay_s(alpha: f32, ts: f32, delay_ratio: f32) -> f32 {
+    // The constructor reaches this helper only after `SmoPllTuning::is_valid`;
+    // therefore alpha is positive and ratio is finite in [0, 1].  The same
+    // expression naturally yields exact zero for alpha=1 or ratio=0, without
+    // carrying those management-time branches into the target image.
+    ts * (1.0 - alpha) / alpha * delay_ratio
+}
+
+#[inline]
+fn emf_filter_phase_advance_rad(omega_rad_s: f32, delay_s: f32) -> f32 {
     const MAXIMUM_ADVANCE_RAD: f32 = 1.2;
-    if alpha >= 1.0 {
-        return 0.0;
-    }
-    let delay_s = ts * (1.0 - alpha) / alpha * DELAY_RATIO;
     clamp(
         omega_rad_s * delay_s,
         -MAXIMUM_ADVANCE_RAD,
@@ -755,6 +773,11 @@ impl SmoPllEstimator {
             diagnostic_reliability_flags: 0,
             raw_phase_error_rad: 0.0,
             acquisition_pll_kp_ratio: tuning.acquisition_pll_kp_ratio,
+            emf_phase_advance_delay_s: emf_filter_phase_advance_delay_s(
+                tuning.emf_filter_alpha,
+                sample_time_s,
+                tuning.emf_phase_advance_ratio,
+            ),
             acquisition_direction: 0,
         }
     }
@@ -933,8 +956,7 @@ impl RotorEstimator for SmoPllEstimator {
             // clearing the SMO can recreate the same capture basin on every retry.
             let phase_advance = emf_filter_phase_advance_rad(
                 initial_electrical_speed_rad_s,
-                self.params.smo.emf_filter_alpha,
-                self.params.smo.ts,
+                self.emf_phase_advance_delay_s,
             );
             let angle = wrap_angle_0_to_2pi(self.state.smo.theta_emf_rad + phase_advance);
             self.state.pll.theta_rad = angle;
@@ -1018,8 +1040,7 @@ impl RotorEstimator for SmoPllEstimator {
         // previous PLL speed keeps the calculation causal and adds only scalar math.
         let phase_advance = emf_filter_phase_advance_rad(
             self.state.pll.omega_rad_s,
-            self.params.smo.emf_filter_alpha,
-            self.params.smo.ts,
+            self.emf_phase_advance_delay_s,
         );
         let compensated_emf_angle =
             wrap_angle_0_to_2pi(self.state.smo.theta_emf_rad + phase_advance);
@@ -1763,11 +1784,7 @@ mod tests {
 
         estimator.prepare_acquisition_at_speed(0.0, forced_speed, AlphaBeta::default());
         let expected_angle = wrap_angle_0_to_2pi(
-            1.0 + emf_filter_phase_advance_rad(
-                forced_speed,
-                estimator.params.smo.emf_filter_alpha,
-                estimator.params.smo.ts,
-            ),
+            1.0 + emf_filter_phase_advance_rad(forced_speed, estimator.emf_phase_advance_delay_s),
         );
         assert_eq!(estimator.state.smo.current_est, current);
         assert_eq!(estimator.state.emf, emf);

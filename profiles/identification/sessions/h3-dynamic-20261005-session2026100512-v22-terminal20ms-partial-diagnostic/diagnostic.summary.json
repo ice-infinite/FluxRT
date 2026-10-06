@@ -1,0 +1,52 @@
+{
+  "contract": "fluxrt-h3-partial-diagnostic",
+  "version": 1,
+  "status": "partial-diagnostic-not-approved",
+  "source_capture_status": "capture-failed",
+  "source_raw_sha256": "12054F9EC2EFF1A2B903AC2C42D03D38495CD5D0D8D55D25D7092B9EF565ECDC",
+  "motor_power_enabled": true,
+  "reported_anchor_count": 16,
+  "g431_anchor_count": 16,
+  "dengfoc_anchor_count": 16,
+  "paired_anchor_count": 16,
+  "g431_only_sequences": [],
+  "dengfoc_only_sequences": [],
+  "query_count": 356,
+  "query_alignment_status": "bracketed",
+  "truth_quality": {
+    "raw_sample_count": 5586,
+    "valid_sample_count": 5579,
+    "rebase_sample_count": 7,
+    "maximum_valid_gap_us": 14000,
+    "maximum_allowed_gap_us": 14000,
+    "malformed_truth_line_count": 1,
+    "terminal_partial_truth_line_count": 1,
+    "maximum_malformed_truth_lines": 1
+  },
+  "loopback": {
+    "valid_count": 16,
+    "timer_tick": 100,
+    "delta_cycles_min": -121,
+    "delta_cycles_max": 49,
+    "delta_cycles_mean": -4.125,
+    "delta_cycles_median": 49.0,
+    "absolute_max_us": 0.711764705882353
+  },
+  "clock_mapping": {
+    "reference_tick_hz": 170000000,
+    "truth_tick_hz": 1000000,
+    "slope_reference_ticks_per_truth_tick": 169.99595487602946,
+    "clock_drift_ppm": -23.794846885527576,
+    "maximum_anchor_residual_ticks": 448.4345703125,
+    "rms_anchor_residual_ticks": 144.88607054724264,
+    "maximum_anchor_residual_us": 2.637850413602941,
+    "rms_anchor_residual_us": 0.8522710032190743
+  },
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "paired-anchors.csv": "3941F69CA3A7CE63150D1DD3B542BAD19B46EC670C154DEE04FFB535C4CC8425",
+    "bracketed-queries.csv": "56AED6082FB6BB47E654948B128C5083F9DA2B186D0AABA5293F7C063A118D04",
+    "valid-truth.csv": "5D82279124497AFC8EE456303C71D62B54A195E026FB3CE70BFF0F163324C690"
+  }
+}

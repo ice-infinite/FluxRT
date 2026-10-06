@@ -1,0 +1,37 @@
+{
+  "contract": "fluxrt-hfi-dynamic-plant",
+  "version": 1,
+  "control_frequency_hz": 12000,
+  "pwm_frequency_hz": 12000.0,
+  "dc_bus_voltage_v": 12.3,
+  "samples": 12000,
+  "settling_samples": 6000,
+  "injection": {
+    "amplitude_v": 1.5,
+    "frequency_hz": 1000.0,
+    "demod_alpha": 0.005,
+    "separator_alpha": 0.05,
+    "minimum_response_a": 0.002,
+    "minimum_relative_saliency": 0.05,
+    "maximum_rms_error_rad": 0.12,
+    "maximum_peak_error_rad": 0.25
+  },
+  "cases": [
+    {"id":"stationary_clean","resistance_ohm":5.0,"ld_h":0.0008,"lq_h":0.0014,"initial_theta_rad":0.30,"electrical_speed_rad_s":0.0,"base_id_a":0.0,"base_iq_a":0.0,"post_step_id_a":0.0,"post_step_iq_a":0.0,"base_current_step_sample":12000,"noise_a":0.0,"delay_samples":0,"dead_time_s":0.0,"expected_valid":1},
+    {"id":"forward_base_current","resistance_ohm":5.0,"ld_h":0.0008,"lq_h":0.0014,"initial_theta_rad":0.80,"electrical_speed_rad_s":20.0,"base_id_a":0.0,"base_iq_a":0.10,"post_step_id_a":0.0,"post_step_iq_a":0.10,"base_current_step_sample":12000,"noise_a":0.001,"delay_samples":1,"dead_time_s":0.0,"expected_valid":1},
+    {"id":"reverse_base_current","resistance_ohm":5.0,"ld_h":0.0008,"lq_h":0.0014,"initial_theta_rad":2.40,"electrical_speed_rad_s":-20.0,"base_id_a":0.0,"base_iq_a":-0.10,"post_step_id_a":0.0,"post_step_iq_a":-0.10,"base_current_step_sample":12000,"noise_a":0.001,"delay_samples":1,"dead_time_s":0.0,"expected_valid":1},
+    {"id":"forward_delay_deadtime","resistance_ohm":5.0,"ld_h":0.0008,"lq_h":0.0014,"initial_theta_rad":1.20,"electrical_speed_rad_s":30.0,"base_id_a":0.0,"base_iq_a":0.15,"post_step_id_a":0.0,"post_step_iq_a":0.15,"base_current_step_sample":12000,"noise_a":0.002,"delay_samples":2,"dead_time_s":5.5e-7,"expected_valid":1},
+    {"id":"forward_load_step","resistance_ohm":5.0,"ld_h":0.0008,"lq_h":0.0014,"initial_theta_rad":1.70,"electrical_speed_rad_s":25.0,"base_id_a":0.0,"base_iq_a":0.03,"post_step_id_a":0.0,"post_step_iq_a":0.20,"base_current_step_sample":8000,"noise_a":0.001,"delay_samples":1,"dead_time_s":5.5e-7,"expected_valid":1},
+    {"id":"dengfoc_m0_stationary_nominal","resistance_ohm":7.9059,"ld_h":0.001055799,"lq_h":0.001335868,"initial_theta_rad":0.30,"electrical_speed_rad_s":0.0,"base_id_a":0.0,"base_iq_a":0.0,"post_step_id_a":0.0,"post_step_iq_a":0.0,"base_current_step_sample":12000,"noise_a":0.0,"delay_samples":0,"dead_time_s":0.0,"expected_valid":1},
+    {"id":"dengfoc_m0_speed_0_nonideal","resistance_ohm":7.9059,"ld_h":0.001055799,"lq_h":0.001335868,"initial_theta_rad":1.20,"electrical_speed_rad_s":0.0,"base_id_a":0.0,"base_iq_a":0.10,"post_step_id_a":0.0,"post_step_iq_a":0.10,"base_current_step_sample":12000,"noise_a":0.002,"delay_samples":1,"dead_time_s":5.5e-7,"expected_valid":1},
+    {"id":"dengfoc_m0_speed_5_nonideal","resistance_ohm":7.9059,"ld_h":0.001055799,"lq_h":0.001335868,"initial_theta_rad":1.20,"electrical_speed_rad_s":5.0,"base_id_a":0.0,"base_iq_a":0.10,"post_step_id_a":0.0,"post_step_iq_a":0.10,"base_current_step_sample":12000,"noise_a":0.002,"delay_samples":1,"dead_time_s":5.5e-7,"expected_valid":1},
+    {"id":"dengfoc_m0_speed_10_nonideal","resistance_ohm":7.9059,"ld_h":0.001055799,"lq_h":0.001335868,"initial_theta_rad":1.20,"electrical_speed_rad_s":10.0,"base_id_a":0.0,"base_iq_a":0.10,"post_step_id_a":0.0,"post_step_iq_a":0.10,"base_current_step_sample":12000,"noise_a":0.002,"delay_samples":1,"dead_time_s":5.5e-7,"expected_valid":1},
+    {"id":"dengfoc_m0_speed_15_nonideal","resistance_ohm":7.9059,"ld_h":0.001055799,"lq_h":0.001335868,"initial_theta_rad":1.20,"electrical_speed_rad_s":15.0,"base_id_a":0.0,"base_iq_a":0.10,"post_step_id_a":0.0,"post_step_iq_a":0.10,"base_current_step_sample":12000,"noise_a":0.002,"delay_samples":1,"dead_time_s":5.5e-7,"expected_valid":1},
+    {"id":"dengfoc_m0_forward_one_sample","resistance_ohm":7.9059,"ld_h":0.001055799,"lq_h":0.001335868,"initial_theta_rad":1.20,"electrical_speed_rad_s":20.0,"base_id_a":0.0,"base_iq_a":0.10,"post_step_id_a":0.0,"post_step_iq_a":0.10,"base_current_step_sample":12000,"noise_a":0.002,"delay_samples":1,"dead_time_s":5.5e-7,"expected_valid":1},
+    {"id":"dengfoc_m0_two_sample","resistance_ohm":7.9059,"ld_h":0.001055799,"lq_h":0.001335868,"initial_theta_rad":1.20,"electrical_speed_rad_s":20.0,"base_id_a":0.0,"base_iq_a":0.10,"post_step_id_a":0.0,"post_step_iq_a":0.10,"base_current_step_sample":12000,"noise_a":0.002,"delay_samples":2,"dead_time_s":5.5e-7,"expected_valid":1},
+    {"id":"dengfoc_m0_p1_rs_minus10pct","resistance_ohm":7.11531,"ld_h":0.001055119,"lq_h":0.001323548,"initial_theta_rad":2.10,"electrical_speed_rad_s":-20.0,"base_id_a":0.0,"base_iq_a":-0.10,"post_step_id_a":0.0,"post_step_iq_a":-0.10,"base_current_step_sample":12000,"noise_a":0.002,"delay_samples":1,"dead_time_s":5.5e-7,"expected_valid":1},
+    {"id":"dengfoc_m0_p2_rs_plus10pct","resistance_ohm":8.69649,"ld_h":0.001056479,"lq_h":0.001348188,"initial_theta_rad":2.70,"electrical_speed_rad_s":20.0,"base_id_a":0.0,"base_iq_a":0.10,"post_step_id_a":0.0,"post_step_iq_a":0.10,"base_current_step_sample":12000,"noise_a":0.002,"delay_samples":1,"dead_time_s":5.5e-7,"expected_valid":1},
+    {"id":"low_saliency_rejected_dynamic","resistance_ohm":5.0,"ld_h":0.00100,"lq_h":0.00102,"initial_theta_rad":0.50,"electrical_speed_rad_s":10.0,"base_id_a":0.0,"base_iq_a":0.10,"post_step_id_a":0.0,"post_step_iq_a":0.10,"base_current_step_sample":12000,"noise_a":0.001,"delay_samples":1,"dead_time_s":0.0,"expected_valid":0},
+    {"id":"non_salient_rejected_dynamic","resistance_ohm":5.0,"ld_h":0.00110,"lq_h":0.00110,"initial_theta_rad":1.50,"electrical_speed_rad_s":-10.0,"base_id_a":0.0,"base_iq_a":-0.10,"post_step_id_a":0.0,"post_step_iq_a":-0.10,"base_current_step_sample":12000,"noise_a":0.001,"delay_samples":1,"dead_time_s":0.0,"expected_valid":0}
+  ]
+}

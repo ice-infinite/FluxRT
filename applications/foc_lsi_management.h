@@ -13,8 +13,15 @@
 #include <stdint.h>
 
 #include "foc_lsi_identification.h"
+#include "foc_rust_bridge.h"
 
 #define FOC_LSI_MANAGEMENT_VERSION (2UL)
+
+/* H2 first-pulse commissioning envelope.  These are experiment limits, not
+ * production motor parameters and not permission to enable the power stage. */
+#define FOC_LSI_H2_FIRST_MAX_BIAS_CURRENT_A       (0.20f)
+#define FOC_LSI_H2_FIRST_MAX_PERTURBATION_V       (0.10f)
+#define FOC_LSI_H2_FIRST_CURRENT_TRIP_A            (0.25f)
 
 typedef enum
 {
@@ -50,8 +57,15 @@ typedef struct
     foc_lsi_output_t output;
 } foc_lsi_management_status_t;
 
-/* Returns the read-only 0.2 A S5 candidate; it does not grant hardware use. */
+/* Returns the read-only H2 first-pulse candidate; it does not grant hardware use. */
 void foc_lsi_management_default_config(foc_lsi_config_t *config);
+
+/* Tightens a Rust actuation ABI config to the application sequence envelope.
+ * A wider H2 request or a Rust envelope already narrower than the requested
+ * sequence is rejected without modifying the actuation config. */
+uint32_t foc_lsi_management_apply_h2_actuation_envelope(
+    const foc_lsi_config_t *sequence,
+    foc_lsi_actuation_config_t *actuation);
 
 /* Boot/reboot initialization always returns the manager to a safe IDLE state. */
 uint32_t foc_lsi_management_init(foc_lsi_management_t *management);

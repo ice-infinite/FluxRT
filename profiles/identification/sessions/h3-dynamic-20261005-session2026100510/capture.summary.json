@@ -1,0 +1,25 @@
+{
+  "contract": "fluxrt-h3-dynamic-board-capture",
+  "version": 1,
+  "status": "captured-not-approved",
+  "anchor_count": 16,
+  "truth_sample_count": 5646,
+  "truth_quality": {
+    "raw_sample_count": 5649,
+    "valid_sample_count": 5646,
+    "rebase_sample_count": 3,
+    "maximum_valid_gap_us": 7000,
+    "maximum_allowed_gap_us": 10000
+  },
+  "query_count": 362,
+  "motor_power_enabled": true,
+  "power_window": "target-owned-bounded",
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "anchors.csv": "7B6C1B302A1F3F1596CA25BC71B61E1608933F56BDE7FCE452F4F2A66575B5AC",
+    "truth.csv": "5FE166B8F9CFB090BE68EB2298C55F9B2ECA30337E94762CC399860781E38DAA",
+    "queries.csv": "FF8576793B592AE9344E60C24F7090961F72444216D623AA262440FA6927913C",
+    "raw-lines.csv": "F2AD0038F5116CA1C9B62CC5937C467C0A83C1A98287A9B1AC8A38621CDE59D3"
+  }
+}

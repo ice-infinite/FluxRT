@@ -1,0 +1,47 @@
+{
+  "contract": "fluxrt-dual-serial-capture",
+  "version": 1,
+  "status": "capture-complete",
+  "read_only": true,
+  "commands_sent": 0,
+  "clock": {
+    "source": "time.monotonic_ns",
+    "shared_origin": true,
+    "origin_ns": 308149856572800,
+    "end_ns": 308151872553600,
+    "elapsed_s": 2.0159808
+  },
+  "sources": {
+    "g431": {
+      "port": "COM6",
+      "baud": 115200,
+      "line_count": 1,
+      "first_host_time_s": 0.4560706,
+      "last_host_time_s": 0.4560706,
+      "flsi_raw_line_count": 0
+    },
+    "dengfoc": {
+      "port": "COM14",
+      "baud": 921600,
+      "line_count": 505,
+      "first_host_time_s": 0.0013783,
+      "last_host_time_s": 2.0093505,
+      "parsed_angle_sample_count": 0
+    }
+  },
+  "static_h2_association": {
+    "kind": "common-host-static-window-only",
+    "dynamic_alignment_valid": false,
+    "g431_raw_window_start_s": null,
+    "g431_raw_window_end_s": null
+  },
+  "errors": [],
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "combined_lines_path": "combined-lines.csv",
+    "combined_lines_sha256": "B6B118D5893F6CACDA673DB9B7F0830D5DBA738384F37EED67C24DB089E42513",
+    "angle_csv_path": "dengfoc-angle.csv",
+    "angle_csv_sha256": "2EE7F8A541BF9502DB70685796F5136D08E55BD3309C940D5F8903BF37FC5BFE"
+  }
+}

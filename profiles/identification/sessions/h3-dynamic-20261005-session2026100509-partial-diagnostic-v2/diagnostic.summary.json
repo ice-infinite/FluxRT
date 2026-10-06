@@ -1,0 +1,49 @@
+{
+  "contract": "fluxrt-h3-partial-diagnostic",
+  "version": 1,
+  "status": "partial-diagnostic-not-approved",
+  "source_capture_status": "capture-failed",
+  "source_raw_sha256": "B908656DF5D2E8207D2212FA88F984E82448EC1076D9FBBEDF4B7BFDE16FB8E5",
+  "motor_power_enabled": true,
+  "reported_anchor_count": 16,
+  "g431_anchor_count": 16,
+  "dengfoc_anchor_count": 16,
+  "paired_anchor_count": 16,
+  "g431_only_sequences": [],
+  "dengfoc_only_sequences": [],
+  "query_count": 362,
+  "query_alignment_status": "bracketed",
+  "truth_quality": {
+    "raw_sample_count": 5645,
+    "valid_sample_count": 5636,
+    "rebase_sample_count": 9,
+    "maximum_valid_gap_us": 7000,
+    "maximum_allowed_gap_us": 10000
+  },
+  "loopback": {
+    "valid_count": 16,
+    "timer_tick": 100,
+    "delta_cycles_min": -121,
+    "delta_cycles_max": 49,
+    "delta_cycles_mean": -25.375,
+    "delta_cycles_median": 49.0,
+    "absolute_max_us": 0.711764705882353
+  },
+  "clock_mapping": {
+    "reference_tick_hz": 170000000,
+    "truth_tick_hz": 1000000,
+    "slope_reference_ticks_per_truth_tick": 169.996039590708,
+    "clock_drift_ppm": -23.29652524712955,
+    "maximum_anchor_residual_ticks": 274.154296875,
+    "rms_anchor_residual_ticks": 116.8481743204023,
+    "maximum_anchor_residual_us": 1.6126723345588236,
+    "rms_anchor_residual_us": 0.6873422018847194
+  },
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "paired-anchors.csv": "E145353570D70D5F2C7D706D7B5513DEC5EC95EDB37DF27199DE734F9F447E2B",
+    "bracketed-queries.csv": "A2FF6B8058B4921B16B22637B4324CBEF9F6A00389B5ED5D91E09089978504ED",
+    "valid-truth.csv": "C7DDF763BF66984B2E22E22A22A57FC3AF2CB83ADA382DA8D9FF8E7F5D562681"
+  }
+}

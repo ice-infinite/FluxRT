@@ -1,0 +1,21 @@
+{
+  "contract": "fluxrt-h3-fixed-no-power-probe",
+  "version": 1,
+  "status": "captured-not-approved",
+  "motor_power_enabled": false,
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "raw-lines.csv": "9BB028EE50551CDE4BA4E9FC4BF8989B69B7F5D51A1A3D202D34B4EB6AD89ABB"
+  },
+  "bus_voltage_mv": 0,
+  "anchor_count": 1,
+  "session_id": 2026100503,
+  "edge_sequence": 3000,
+  "edge_tag": 700,
+  "reference_control_tick": 4410643,
+  "truth_tick_us": 22866030,
+  "g431_flags": 7,
+  "deng_flags": 3,
+  "loopback_delta_cycles": -121
+}

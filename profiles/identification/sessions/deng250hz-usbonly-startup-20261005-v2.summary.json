@@ -1,0 +1,10 @@
+{
+  "sample_count": 0,
+  "valid_sample_count": 0,
+  "verdict": "NO_VALID_SAMPLES",
+  "port": "COM14",
+  "baud": 921600,
+  "duration_s": 3.0,
+  "boot_line_count": 681,
+  "requirements_pass": false
+}

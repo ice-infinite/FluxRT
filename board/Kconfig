@@ -120,10 +120,12 @@ config FLUXRT_G431_PROFILE_BASIC_DRIVE
         G431RB product composition allowed with non-Diagnostic build profiles.
 
 config FLUXRT_G431_PROFILE_ADVANCED_LAB
-    bool "Advanced Lab (advanced FOC candidate only)"
+    bool "Advanced Lab (one advanced FOC candidate at a time)"
     help
-        Permit the default-off MTPA/field-weakening/MTPV/decoupling and related
-        advanced supervisor in a dedicated Diagnostic measurement image.
+        Permit either the default-off MTPA/field-weakening/MTPV/decoupling
+        supervisor or the full-speed sensorless/HFI chain in a dedicated
+        Diagnostic measurement image. The two large candidates may not coexist
+        on the 128 KiB STM32G431RB target.
 
 config FLUXRT_G431_PROFILE_MOTION_LAB
     bool "Motion Lab (planner/cascade candidate only)"
@@ -161,6 +163,52 @@ config FOC_ADVANCED_CONTROL_CANDIDATE
         accepted only while stopped and fault-free. Hardware-coupled policies
         still require explicit platform capability bits. Production ignores
         this candidate even if an old .config retains the symbol.
+
+config FOC_SENSORLESS_CONTROL_CANDIDATE
+    bool "Build Diagnostic-only full-speed sensorless FOC candidate"
+    depends on SOC_STM32G431RB && FLUXRT_G431_PROFILE_ADVANCED_LAB
+    default n
+    help
+        Build the separate HFI axis acquisition, polarity identification and
+        HFI/BEMF fusion ABI plus its no-power ADC-ISR timing probe. This image
+        is default-off, disables normal motor arm, and never grants the real
+        board an injection capability. It is mutually exclusive with the large
+        FOC_ADVANCED_CONTROL_CANDIDATE on the 128 KiB G431 target.
+
+config FOC_H3_DYNAMIC_QUERY_CANDIDATE
+    bool "Add bounded H3 encoder-truth query to the Advanced Lab image"
+    depends on SOC_STM32G431RB && FLUXRT_G431_PROFILE_ADVANCED_LAB
+    depends on FOC_ADVANCED_CONTROL_CANDIDATE
+    default n
+    help
+        Build the PB6/TIM4 H3 identity transmitter and realtime trace into a
+        stripped Advanced-Lab image. The only powered H3 entry is the fixed
+        P5.5 trial envelope; generic tuning, phase capture and math benchmarks
+        are removed to preserve the 128 KiB Flash boundary. Selecting this
+        option does not arm the motor or grant an HFI capability.
+
+config FOC_AS5600_TRUTH_DIAGNOSTIC
+    bool "Build no-power AS5600 truth-sensor diagnostic"
+    depends on SOC_STM32G431RB && FLUXRT_G431_PROFILE_BASIC_DRIVE
+    default n
+    help
+        Build a bounded, Shell-thread-only AS5600 reader on I2C3 using
+        PC8/CN10-2 as SCL and PC11/CN7-2 as SDA. This diagnostic image
+        compiles out every normal motor-arm path and does not run I2C from
+        the 12 kHz control ISR. It is intended for direct encoder truth
+        validation with the 12.3 V motor supply disconnected.
+
+config FOC_AS5600_ALIGNMENT_CANDIDATE
+    bool "Add one-shot bounded AS5600 electrical-alignment trial"
+    depends on FOC_AS5600_TRUTH_DIAGNOSTIC
+    default n
+    help
+        Add one explicit-token, one-run-per-boot powered alignment transaction
+        to the AS5600 truth image. Generic foc_start remains compiled out. The
+        fixed 0.20 A request is cut after exactly 12000 accepted alignment
+        commits by the ADC ISR (1.0 s at 12 kHz), with a 0.45 A software trip.
+        I2C remains task-context only. Selecting this option does not approve
+        the measured offset or any sensorless/HFI capability.
 
 endmenu
 

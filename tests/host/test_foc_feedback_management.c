@@ -113,6 +113,10 @@ static void fake_update_ready(void)
         expected |= FOC_FEEDBACK_CALIBRATION_STEP_ENCODER_INDEX |
                     FOC_FEEDBACK_CALIBRATION_STEP_ENCODER_OFFSET;
     }
+    else if (g_fake.feedback_mode == FOC_FEEDBACK_MODE_ABSOLUTE_ENCODER)
+    {
+        expected |= FOC_FEEDBACK_CALIBRATION_STEP_ENCODER_OFFSET;
+    }
     else
     {
         expected |= FOC_FEEDBACK_CALIBRATION_STEP_HALL_SEQUENCE;
@@ -394,6 +398,15 @@ static foc_feedback_management_evidence_t encoder_evidence(void)
     return evidence;
 }
 
+static foc_feedback_management_evidence_t absolute_encoder_evidence(void)
+{
+    foc_feedback_management_evidence_t evidence = encoder_evidence();
+    evidence.evidence_flags &=
+        ~(uint32_t)FOC_FEEDBACK_EVIDENCE_ENCODER_INDEX;
+    evidence.encoder_index_samples = 0U;
+    return evidence;
+}
+
 static void setup(
     foc_feedback_management_t *management,
     foc_feedback_context_storage_t *feedback,
@@ -508,6 +521,28 @@ static void test_owner_and_committed_finish(void)
     assert(g_fake.feedback_state == FOC_FEEDBACK_CALIBRATION_IDLE);
 }
 
+static void test_absolute_encoder_does_not_require_index_evidence(void)
+{
+    foc_feedback_management_t management;
+    foc_feedback_context_storage_t feedback;
+    foc_config_context_storage_t config;
+    foc_config_apply_guard_t guard = safe_guard();
+    foc_feedback_management_evidence_t evidence = absolute_encoder_evidence();
+
+    setup(&management, &feedback, &config);
+    enable(&management);
+    assert(foc_feedback_management_begin(
+               &management, 7U, FOC_FEEDBACK_MODE_ABSOLUTE_ENCODER,
+               10U, 100U, &guard) == FOC_FEEDBACK_MANAGEMENT_OK);
+    assert(foc_feedback_management_submit_evidence(
+               &management, 7U, 11U, &evidence) ==
+           FOC_FEEDBACK_MANAGEMENT_OK);
+    assert(management.state ==
+           FOC_FEEDBACK_MANAGEMENT_STATE_READY_FOR_REVIEW);
+    assert((g_fake.completed_steps &
+            FOC_FEEDBACK_CALIBRATION_STEP_ENCODER_INDEX) == 0U);
+}
+
 static void test_cancel_rolls_back_staged_transaction(void)
 {
     foc_feedback_management_t management;
@@ -606,6 +641,7 @@ int main(void)
 {
     test_default_off_and_safe_enable();
     test_owner_and_committed_finish();
+    test_absolute_encoder_does_not_require_index_evidence();
     test_cancel_rolls_back_staged_transaction();
     test_timeout_wrap_latches_safe_failure();
     test_bad_evidence_requires_recovery();

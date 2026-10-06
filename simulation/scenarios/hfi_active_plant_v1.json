@@ -1,0 +1,28 @@
+{
+  "contract": "fluxrt-hfi-active-plant",
+  "version": 1,
+  "control_frequency_hz": 12000,
+  "samples": 6000,
+  "injection": {
+    "amplitude_v": 1.0,
+    "frequency_hz": 1000.0,
+    "demod_alpha": 0.005,
+    "minimum_response_a": 0.002,
+    "minimum_relative_saliency": 0.05,
+    "maximum_angle_error_rad": 0.04
+  },
+  "cases": [
+    {"id":"salient_theta_0p20","resistance_ohm":5.0,"ld_h":0.0008,"lq_h":0.0014,"theta_rad":0.20,"expected_valid":1},
+    {"id":"salient_theta_1p10","resistance_ohm":5.0,"ld_h":0.0008,"lq_h":0.0014,"theta_rad":1.10,"expected_valid":1},
+    {"id":"salient_theta_2p70","resistance_ohm":5.0,"ld_h":0.0008,"lq_h":0.0014,"theta_rad":2.70,"expected_valid":1},
+    {"id":"salient_wrap_4p20","resistance_ohm":5.0,"ld_h":0.0008,"lq_h":0.0014,"theta_rad":4.20,"expected_valid":1},
+    {"id":"dengfoc_m0_nominal_theta_0p20","resistance_ohm":7.9059,"ld_h":0.001055799,"lq_h":0.001335868,"theta_rad":0.20,"expected_valid":1},
+    {"id":"dengfoc_m0_nominal_theta_1p10","resistance_ohm":7.9059,"ld_h":0.001055799,"lq_h":0.001335868,"theta_rad":1.10,"expected_valid":1},
+    {"id":"dengfoc_m0_lcr_p1","resistance_ohm":7.9059,"ld_h":0.001055119,"lq_h":0.001323548,"theta_rad":2.20,"expected_valid":1},
+    {"id":"dengfoc_m0_lcr_p2","resistance_ohm":7.9059,"ld_h":0.001056479,"lq_h":0.001348188,"theta_rad":2.70,"expected_valid":1},
+    {"id":"dengfoc_m0_rs_minus10pct","resistance_ohm":7.11531,"ld_h":0.001055799,"lq_h":0.001335868,"theta_rad":3.20,"expected_valid":1},
+    {"id":"dengfoc_m0_rs_plus10pct","resistance_ohm":8.69649,"ld_h":0.001055799,"lq_h":0.001335868,"theta_rad":3.70,"expected_valid":1},
+    {"id":"low_saliency_rejected","resistance_ohm":5.0,"ld_h":0.00100,"lq_h":0.00102,"theta_rad":0.70,"expected_valid":0},
+    {"id":"non_salient_rejected","resistance_ohm":5.0,"ld_h":0.00110,"lq_h":0.00110,"theta_rad":1.40,"expected_valid":0}
+  ]
+}

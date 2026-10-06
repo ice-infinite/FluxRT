@@ -1,0 +1,12 @@
+{
+  "contract": "fluxrt-h3-fixed-no-power-probe",
+  "version": 1,
+  "status": "capture-failed",
+  "motor_power_enabled": false,
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "raw-lines.csv": "8DFE2923C1BA0CB7624AAB901C61ECCBEB67A335A08BBB64336C731EF1DC0A2F"
+  },
+  "error": "expected one G431 and one DengFOC anchor, got 1/0"
+}

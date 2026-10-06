@@ -59,20 +59,20 @@ extern "C" {
 #endif
 
 /*
- * ABI 版本。主/次版本各占 16 位：0x0015_0000 表示第 21 代主版本。
- * ABI version. Major and minor occupy one 16-bit half each: 0x0015_0000 is
- * major revision 21.
+ * ABI 版本。主/次版本各占 16 位：0x0016_0000 表示第 22 代主版本。
+ * ABI version. Major and minor occupy one 16-bit half each: 0x0016_0000 is
+ * major revision 22.
  *
  * 提升规则 / Bump rule: 任何结构体字段、函数签名或语义（不仅是尺寸）变化
  * 都必须提升；main.c 会在启动时比对并拒绝不匹配的固件组合。
  * Bump for any struct field, signature or semantic change, not only size
  * changes. main.c compares this at boot and rejects a mismatched combination.
  */
-#define FOC_RUST_ABI_VERSION        (0x00150000UL)
+#define FOC_RUST_ABI_VERSION        (0x00160000UL)
 /* 运行时配置结构体的版本，与 ABI 版本独立演进，用于结构体内自检。
  * Version of the runtime configuration struct; it evolves independently of the
  * ABI version and is used for the struct's internal self-check. */
-#define FOC_RUST_CONFIG_VERSION     (11UL)
+#define FOC_RUST_CONFIG_VERSION     (12UL)
 /* V19 实时输入结构自身的版本；与运行配置版本独立。 */
 #define FOC_REALTIME_INPUT_VERSION  (1UL)
 /* C 侧提供的控制器存储容量 [bytes]，对齐 8 字节。
@@ -116,6 +116,8 @@ extern "C" {
 #define FOC_RUST_FAULT_MOTION_CONTROL    (1UL << 5)
 /* Advanced operating-region/modulation supervisor rejected a runtime input. */
 #define FOC_RUST_FAULT_ADVANCED_CONTROL  (1UL << 6)
+/* Full-speed sensorless fusion/injection/composition contract failed. */
+#define FOC_RUST_FAULT_SENSORLESS_CONTROL (1UL << 7)
 
 /*
  * 观测器后端选择。数值与 ABI 绑定，只能追加不能重排。
@@ -388,6 +390,10 @@ typedef struct
      * output lag more than the electrical frequency and is a leading cause of
      * observer loss of lock. */
     float observer_emf_filter_alpha;
+    /* 反电动势低通群延迟近似的采用比例 [--]，合法范围 [0,1]；0 禁用相位超前，
+     * 0.8 保留 V21 及更早版本的经验补偿。
+     * Applied fraction of the EMF-filter group-delay estimate [0,1]. */
+    float observer_emf_phase_advance_ratio;
     /* PLL 比例增益 [rad/s per rad] / PLL proportional gain. */
     float observer_pll_kp;
     /* 强拖捕获阶段的 PLL Kp/Ki 校正比例 [--]，合法范围 (0, 1]；终速前馈不缩放。
@@ -1003,7 +1009,7 @@ _Static_assert(sizeof(foc_angle_compensation_config_t) == 8U,
                "FOC angle compensation config ABI changed");
 _Static_assert(sizeof(foc_inverter_voltage_model_config_t) == 36U,
                "FOC inverter model config ABI changed");
-_Static_assert(sizeof(foc_runtime_config_t) == 296U, "FOC runtime config ABI changed");
+_Static_assert(sizeof(foc_runtime_config_t) == 300U, "FOC runtime config ABI changed");
 _Static_assert(sizeof(foc_telemetry_t) == 100U, "FOC telemetry ABI changed");
 _Static_assert(sizeof(foc_lsi_drive_request_abi_t) == sizeof(uint32_t),
                "FOC LSI drive request ABI changed");

@@ -218,12 +218,21 @@ pub struct ControlTelemetry {
     /// 逆 Park 后交给 SVPWM 的静止坐标系电压 `[V]`。
     /// Stationary-frame voltage in `[V]` handed to SVPWM after inverse Park.
     pub voltage_alpha_beta: AlphaBeta,
+    /// Portion of the stationary-frame injection request that survived the
+    /// final shared voltage-circle limit.  Sensorless request ledgers must feed
+    /// this value, rather than the requested value, into the next ADC sample.
+    pub applied_injection_alpha_beta: AlphaBeta,
     /// 观测器给出的机械转速 `[rpm]`。
     /// Observer mechanical speed in `[rpm]`.
     pub measured_speed_rpm: f32,
     /// 本拍电压圆限幅是否生效；持续为真说明已超出母线能力。
     /// Whether the voltage circle limiter engaged this sample.
     pub voltage_limited: bool,
+    /// True only when the downstream, post-injection circle reduced the
+    /// injection request.  This is intentionally distinct from a fundamental
+    /// d/q voltage limit so the next-tick sensorless ledger can distinguish the
+    /// two cases without reconstructing controller internals.
+    pub injection_limited: bool,
 }
 
 /// 硬件侧故障，决定快环是继续、关断还是锁存。

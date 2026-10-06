@@ -104,7 +104,7 @@ FOC输出；输入非有限、平台能力丢失、supervisor失败或PWM非法�
 
 ## 6. 配置与 ABI
 
-- 全局 bridge：V21 / `0x00150000`；V19 的 88 B 逐拍输入布局不变；
+- 全局 bridge：V22 / `0x00160000`；运行配置V12 / 300 B；V19 的88 B逐拍输入布局不变；
 - 高级子 ABI：V2 / `0x00020000`；
 - `foc_advanced_algorithm_config_t`：128 B；
 - `foc_advanced_runtime_config_t`：148 B，新增平台有效`minimum_duty/maximum_duty`窗口；

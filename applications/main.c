@@ -33,6 +33,10 @@
 
 #include "foc_math_accel.h"
 #include "foc_platform.h"
+#if defined(FLUXRT_AS5600_ALIGNMENT_BUILD)
+#include "foc_as5600_stm32g431.h"
+#include "foc_platform_as5600_alignment_candidate.h"
+#endif
 #include "foc_production_profile.h"
 #include "foc_rust_bridge.h"
 #if defined(FLUXRT_PROTOCOL_NATIVE)
@@ -45,7 +49,8 @@
 #include "foc_external_io_platform.h"
 #include "foc_external_input_platform.h"
 #endif
-#if defined(FLUXRT_ADVANCED_CANDIDATE_BUILD)
+#if defined(FLUXRT_ADVANCED_CANDIDATE_BUILD) || \
+    defined(FLUXRT_SENSORLESS_CANDIDATE_BUILD)
 #include "foc_advanced_bridge.h"
 #include "foc_platform_advanced_candidate.h"
 #endif
@@ -56,6 +61,9 @@
     defined(FOC_MOTION_CONTROL_CANDIDATE)
 #include "foc_config_bridge.h"
 #include "foc_platform_motion_candidate.h"
+#endif
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+#include "foc_time_sync_stm32g431.h"
 #endif
 
 /* 构建档名与 Rust 优化等级名由 custom.cmake 以 -D 传入，只用于打印。
@@ -89,6 +97,26 @@ static foc_external_input_owner_t g_foc_external_input_owner;
  * The active runtime configuration. It is replaced as a whole only after foc_cfg
  * commits successfully, and keeps its old value on failure. */
 static foc_runtime_config_t g_foc_runtime_config;
+#if defined(FLUXRT_AS5600_ALIGNMENT_BUILD)
+#define FOC_ALIGNMENT_CAPTURE_MAX_SAMPLES (64U)
+#define FOC_ALIGNMENT_CAPTURE_PERIOD_MS   (20U)
+#define FOC_ALIGNMENT_CAPTURE_TIMEOUT_MS  (1800U)
+typedef struct
+{
+    uint32_t elapsed_ms;
+    uint32_t trial_state;
+    uint16_t raw_count;
+    uint16_t read_ok;
+} foc_alignment_capture_sample_t;
+static foc_runtime_config_t g_foc_alignment_runtime_saved;
+static foc_runtime_config_t g_foc_alignment_runtime_candidate;
+static foc_platform_config_t g_foc_alignment_platform_saved;
+static foc_platform_config_t g_foc_alignment_platform_candidate;
+static foc_alignment_capture_sample_t
+    g_foc_alignment_samples[FOC_ALIGNMENT_CAPTURE_MAX_SAMPLES];
+static uint32_t g_foc_alignment_sample_count;
+static uint32_t g_foc_alignment_attempt_consumed;
+#endif
 #if defined(FLUXRT_ADVANCED_CANDIDATE_BUILD)
 /* Optional advanced policy keeps an independent ABI and management snapshot.
  * Boot always commits the generated disabled configuration first; merely
@@ -113,9 +141,9 @@ static foc_motion_torque_trial_status_t g_foc_motion_trial_status;
 #endif
 #if defined(FLUXRT_RUNTIME_TUNING_BUILD)
 /* foc_cfg 只由单一 tshell 线程调用。候选配置和诊断快照放在静态
- * 管理存储中，避免 296 B + 144 B 固定局部量与 Rust 配置/
+ * 管理存储中，避免 300 B + 144 B 固定局部量与 Rust 配置/
  * rt_kprintf 深度叠加后压穿 2 KiB tshell 栈。它们绝不在 ISR 中读写。
- * foc_cfg has exactly one caller: the tshell thread. Keep its 296-byte candidate
+ * foc_cfg has exactly one caller: the tshell thread. Keep its 300-byte candidate
  * and 144-byte diagnostics snapshot in static management storage so they do not
  * compound the Rust configuration and rt_kprintf call depth on the 2 KiB shell
  * stack. Neither object is ever touched by the ISR. */
@@ -318,6 +346,175 @@ static int foc_stop(int argc, char **argv)
     return 0;
 }
 MSH_CMD_EXPORT(foc_stop, -);
+
+#if defined(FLUXRT_AS5600_ALIGNMENT_BUILD)
+/* One exact powered transaction for direct-G431 AS5600 offset evidence.
+ * Generic foc_start remains unavailable in this image. The ADC ISR cuts power
+ * after 12000 accepted Alignment commits even if this Shell command stalls. */
+static int foc_encoder_align(int argc, char **argv)
+{
+    foc_as5600_alignment_trial_status_t trial = {0};
+    foc_platform_diagnostics_t diagnostics = {0};
+    foc_as5600_stm32g431_diagnostics_t encoder_diagnostics = {0};
+    foc_status_t runtime_status = FOC_STATUS_NOT_CONFIGURED;
+    foc_status_t platform_status = FOC_STATUS_NOT_CONFIGURED;
+    foc_status_t start_status = FOC_STATUS_NOT_CONFIGURED;
+    foc_status_t restore_runtime_status = FOC_STATUS_NOT_CONFIGURED;
+    foc_status_t restore_platform_status = FOC_STATUS_NOT_CONFIGURED;
+    uint32_t started_ms = 0U;
+    uint32_t elapsed_ms = 0U;
+    uint32_t valid_samples = 0U;
+    uint16_t preflight_raw = 0U;
+    uint32_t index;
+    int result;
+
+    if ((argc != 2) || (strcmp(argv[1], "P55-ALIGN1") != 0))
+    {
+        rt_kprintf("FALIGN,confirm\n");
+        return -1;
+    }
+    if (g_foc_alignment_attempt_consumed != 0U)
+    {
+        rt_kprintf("FALIGN,consumed-reset-required\n");
+        return -1;
+    }
+
+    foc_platform_control_stop();
+    if (!foc_as5600_stm32g431_init() ||
+        !foc_as5600_stm32g431_read_raw(&preflight_raw))
+    {
+        foc_as5600_stm32g431_get_diagnostics(&encoder_diagnostics);
+        rt_kprintf("FALIGN,encoder,%u,%u,%08x,%u,%u\n",
+                   (unsigned int)encoder_diagnostics.sensor_present,
+                   (unsigned int)encoder_diagnostics.last_hal_status,
+                   (unsigned int)encoder_diagnostics.last_hal_error,
+                   (unsigned int)encoder_diagnostics.scl_high,
+                   (unsigned int)encoder_diagnostics.sda_high);
+        return -1;
+    }
+
+    g_foc_alignment_runtime_saved = g_foc_runtime_config;
+    g_foc_alignment_platform_saved = g_foc_platform_config;
+    g_foc_alignment_runtime_candidate = g_foc_runtime_config;
+    g_foc_alignment_platform_candidate = g_foc_platform_config;
+    g_foc_alignment_runtime_candidate.observer_enable = 0U;
+    g_foc_alignment_runtime_candidate.closed_loop_enable = 0U;
+    g_foc_alignment_runtime_candidate.startup_alignment_current_a =
+        FOC_AS5600_ALIGNMENT_TRIAL_CURRENT_A;
+    g_foc_alignment_runtime_candidate.startup_current_a =
+        FOC_AS5600_ALIGNMENT_TRIAL_CURRENT_A;
+    g_foc_alignment_runtime_candidate.alignment_duration_s =
+        FOC_AS5600_ALIGNMENT_TRIAL_ALIGNMENT_DURATION_S;
+    g_foc_alignment_platform_candidate.software_current_trip_a =
+        FOC_AS5600_ALIGNMENT_TRIAL_SOFTWARE_TRIP_A;
+
+    runtime_status = foc_rust_configure(
+        &g_foc_controller, &g_foc_alignment_runtime_candidate);
+    if (runtime_status == FOC_STATUS_OK)
+    {
+        platform_status = foc_platform_configure(
+            &g_foc_alignment_platform_candidate);
+    }
+    if ((runtime_status == FOC_STATUS_OK) &&
+        (platform_status == FOC_STATUS_OK))
+    {
+        /* Consume before the arm attempt. A rejected arm requires a reset;
+         * retries cannot silently multiply powered exposure. */
+        g_foc_alignment_attempt_consumed = 1U;
+        g_foc_alignment_sample_count = 0U;
+        start_status = foc_platform_as5600_alignment_trial_start(
+            &g_foc_alignment_runtime_candidate,
+            g_foc_alignment_runtime_candidate.startup_final_speed_rpm);
+    }
+    if (start_status == FOC_STATUS_OK)
+    {
+        started_ms = (uint32_t)rt_tick_get_millisecond();
+        do
+        {
+            foc_alignment_capture_sample_t *sample;
+            uint16_t raw_count = 0U;
+            uint32_t read_ok;
+
+            elapsed_ms = (uint32_t)rt_tick_get_millisecond() - started_ms;
+            (void)foc_platform_as5600_alignment_trial_get_status(&trial);
+            read_ok = foc_as5600_stm32g431_read_raw(&raw_count) ? 1U : 0U;
+            if (g_foc_alignment_sample_count <
+                FOC_ALIGNMENT_CAPTURE_MAX_SAMPLES)
+            {
+                sample =
+                    &g_foc_alignment_samples[g_foc_alignment_sample_count++];
+                sample->elapsed_ms = elapsed_ms;
+                sample->trial_state = trial.state;
+                sample->raw_count = raw_count;
+                sample->read_ok = (uint16_t)read_ok;
+            }
+            if ((trial.state == FOC_AS5600_ALIGNMENT_TRIAL_COMPLETE) ||
+                (trial.state == FOC_AS5600_ALIGNMENT_TRIAL_FAILED) ||
+                (trial.state == FOC_AS5600_ALIGNMENT_TRIAL_ABORTED))
+            {
+                break;
+            }
+            rt_thread_mdelay(FOC_ALIGNMENT_CAPTURE_PERIOD_MS);
+        } while (elapsed_ms < FOC_ALIGNMENT_CAPTURE_TIMEOUT_MS);
+    }
+
+    foc_platform_control_stop();
+    (void)foc_platform_as5600_alignment_trial_get_status(&trial);
+    (void)foc_platform_get_diagnostics(&diagnostics);
+    foc_as5600_stm32g431_get_diagnostics(&encoder_diagnostics);
+    restore_runtime_status = foc_rust_configure(
+        &g_foc_controller, &g_foc_alignment_runtime_saved);
+    restore_platform_status = foc_platform_configure(
+        &g_foc_alignment_platform_saved);
+    if (restore_runtime_status == FOC_STATUS_OK)
+    {
+        g_foc_runtime_config = g_foc_alignment_runtime_saved;
+    }
+    if (restore_platform_status == FOC_STATUS_OK)
+    {
+        g_foc_platform_config = g_foc_alignment_platform_saved;
+    }
+    for (index = 0U; index < g_foc_alignment_sample_count; ++index)
+    {
+        const foc_alignment_capture_sample_t *sample =
+            &g_foc_alignment_samples[index];
+        valid_samples += (sample->read_ok != 0U) ? 1U : 0U;
+        rt_kprintf("FALR,%u,%u,%u,%u,%u\n",
+                   (unsigned int)index,
+                   (unsigned int)sample->elapsed_ms,
+                   (unsigned int)sample->read_ok,
+                   (unsigned int)sample->raw_count,
+                   (unsigned int)sample->trial_state);
+    }
+    rt_kprintf("FALEND,%u,%u,%u,%u,%u,%u,%u,%u,%08x,%u,%u,%u,%u,%u,%u\n",
+               (unsigned int)preflight_raw,
+               (unsigned int)runtime_status,
+               (unsigned int)platform_status,
+               (unsigned int)start_status,
+               (unsigned int)trial.state,
+               (unsigned int)trial.result,
+               (unsigned int)trial.total_ticks,
+               (unsigned int)trial.committed_alignment_ticks,
+               (unsigned int)diagnostics.flags,
+               (unsigned int)diagnostics.deadline_miss_count,
+               (unsigned int)diagnostics.realtime_error_count,
+               (unsigned int)diagnostics.peak_current_delta_counts,
+               (unsigned int)g_foc_alignment_sample_count,
+               (unsigned int)valid_samples,
+               (unsigned int)((restore_runtime_status << 16U) |
+                              restore_platform_status));
+    result = ((start_status == FOC_STATUS_OK) &&
+              (trial.state == FOC_AS5600_ALIGNMENT_TRIAL_COMPLETE) &&
+              (trial.result == FOC_AS5600_ALIGNMENT_TRIAL_RESULT_OK) &&
+              (diagnostics.deadline_miss_count == 0U) &&
+              (diagnostics.realtime_error_count == 0U) &&
+              (valid_samples >= 15U) &&
+              (restore_runtime_status == FOC_STATUS_OK) &&
+              (restore_platform_status == FOC_STATUS_OK)) ? 0 : -1;
+    return result;
+}
+MSH_CMD_EXPORT(foc_encoder_align, one-shot fixed P55-ALIGN1 candidate);
+#endif
 
 /* Sticky platform/Rust faults can only be cleared through this explicit
  * recovery preflight. The command never arms PWM; a separate foc_start is still
@@ -1301,10 +1498,11 @@ static void foc_print_config(void)
                (int)(FOC_PLATFORM_HARD_MIN_DUTY * 1000.0f),
                (int)(FOC_PLATFORM_HARD_MAX_DUTY * 1000.0f),
                (unsigned int)FOC_PLATFORM_HARD_MAX_ISR_DEADLINE_CYCLES);
-    rt_kprintf("CO,%d/%d/%d,%d/%d/%d\n",
+    rt_kprintf("CO,%d/%d/%d/%d,%d/%d/%d\n",
                (int)(g_foc_runtime_config.observer_smo_k_slide_v * 1000.0f),
                (int)(g_foc_runtime_config.observer_smo_boundary_a * 1000.0f),
                (int)(g_foc_runtime_config.observer_emf_filter_alpha * 1000.0f),
+               (int)(g_foc_runtime_config.observer_emf_phase_advance_ratio * 1000.0f),
                (int)g_foc_runtime_config.observer_pll_kp,
                (int)(g_foc_runtime_config.observer_acquisition_pll_kp_ratio * 1000.0f),
                (int)g_foc_runtime_config.observer_pll_ki);
@@ -1493,6 +1691,12 @@ static int foc_cfg(int argc, char **argv)
         if (foc_shell_parse_i32_scaled(
                 argv[2], 1000U,
                 &candidate->observer_emf_filter_alpha) == 0U) return -1;
+    }
+    else if (strcmp(argv[1], "phaseadvance") == 0)
+    {
+        if (foc_shell_parse_i32_scaled(
+                argv[2], 1000U,
+                &candidate->observer_emf_phase_advance_ratio) == 0U) return -1;
     }
     else if (strcmp(argv[1], "pll_kp") == 0)
     {
@@ -1825,7 +2029,6 @@ static int foc_advanced_wcet(int argc, char **argv)
                (unsigned int)timing.wcet.total_cycles,
                (unsigned int)timing.peak_control_cycles,
                (unsigned int)diagnostics.deadline_miss_count);
-
     result = ((status == FOC_STATUS_OK) &&
               (probe_status.state == FOC_ADVANCED_PROBE_COMPLETE) &&
               (probe_status.executed_ticks == requested_ticks) &&
@@ -1885,6 +2088,164 @@ static int foc_arm_rearm_test(int argc, char **argv)
 }
 MSH_CMD_EXPORT(foc_arm_rearm_test, -);
 
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+#define FOC_H3_DYNAMIC_MAX_ANCHORS (32U)
+#define FOC_H3_DYNAMIC_ANCHOR_PERIOD_MS (500U)
+#define FOC_H3_DYNAMIC_TERMINAL_ANCHOR_ACTIVE_TICK (960U)
+
+/* Powered H3 anchors are emitted only after the bounded trial has stopped.
+ * Printing a full anchor while the ADC owner is active can make the board
+ * UART backend briefly mask interrupts and contaminate the very WCET window
+ * being measured.  This fixed array has no allocation and covers the
+ * 14-second transaction at the fixed 500 ms cadence with margin. */
+static foc_time_sync_stm32g431_tx_status_t
+    g_foc_h3_dynamic_anchors[FOC_H3_DYNAMIC_MAX_ANCHORS];
+/* H3 is an explicitly experimental runtime candidate.  Keep its control-law
+ * override separate from the immutable production-profile configuration so the
+ * bounded trial can A/B one parameter and the finish path still restores the
+ * boot configuration.  Static storage avoids adding another 300 B object to the
+ * 2 KiB tshell stack. */
+static foc_runtime_config_t g_foc_h3_trial_runtime_config;
+static uint32_t g_foc_h3_no_power_probe_slot;
+
+static void foc_h3_dynamic_print_anchor(
+    const foc_time_sync_stm32g431_tx_status_t *status)
+{
+    rt_kprintf("FH3_DYNAMIC_ANCHOR,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d\n",
+               (unsigned int)status->version,
+               (unsigned int)status->state,
+               (unsigned int)status->started_count,
+               (unsigned int)status->completed_count,
+               (unsigned int)status->failed_count,
+               (unsigned int)status->first_edge_count,
+               (unsigned int)status->first_edge_timer_tick,
+               (unsigned int)status->first_edge_cycle_tick,
+               (unsigned int)status->first_edge_control_tick,
+               (unsigned int)status->first_edge_flags,
+               (unsigned int)status->last_session_id,
+               (unsigned int)status->last_edge_sequence,
+               (unsigned int)status->last_edge_tag,
+               (unsigned int)status->last_hal_status,
+               (unsigned int)status->loopback_edge_count,
+               (unsigned int)status->loopback_edge_timer_tick,
+               (unsigned int)status->loopback_edge_cycle_tick,
+               (int)status->loopback_delta_cycles);
+}
+
+static uint32_t foc_h3_dynamic_send_anchor(
+    foc_time_sync_edge_identity_t *identity,
+    foc_time_sync_stm32g431_tx_status_t *completed_status)
+{
+    foc_time_sync_stm32g431_tx_status_t status;
+    uint32_t waited_ms = 0U;
+
+    if (foc_time_sync_stm32g431_tx_start(identity) == 0U)
+    {
+        return 0U;
+    }
+    do
+    {
+        rt_thread_mdelay(1);
+        ++waited_ms;
+        foc_time_sync_stm32g431_tx_get_status(&status);
+    } while ((status.state == FOC_TIME_SYNC_STM32G431_TX_BUSY) &&
+             (waited_ms < 50U));
+    if ((status.state != FOC_TIME_SYNC_STM32G431_TX_COMPLETE) ||
+        ((status.first_edge_flags &
+          (FOC_TIME_SYNC_STM32G431_EDGE_CYCLE_VALID |
+           FOC_TIME_SYNC_STM32G431_CONTROL_TICK_VALID |
+           FOC_TIME_SYNC_STM32G431_LOOPBACK_VALID)) !=
+         (FOC_TIME_SYNC_STM32G431_EDGE_CYCLE_VALID |
+          FOC_TIME_SYNC_STM32G431_CONTROL_TICK_VALID |
+          FOC_TIME_SYNC_STM32G431_LOOPBACK_VALID)))
+    {
+        return 0U;
+    }
+    if (completed_status != RT_NULL)
+    {
+        *completed_status = status;
+    }
+    ++identity->edge_sequence;
+    ++identity->edge_tag;
+    return 1U;
+}
+
+/* Fixed no-power S4 probe for the exact stripped H3 dynamic image.  The
+ * command has no caller-controlled identity or timing and cannot arm the
+ * motor.  It refuses unless the measured bus is below 0.5 V and every output
+ * path is already inactive, then emits exactly one verified PB6/PB7 frame. */
+static int foc_h3_no_power_probe(int argc, char **argv)
+{
+    const uint32_t forbidden_flags =
+        FOC_PLATFORM_DIAG_DRIVER_FAULT |
+        FOC_PLATFORM_DIAG_OUTPUT_ACTIVE |
+        FOC_PLATFORM_DIAG_BREAK_LATCHED |
+        FOC_PLATFORM_DIAG_CURRENT_TRIP |
+        FOC_PLATFORM_DIAG_TRIAL_ARMED |
+        FOC_PLATFORM_DIAG_REALTIME_ARMED |
+        FOC_PLATFORM_DIAG_CONTROL_ERROR |
+        FOC_PLATFORM_DIAG_OUTPUT_REJECTED;
+    foc_time_sync_edge_identity_t identity = {
+        sizeof(foc_time_sync_edge_identity_t),
+        FOC_TIME_SYNC_IDENTITY_VERSION,
+        2026100506U,
+        6000U,
+        1000U,
+        FOC_TIME_SYNC_FLAG_RISING_EDGE |
+            FOC_TIME_SYNC_FLAG_IDENTITY_VERIFIED,
+    };
+    foc_time_sync_stm32g431_tx_status_t status;
+    foc_platform_diagnostics_t diagnostics;
+    uint32_t result = 0U;
+
+    (void)argv;
+    /* Alternate between two firmware-owned identities so a pair of no-power
+     * calls can prove a drained receiver crosses an explicit session boundary
+     * without exposing caller-controlled wire identity or motor authority. */
+    if (g_foc_h3_no_power_probe_slot != 0U)
+    {
+        identity.session_id = 2026100507U;
+        identity.edge_sequence = 7000U;
+        identity.edge_tag = 1100U;
+    }
+    (void)memset(&diagnostics, 0, sizeof(diagnostics));
+    if ((argc != 1) ||
+        (foc_platform_get_diagnostics(&diagnostics) != FOC_STATUS_OK) ||
+        (foc_bus_voltage_mv(diagnostics.bus_voltage_raw) > 500U) ||
+        ((diagnostics.flags & forbidden_flags) != 0U))
+    {
+        rt_kprintf("FH3_NOPWR,refused,%u,%08x\n",
+                   (unsigned int)foc_bus_voltage_mv(
+                       diagnostics.bus_voltage_raw),
+                   (unsigned int)diagnostics.flags);
+        return -1;
+    }
+    if (foc_time_sync_stm32g431_tx_init() != 0U)
+    {
+        /* After reset PB6 is high impedance and the legacy SDA1 input pulls
+         * GPIO23 high.  Give the receiver time to publish and re-arm after
+         * tx_init takes PB6 low.  The ESP32 RMT idle limit is 500 us and its
+         * management loop is not a realtime owner, so 20 ms deliberately
+         * covers the idle completion plus several loop/serial iterations. */
+        rt_thread_mdelay(20);
+        result = foc_h3_dynamic_send_anchor(&identity, &status);
+    }
+    if (result == 0U)
+    {
+        foc_time_sync_stm32g431_tx_get_status(&status);
+    }
+    foc_time_sync_stm32g431_tx_abort();
+    foc_h3_dynamic_print_anchor(&status);
+    rt_kprintf("FH3_NOPWR,%u\n", (unsigned int)result);
+    if (result != 0U)
+    {
+        g_foc_h3_no_power_probe_slot ^= 1U;
+    }
+    return (result != 0U) ? 0 : -1;
+}
+MSH_CMD_EXPORT(foc_h3_no_power_probe, -);
+#endif
+
 /* foc_advanced_trial P54-BASIC-100MS
  *
  * The first P5.4 powered gate exposes one exact token and only the feature=0
@@ -1901,20 +2262,96 @@ static int foc_advanced_trial(int argc, char **argv)
     foc_status_t status;
     foc_status_t finish_status;
     uint32_t started_ms;
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+    foc_time_sync_edge_identity_t h3_identity = {
+        sizeof(foc_time_sync_edge_identity_t),
+        FOC_TIME_SYNC_IDENTITY_VERSION,
+        0U,
+        0U,
+        0U,
+        FOC_TIME_SYNC_FLAG_RISING_EDGE |
+            FOC_TIME_SYNC_FLAG_IDENTITY_VERIFIED,
+    };
+    uint32_t h3_anchor_count = 0U;
+    uint32_t h3_next_anchor_ms = FOC_H3_DYNAMIC_ANCHOR_PERIOD_MS;
+    uint32_t trace_started = 0U;
+    uint32_t h3_init_ok = 0U;
+    uint32_t h3_anchor_ok = 0U;
+    uint32_t h3_terminal_anchor_sent = 0U;
+    uint32_t h3_print_index;
+    foc_status_t h3_trace_status = FOC_STATUS_NOT_CONFIGURED;
+    foc_time_sync_stm32g431_tx_status_t h3_tx_status;
+#endif
     int result = -1;
 
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+    /* This stripped candidate accepts one reverse-only operation token.  The
+     * sign is compiled into the platform trial command; no Shell argument can
+     * turn this into an arbitrary speed or an automatic retry surface. */
+    if ((argc != 5) ||
+        (strcmp(argv[1], "P55-H3-REV") != 0) ||
+        (foc_shell_parse_u32(argv[2], &h3_identity.session_id) == 0U) ||
+        (foc_shell_parse_u32(argv[3], &h3_identity.edge_sequence) == 0U) ||
+        (foc_shell_parse_u32(argv[4], &h3_identity.edge_tag) == 0U) ||
+        (h3_identity.session_id == 0U) ||
+        (h3_identity.edge_sequence == 0U) ||
+        (h3_identity.edge_sequence > (UINT32_MAX - 80U)) ||
+        (h3_identity.edge_tag == 0U) ||
+        (h3_identity.edge_tag > (UINT32_MAX - 80U)))
+    {
+        rt_kprintf("FADVP,h3-token\n");
+        return -1;
+    }
+#else
     if ((argc != 2) || (strcmp(argv[1], "P54-BASIC-100MS") != 0))
     {
         rt_kprintf("FADVP,token\n");
         return -1;
     }
+#endif
     (void)memset(&trial, 0, sizeof(trial));
     (void)memset(&advanced, 0, sizeof(advanced));
     (void)memset(&snapshot, 0, sizeof(snapshot));
     g_foc_management_log_inhibit = 1U;
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+    (void)foc_platform_get_diagnostics(&diagnostics);
+    g_foc_h3_trial_runtime_config = g_foc_runtime_config;
+    g_foc_h3_trial_runtime_config.observer_emf_phase_advance_ratio = 0.0f;
+    (void)memset(&h3_tx_status, 0, sizeof(h3_tx_status));
+    if (diagnostics.control_frequency_hz != 0U)
+    {
+        h3_trace_status = foc_platform_trace_start(
+            diagnostics.control_frequency_hz / 50U);
+    }
+    if (h3_trace_status == FOC_STATUS_OK)
+    {
+        h3_init_ok = foc_time_sync_stm32g431_tx_init();
+    }
+    if (h3_init_ok == 0U)
+    {
+        foc_time_sync_stm32g431_tx_get_status(&h3_tx_status);
+        foc_platform_trace_stop();
+        foc_time_sync_stm32g431_tx_abort();
+        g_foc_management_log_inhibit = 0U;
+        rt_kprintf("FADVP,h3-preflight,%u,%u,%u,%u,%u,%u\n",
+                   (unsigned int)diagnostics.control_frequency_hz,
+                   (unsigned int)h3_trace_status,
+                   (unsigned int)h3_init_ok,
+                   (unsigned int)h3_tx_status.state,
+                   (unsigned int)h3_tx_status.last_hal_status,
+                   (unsigned int)h3_tx_status.first_edge_flags);
+        return -1;
+    }
+    trace_started = 1U;
+    g_foc_trace_rate_hz = 50U;
+#endif
     status = foc_platform_advanced_candidate_power_trial_start(
         FOC_ADVANCED_POWER_TRIAL_MODE_BASIC,
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+        &g_foc_h3_trial_runtime_config);
+#else
         &g_foc_runtime_config);
+#endif
     if (status != FOC_STATUS_OK)
     {
         (void)foc_platform_advanced_candidate_power_trial_get_status(
@@ -1939,16 +2376,97 @@ static int foc_advanced_trial(int argc, char **argv)
                    (int)(snapshot.observer_pll_phase_error_rad * 1000.0f),
                    (int)snapshot.observer_speed_mean_rpm,
                    (unsigned int)(snapshot.observer_loss_elapsed_s * 1000000.0f));
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+        if (trace_started != 0U)
+        {
+            foc_platform_trace_stop();
+            g_foc_trace_rate_hz = 0U;
+        }
+        foc_time_sync_stm32g431_tx_abort();
+#endif
         g_foc_management_log_inhibit = 0U;
         return -1;
     }
+
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+    /* The control-tick latch only becomes meaningful after the ADC ISR owner
+     * is running.  A pre-arm frame can prove PB6/PB7 timing, but cannot be a
+     * trace-aligned H3 anchor.  Give the ISR two milliseconds to publish its
+     * first control tick, then make failure of the first real anchor terminate
+     * the already bounded trial through the same finish transaction. */
+    rt_thread_mdelay(2);
+    h3_anchor_ok = foc_h3_dynamic_send_anchor(
+        &h3_identity,
+        &g_foc_h3_dynamic_anchors[0]);
+    if (h3_anchor_ok == 0U)
+    {
+        foc_time_sync_stm32g431_tx_get_status(&h3_tx_status);
+        finish_status =
+            foc_platform_advanced_candidate_power_trial_finish(
+                &g_foc_runtime_config);
+        foc_platform_trace_stop();
+        g_foc_trace_rate_hz = 0U;
+        foc_time_sync_stm32g431_tx_abort();
+        g_foc_management_log_inhibit = 0U;
+        rt_kprintf("FADVP,h3-active,%u,%u,%u\n",
+                   (unsigned int)h3_tx_status.state,
+                   (unsigned int)h3_tx_status.first_edge_flags,
+                   (unsigned int)finish_status);
+        return -1;
+    }
+    h3_anchor_count = 1U;
+#endif
 
     started_ms = (uint32_t)rt_tick_get_millisecond();
     do
     {
         rt_thread_mdelay(1);
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+        if ((uint32_t)((uint32_t)rt_tick_get_millisecond() - started_ms) >=
+            h3_next_anchor_ms)
+        {
+            if ((h3_anchor_count >= FOC_H3_DYNAMIC_MAX_ANCHORS) ||
+                (foc_h3_dynamic_send_anchor(
+                    &h3_identity,
+                    &g_foc_h3_dynamic_anchors[h3_anchor_count]) == 0U))
+            {
+                status = FOC_STATUS_HARDWARE_FAULT;
+                break;
+            }
+            ++h3_anchor_count;
+            h3_next_anchor_ms += FOC_H3_DYNAMIC_ANCHOR_PERIOD_MS;
+        }
+#endif
         status = foc_platform_advanced_candidate_power_trial_get_status(
             &trial, &advanced, &snapshot);
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+        /* The previous implementation sent one final edge after COMPLETE.
+         * realtime_step_count is frozen by then, so that edge paired a stale
+         * control tick with a later truth timestamp and corrupted the affine
+         * control/truth map.  Emit the terminal edge during the last 20 ms of
+         * the still-active 1,200-tick window instead.  The earlier threshold
+         * gives the 1 ms management thread enough scheduling margin; trace
+         * phase is global, so any query after this edge is explicitly bounded
+         * and excluded by the offline mapping contract rather than pretending
+         * that one fixed relative tick is always the final 50 Hz sample. */
+        if ((status == FOC_STATUS_OK) &&
+            (trial.state == FOC_ADVANCED_POWER_TRIAL_ACTIVE) &&
+            (trial.active_ticks >=
+             FOC_H3_DYNAMIC_TERMINAL_ANCHOR_ACTIVE_TICK) &&
+            (h3_terminal_anchor_sent == 0U))
+        {
+            if ((h3_anchor_count >= FOC_H3_DYNAMIC_MAX_ANCHORS) ||
+                (foc_h3_dynamic_send_anchor(
+                    &h3_identity,
+                    &g_foc_h3_dynamic_anchors[h3_anchor_count]) == 0U))
+            {
+                status = FOC_STATUS_HARDWARE_FAULT;
+                break;
+            }
+            ++h3_anchor_count;
+            h3_terminal_anchor_sent = 1U;
+        }
+#endif
         if ((status != FOC_STATUS_OK) ||
             (trial.state == FOC_ADVANCED_POWER_TRIAL_COMPLETE) ||
             (trial.state == FOC_ADVANCED_POWER_TRIAL_FAILED) ||
@@ -1963,6 +2481,20 @@ static int foc_advanced_trial(int argc, char **argv)
     (void)foc_platform_get_diagnostics(&diagnostics);
     finish_status = foc_platform_advanced_candidate_power_trial_finish(
         &g_foc_runtime_config);
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+    foc_platform_trace_stop();
+    g_foc_trace_rate_hz = 0U;
+    foc_time_sync_stm32g431_tx_abort();
+    /* The power stage is closed before any long console line is emitted.
+     * Preserve all original anchor fields and ordering for the Host ABI. */
+    for (h3_print_index = 0U;
+         h3_print_index < h3_anchor_count;
+         ++h3_print_index)
+    {
+        foc_h3_dynamic_print_anchor(
+            &g_foc_h3_dynamic_anchors[h3_print_index]);
+    }
+#endif
     rt_kprintf("FADVP,state=%u,result=%u,ticks=%u/%u,first=%u,"
                "epoch=%u/%u,miss=%u/%u,features=%02x,status=%08x,"
                "snap=%u,ctrlstate=%u,orel=%u,closed=%u,ogates=%02x,"
@@ -1993,6 +2525,12 @@ static int foc_advanced_trial(int argc, char **argv)
                (unsigned int)timing.peak_control_cycles,
                (unsigned int)diagnostics.deadline_miss_count,
                (unsigned int)finish_status);
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+    /* Compact fixed schema: tag, anchor count, trace Hz, bounded-window flag. */
+    rt_kprintf("FH3R,%u,50,%u\n",
+               (unsigned int)h3_anchor_count,
+               (unsigned int)h3_terminal_anchor_sent);
+#endif
     result = ((status == FOC_STATUS_OK) &&
               (trial.state == FOC_ADVANCED_POWER_TRIAL_COMPLETE) &&
               (trial.result == FOC_ADVANCED_POWER_TRIAL_RESULT_OK) &&
@@ -2001,11 +2539,128 @@ static int foc_advanced_trial(int argc, char **argv)
               (trial.last_active_features == 0U) &&
               (trial.last_advanced_status_flags == 0U) &&
               (diagnostics.deadline_miss_count == 0U) &&
-              (finish_status == FOC_STATUS_OK)) ? 0 : -1;
+              (finish_status == FOC_STATUS_OK)
+#if defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD)
+              && (h3_anchor_count >= 3U)
+              && (h3_terminal_anchor_sent != 0U)
+#endif
+              ) ? 0 : -1;
     g_foc_management_log_inhibit = 0U;
     return result;
 }
 MSH_CMD_EXPORT(foc_advanced_trial, -);
+#endif
+
+#if defined(FLUXRT_SENSORLESS_CANDIDATE_BUILD)
+/* foc_sensorless_wcet [ticks] [mode]
+ * mode 1: BEMF/fusion hot path; mode 2: rotating-HFI/request-ledger hot path.
+ * This dedicated image has compile-time motor-arm disabled and the platform
+ * verifies Gate/MOE/CCER off on every ADC tick. */
+static int foc_sensorless_wcet(int argc, char **argv)
+{
+    foc_advanced_probe_status_t probe_status = {0};
+    foc_sensorless_realtime_output_t output = {0};
+    foc_realtime_timing_stats_t timing = {0};
+    foc_platform_diagnostics_t diagnostics = {0};
+    uint32_t requested_ticks = 36000U;
+    uint32_t mode = 2U;
+    uint32_t started_ms;
+    uint32_t timeout_ms;
+    uint32_t required_flags;
+    foc_status_t status;
+    foc_status_t finish_status;
+    int result;
+
+    if ((argc > 3) ||
+        ((argc >= 2) &&
+         (foc_shell_parse_u32(argv[1], &requested_ticks) == 0U)) ||
+        ((argc == 3) &&
+         (foc_shell_parse_u32(argv[2], &mode) == 0U)) ||
+        (requested_ticks < FOC_ADVANCED_PROBE_MIN_TICKS) ||
+        (requested_ticks > FOC_ADVANCED_PROBE_MAX_TICKS) ||
+        (mode < 1U) || (mode > 2U))
+    {
+        rt_kprintf("FSLS,ERR,usage\n");
+        return -1;
+    }
+    status = foc_platform_sensorless_candidate_probe_start(
+        mode, requested_ticks);
+    if (status != FOC_STATUS_OK)
+    {
+        rt_kprintf("FSLS,start,%u\n", (unsigned int)status);
+        (void)foc_platform_sensorless_candidate_probe_finish();
+        return -1;
+    }
+    started_ms = (uint32_t)rt_tick_get_millisecond();
+    timeout_ms = (requested_ticks / 12U) + 2000U;
+    do
+    {
+        rt_thread_mdelay(1);
+        status = foc_platform_sensorless_candidate_probe_get_status(
+            &probe_status, &output);
+        if ((status != FOC_STATUS_OK) ||
+            (probe_status.state == FOC_ADVANCED_PROBE_COMPLETE) ||
+            (probe_status.state == FOC_ADVANCED_PROBE_FAILED))
+        {
+            break;
+        }
+    } while ((uint32_t)((uint32_t)rt_tick_get_millisecond() -
+                        started_ms) < timeout_ms);
+
+    (void)foc_platform_get_timing(&timing);
+    (void)foc_platform_get_diagnostics(&diagnostics);
+    rt_kprintf("FSLS,m=%u,p=%u,r=%u,n=%u/%u,sig=%08x/%u,wcet=%u,ctrl=%u,miss=%u\n",
+               (unsigned int)mode,
+               (unsigned int)probe_status.state,
+               (unsigned int)probe_status.last_result,
+               (unsigned int)probe_status.executed_ticks,
+               (unsigned int)probe_status.requested_ticks,
+               (unsigned int)probe_status.decision_signature,
+               (unsigned int)probe_status.decision_samples,
+               (unsigned int)timing.wcet.total_cycles,
+               (unsigned int)timing.peak_control_cycles,
+               (unsigned int)diagnostics.deadline_miss_count);
+    rt_kprintf("FSLSO,s=%08x,stg=%u,fail=%u,pfail=%u,src=%u,rel=%u,fb=%u,seq=%u/%u\n",
+               (unsigned int)output.status_flags,
+               (unsigned int)output.stage,
+               (unsigned int)output.failure,
+               (unsigned int)output.polarity_failure,
+               (unsigned int)output.angle_source,
+               (unsigned int)output.angle_reliable,
+               (unsigned int)output.fallback_required,
+               (unsigned int)output.sample_sequence,
+               (unsigned int)output.request_apply_sequence);
+
+    required_flags = FOC_SENSORLESS_OUTPUT_CONFIGURED |
+                     FOC_SENSORLESS_OUTPUT_ENABLED |
+                     ((mode == 1U) ?
+                         FOC_SENSORLESS_OUTPUT_ANGLE_RELIABLE :
+                         FOC_SENSORLESS_OUTPUT_INJECTION_REQUESTED);
+    result = ((status == FOC_STATUS_OK) &&
+              (probe_status.state == FOC_ADVANCED_PROBE_COMPLETE) &&
+              (probe_status.executed_ticks == requested_ticks) &&
+              (probe_status.decision_samples == requested_ticks) &&
+              (probe_status.rejected_tick_count == 0U) &&
+              (diagnostics.deadline_miss_count == 0U) &&
+              ((output.status_flags & required_flags) == required_flags) &&
+              ((output.status_flags &
+                FOC_SENSORLESS_OUTPUT_FAULT_LATCHED) == 0U) &&
+              (output.stage == FOC_SENSORLESS_STAGE_AXIS_ACQUISITION) &&
+              (output.failure == 0U) &&
+              (output.request_apply_sequence ==
+               (output.sample_sequence + 1U)) &&
+              (((mode == 1U) &&
+                (output.angle_source == FOC_SENSORLESS_ANGLE_SOURCE_BEMF) &&
+                (output.angle_reliable == 1U) &&
+                (output.fallback_required == 0U)) ||
+               (mode == 2U))) ? 0 : -1;
+    finish_status = foc_platform_sensorless_candidate_probe_finish();
+    rt_kprintf("FSLS,end,%u,%u\n",
+               (unsigned int)((result == 0) ? 0U : 1U),
+               (unsigned int)finish_status);
+    return ((finish_status == FOC_STATUS_OK) && (result == 0)) ? 0 : -1;
+}
+MSH_CMD_EXPORT(foc_sensorless_wcet, -);
 #endif
 
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
@@ -2520,6 +3175,9 @@ int main(void)
         (foc_rust_context_required_align() > _Alignof(foc_rust_context_t))
 #if defined(FLUXRT_ADVANCED_CANDIDATE_BUILD)
         || (foc_rust_advanced_abi_version() != FOC_ADVANCED_ABI_VERSION)
+#endif
+#if defined(FLUXRT_SENSORLESS_CANDIDATE_BUILD)
+        || (foc_rust_sensorless_abi_version() != FOC_SENSORLESS_ABI_VERSION)
 #endif
 #if defined(FLUXRT_POWER_CANDIDATE_BUILD)
         || (foc_rust_power_abi_version() != FOC_POWER_ABI_VERSION)

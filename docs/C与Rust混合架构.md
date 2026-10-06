@@ -79,9 +79,11 @@ rust/crates/foc-sim/
 
 可移植 CPU 快速近似放在算法层纯函数中，通过 `FastApproxMath` 实现同一 trait；目标选择
 只在 bridge 中完成。它已完成 PC/实机 A/B，但因没有实机闭环角度真值仍默认关闭。当前
-C/Rust 全局 bridge ABI 当前为 V21 / `0x00150000`；逐拍实时输入子契约仍为 V19 / 88 B。
-V21 只增加独立高级FOC子ABI及Diagnostic候选下的条件式上下文容量，基础运行配置和
-基础遥测结构尺寸没有变化。
+C/Rust 全局 bridge ABI 当前为 V22 / `0x00160000`；运行配置 V12 / 300 B 新增可配置的
+反电势低通相位超前比例；逐拍实时输入子契约仍为 V19 / 88 B。
+V21只增加独立高级FOC子ABI及Diagnostic候选下的条件式上下文容量；V22才把
+`observer_emf_phase_advance_ratio`加入运行配置并把配置尺寸提升到300 B，基础遥测结构
+尺寸仍没有变化。
 P1.1 新增独立产品契约 V1（`0x00010000`），用于 Axis/命令/快照，不替换当前 ISR 私有
 结构。详见[产品公共契约 V1](产品公共契约V1.md)。
 

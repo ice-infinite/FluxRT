@@ -36,6 +36,34 @@
       "command": "${env:USERPROFILE}\\.cargo\\bin\\cargo.exe",
       "args": ["clippy", "--manifest-path", "${workspaceFolder}\\rust\\Cargo.toml", "--workspace", "--all-targets", "--", "-D", "warnings"],
       "problemMatcher": "$rustc"
+    },
+    {
+      "label": "FluxRT: DengFOC USB-only 角度诊断编译",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\targets\\esp32_dengfoc\\build.ps1"],
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "FluxRT: DengFOC USB-only PWM准备编译",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\targets\\esp32_dengfoc\\build.ps1", "-Environment", "dengfoc_usb_pwm_prepare"],
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "FluxRT: DengFOC USB-only MCPWM时序编译",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\targets\\esp32_dengfoc\\build.ps1", "-Environment", "dengfoc_usb_mcpwm_timing"],
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "FluxRT: H2 Ls(I) Rust-MATLAB离线重放",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}\\simulation\\run_lsi_h2_replay_gate.ps1"],
+      "problemMatcher": []
     }
   ]
 }

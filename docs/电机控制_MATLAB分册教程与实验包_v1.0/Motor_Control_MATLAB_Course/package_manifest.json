@@ -1,0 +1,870 @@
+{
+  "package": "Motor_Control_MATLAB_Course",
+  "version": "1.0",
+  "date": "2026-09-27",
+  "manifest_excludes_itself": true,
+  "matlab_executed": false,
+  "simulink_executed": false,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 3764,
+      "sha256": "8da38cda14bbef054a0884dc2c56f0db97da0b26717a92a55b7f2fa0498618af"
+    },
+    {
+      "path": "course_inventory.json",
+      "bytes": 4853,
+      "sha256": "aa80147588847522b6918139252a8b2c51c9e006f1ec17d030b74e1efe46f6b2"
+    },
+    {
+      "path": "docs/00_学习总览与环境指南.md",
+      "bytes": 11594,
+      "sha256": "0243c60efc442b36bc64dc9d42b23973cfe1444ade668e32e94af685445d814d"
+    },
+    {
+      "path": "docs/01_电机原理_参数与选型.md",
+      "bytes": 30726,
+      "sha256": "791e7f443adda8768911c9c4ac5a1f7715f2a0aa81721f7eb2513cc1aa7233a2"
+    },
+    {
+      "path": "docs/02_六步换相_异步与步进电机.md",
+      "bytes": 28640,
+      "sha256": "ae62327f65ab185cfc8397ae5708fff5d9be3ec664ce71f88fdf18c879752339"
+    },
+    {
+      "path": "docs/03_坐标变换_PMSM数学模型.md",
+      "bytes": 28154,
+      "sha256": "6df45f27d8c5b9b9a7cdd382974937752be786fe2c3c1bf3a8b46e176225e89a"
+    },
+    {
+      "path": "docs/04_PWM_SVPWM_功率驱动.md",
+      "bytes": 29515,
+      "sha256": "b951b7bb1b0c322af149d497d12804f1204906c36da96527622d1db58d8f9fec"
+    },
+    {
+      "path": "docs/05_PI整定_电流环_完整FOC.md",
+      "bytes": 22738,
+      "sha256": "c9a639e8e1bd31dc7316b72ff4e561a756c6bc7e6f5a72f7d48770d954ff939a"
+    },
+    {
+      "path": "docs/06_电流采样_编码器_MCU实时执行.md",
+      "bytes": 44613,
+      "sha256": "ac65d5ffe57b1d47d9efda3d6526ca0816ac682a1377b6e4bc660d8955f1675d"
+    },
+    {
+      "path": "docs/07_无感观测器_启动与接管.md",
+      "bytes": 19214,
+      "sha256": "86f4f68aeff7e9d44bb3f88fec0e00b3b994d460238b18711872c2f22f16f9bb"
+    },
+    {
+      "path": "docs/08_MTPA_弱磁_运行包络.md",
+      "bytes": 17954,
+      "sha256": "dac4162f31e7785afc49d270527890eeff362fcc3f9e7634f28894201cf963e5"
+    },
+    {
+      "path": "docs/09_伺服三环_机械共振_机器人关节.md",
+      "bytes": 28008,
+      "sha256": "06f46a140c2a33fdee25f6b20deda0266071c45c735e96208c3a31da7e63fa75"
+    },
+    {
+      "path": "docs/10_保护状态机_再生制动_故障诊断.md",
+      "bytes": 37000,
+      "sha256": "95432a23b86b1bab0dfc615486db8c7b105cf1488f84e448918609cb5fc6615c"
+    },
+    {
+      "path": "docs/11_通信多轴_嵌入式代码_数值验证.md",
+      "bytes": 25093,
+      "sha256": "eb8aaffa0b739d950e17e071feb528453d7bd64e2173d4562033147cd8d8b11a"
+    },
+    {
+      "path": "docs/12_MATLAB_Simulink_辨识与验证.md",
+      "bytes": 28525,
+      "sha256": "0c4dd3e756276ef98c5f1d21b9610baea357bcb53ac274d67505f6dc2a3b2d02"
+    },
+    {
+      "path": "docs/13_项目案例_面试表达_实验报告.md",
+      "bytes": 20634,
+      "sha256": "4049319faa5ee61df62a45d39c67cf7f0ae0cb0a36f16da49b64d8e05b3b78bf"
+    },
+    {
+      "path": "docs/14_MATLAB实验逐步手册.md",
+      "bytes": 114479,
+      "sha256": "e907371328268788f2501049a10f8771e95bcfad613239feb040aff5fca4e7a4"
+    },
+    {
+      "path": "docs/15_参考资料与符号约定.md",
+      "bytes": 8303,
+      "sha256": "42b1dd1a5edc02506025e706530813326b6e6da5b4a369c56fe88433c88d919a"
+    },
+    {
+      "path": "docs/16_验证记录与已知边界.md",
+      "bytes": 7772,
+      "sha256": "1c307f5bae74df664baab0eba7af9e055ddc3e82ac76c478c5a460a68255ba11"
+    },
+    {
+      "path": "docs/99_200题分册与实验索引.md",
+      "bytes": 57031,
+      "sha256": "6d93d67f18640c690209c13f6c886e0c5f3f58e2f196f2611e1961484affd098"
+    },
+    {
+      "path": "figures/L01_abc.png",
+      "bytes": 144256,
+      "sha256": "7df498b45ed6322008604b4a3aeb3921105338ab6573a477da99572983156f43"
+    },
+    {
+      "path": "figures/L01_vector.png",
+      "bytes": 58431,
+      "sha256": "ebf94e63d356f6448dd7d582794f2aeda9eb4bb4d0eae697037a0d9e295f8733"
+    },
+    {
+      "path": "figures/L02_mechanical.png",
+      "bytes": 65141,
+      "sha256": "6491237670c8155ec644b0fbbff70e42f6fcf7a159028808872ba8818fa12f8a"
+    },
+    {
+      "path": "figures/L02_rl.png",
+      "bytes": 55490,
+      "sha256": "e43367499ca7235738363113023c07109e10bf1e40eb68e60bb0dd577ecb7c2f"
+    },
+    {
+      "path": "figures/L03_commutation.png",
+      "bytes": 47625,
+      "sha256": "261fd00ebc2d1d9189f759e56422badf1cd3a2cab994806ee11f5f2070c3591a"
+    },
+    {
+      "path": "figures/L03_power.png",
+      "bytes": 109625,
+      "sha256": "3db6d6a67a3e1c7896eca4cc0e6743bc0556bb73dbfb555acf5c586547bd9db9"
+    },
+    {
+      "path": "figures/L04_dq.png",
+      "bytes": 45007,
+      "sha256": "bdf0d557dec0fa7ebed273319d362978cf9eabf3320defd3772f1b341da28908"
+    },
+    {
+      "path": "figures/L05_dq.png",
+      "bytes": 60026,
+      "sha256": "f58c9bbbe370c55ab02146bd67c23ec1ce2fd75ee0c1712e542958c3df111001"
+    },
+    {
+      "path": "figures/L05_energy.png",
+      "bytes": 140991,
+      "sha256": "52479340463173f056976ed357691a2f2499813a9bd093f923a3d3fa252110ce"
+    },
+    {
+      "path": "figures/L06_duty.png",
+      "bytes": 117236,
+      "sha256": "41cfadeb520815c1c06d429bc2e0d8f70102b07048365186df63a7ffd03b8299"
+    },
+    {
+      "path": "figures/L06_switching.png",
+      "bytes": 58690,
+      "sha256": "986bafc90a5b12ec7530fab255703a3590af31b9dd7c16d3e03ebfae71956d6f"
+    },
+    {
+      "path": "figures/L07_response.png",
+      "bytes": 54947,
+      "sha256": "6291c496256f6b8b7d7a67d408dff8b79177633158a308736cc48d790354ab90"
+    },
+    {
+      "path": "figures/L07_voltage.png",
+      "bytes": 54267,
+      "sha256": "a92ea91528cab131bd9f74927db4445ca46afe3f4e50d13bd643c320b6860c9d"
+    },
+    {
+      "path": "figures/L08_aw.png",
+      "bytes": 64118,
+      "sha256": "e0141ec2b98103bb2b0c7b2f19235a5b24c0760bda6143d3d6f9bb5352ff6870"
+    },
+    {
+      "path": "figures/L08_delay.png",
+      "bytes": 56762,
+      "sha256": "66ab78df0a7cc84167f06980c197b7a232e5951ce18885a4d71326671abe0fa4"
+    },
+    {
+      "path": "figures/L08_integral.png",
+      "bytes": 73086,
+      "sha256": "1004ac29b503bc96ad0977c08978c09b90df7d35340d6bbde012af07e6ba9a2d"
+    },
+    {
+      "path": "figures/L09_error.png",
+      "bytes": 59700,
+      "sha256": "ba08edbdee9301aa97a91fe2a71bfd50cd3a732100a44520cd3453e78f6076e2"
+    },
+    {
+      "path": "figures/L09_samples.png",
+      "bytes": 144831,
+      "sha256": "8a1c68cdb8578a1bdf6ce6193c566ac695f14e5796df686b1fa091445fe1a848"
+    },
+    {
+      "path": "figures/L10_angle.png",
+      "bytes": 50832,
+      "sha256": "b1125f0205d107b89cb9cbc565dd60b95bfbf9fb60825d7953cfa92cc031f0bb"
+    },
+    {
+      "path": "figures/L10_speed.png",
+      "bytes": 242138,
+      "sha256": "a166f37c40191b67561e044afac9292ffdb0ff18048f456193b8bb4370221b7e"
+    },
+    {
+      "path": "figures/L11_current.png",
+      "bytes": 67115,
+      "sha256": "24855d7a8534da3f20e293751a83de0d4a918a7f03e25a1a21c43d07bd14ce81"
+    },
+    {
+      "path": "figures/L11_fault_effect.png",
+      "bytes": 91790,
+      "sha256": "98bf8d2ae7eb127808453305ba5fdcf834c041fe8789a98185598fb68ccb68f7"
+    },
+    {
+      "path": "figures/L11_speed.png",
+      "bytes": 59925,
+      "sha256": "ba22f49ecfb05158a59d8f41e8560d7a7687bfa768c2f5d9ad22ba9653e7e41a"
+    },
+    {
+      "path": "figures/L11_voltage.png",
+      "bytes": 56096,
+      "sha256": "b3e163606fa4002598ff0c549fb68d6e61bb5f43f360de80089c3998203c0869"
+    },
+    {
+      "path": "figures/L12_angle.png",
+      "bytes": 60265,
+      "sha256": "cdb4564a852e55c8afc396d9238ff083efb6febc68b82fa9f76e9a43db5122c5"
+    },
+    {
+      "path": "figures/L12_emf.png",
+      "bytes": 120648,
+      "sha256": "3eb352cbe775b463a14031053ae4051eaab701c4341f0201b33236cc748731ac"
+    },
+    {
+      "path": "figures/L12_low_speed.png",
+      "bytes": 324847,
+      "sha256": "5124eaccb1320fc216646f7e5185b40cfb92af92a584b4d55b68e2e18392ab05"
+    },
+    {
+      "path": "figures/L13_currents.png",
+      "bytes": 62228,
+      "sha256": "284668e3a95ed9219c25345c018aa993dfb12f4fe935d3dd34937c813b031ac3"
+    },
+    {
+      "path": "figures/L13_saving.png",
+      "bytes": 72140,
+      "sha256": "6d9696b3cb44fa4862a93093597d922bc355a12030045c9c7428adc10c9e6d75"
+    },
+    {
+      "path": "figures/L14_envelope.png",
+      "bytes": 76250,
+      "sha256": "a701f375af5b0d913b3deb8602fdd1e551dc07db0b5300532c78a6769b92d874"
+    },
+    {
+      "path": "figures/L14_idiq.png",
+      "bytes": 60059,
+      "sha256": "9b5cb684fd30135b45ff7741359848432c186b25a54b1b5acde82e224220608c"
+    },
+    {
+      "path": "figures/L15_error.png",
+      "bytes": 71529,
+      "sha256": "736955a868a588b83721f49dfc123555faf944aa40677f8e8d44de28e66e2a45"
+    },
+    {
+      "path": "figures/L15_position.png",
+      "bytes": 70899,
+      "sha256": "7ed21b17d5b9625ac60334151e5635ebc9b366b31ac43eb608fc99c101253b38"
+    },
+    {
+      "path": "figures/L16_resonance.png",
+      "bytes": 92957,
+      "sha256": "b5da4da377571b04d425d2de03751390e1054fb4f1cc35ba19332d177bf26128"
+    },
+    {
+      "path": "figures/L17_contact.png",
+      "bytes": 72089,
+      "sha256": "c09e29d35542f8683c24c9c9cce50a5290ac9949e955e15e11389a94c5ff41dd"
+    },
+    {
+      "path": "figures/L17_position.png",
+      "bytes": 70540,
+      "sha256": "7d31d9e321fea49b9cd111cf342cfb2e72849c6af3b808fcc623f6fe974c0183"
+    },
+    {
+      "path": "figures/L18_bus.png",
+      "bytes": 77328,
+      "sha256": "c23642d8af467d761fa4ca0f4207351f1a46a7026e4e93d305f69eac26f85037"
+    },
+    {
+      "path": "figures/L18_power.png",
+      "bytes": 97705,
+      "sha256": "467e3858ca51854299e78cbac158b82d21d963857720515d08947c774141b51e"
+    },
+    {
+      "path": "figures/L19_states.png",
+      "bytes": 57305,
+      "sha256": "93bd17b6b8c50a3400819c175bbb26fb611a0ec2caf60b7f6f40c789f58a980f"
+    },
+    {
+      "path": "figures/L20_fit.png",
+      "bytes": 271212,
+      "sha256": "e74b7e4fb05a1dd1f4b9d5bd02fbc5ecc80463d54c63ac40f5025e7bb14c5a8b"
+    },
+    {
+      "path": "figures/L20_residual.png",
+      "bytes": 285550,
+      "sha256": "977fc828b5be7f72a0a53cabe450ce252b71e3ac3044c94fc811191c742159a3"
+    },
+    {
+      "path": "figures/L21_budget.png",
+      "bytes": 75771,
+      "sha256": "7b52ec998e8984cc495813ffb6654b01b32a0db226c0c70067b7c9a0bc3b1757"
+    },
+    {
+      "path": "figures/L22_quantization.png",
+      "bytes": 146249,
+      "sha256": "c9f01a47c26cd96fe47e203bcda28eb94c71cbab75539de0356960e69d5670b8"
+    },
+    {
+      "path": "figures/L23_induction.png",
+      "bytes": 77794,
+      "sha256": "b3b717811013f0dbd38a4441f3a70fd42fe3ec9ea06a35ce6af19799bba3d6c9"
+    },
+    {
+      "path": "figures/L23_stepper.png",
+      "bytes": 79548,
+      "sha256": "76c824069d0796bb905080acb9a1cdbb3b96766bb40d907a01854046645366b2"
+    },
+    {
+      "path": "figures/L24_losses.png",
+      "bytes": 56967,
+      "sha256": "465104a32c69ed8be6093ad6f47eeb83e891439234d57f986d21a9cbdfb4e577"
+    },
+    {
+      "path": "figures/L24_temperature.png",
+      "bytes": 68293,
+      "sha256": "771a2d8d93f3476b4c6c4167eb1f2bf49315f720caf16f1b78e3cab263ff4839"
+    },
+    {
+      "path": "matlab/README.md",
+      "bytes": 3879,
+      "sha256": "bd500da567431b66abd0065fcc34203bad33470cf1609044291cfb18c9aea52c"
+    },
+    {
+      "path": "matlab/common/mc_current_loop.m",
+      "bytes": 555,
+      "sha256": "94e7cf3338d270a7f810b1030f25af0b9f7c837cae10cae9b8f520e12691026a"
+    },
+    {
+      "path": "matlab/common/mc_foc_sim.m",
+      "bytes": 1656,
+      "sha256": "ef71b515f1b414d8891483a9ed48700470ec8ceb4129259aa93ba33888246a6d"
+    },
+    {
+      "path": "matlab/common/mc_ipm_params.m",
+      "bytes": 184,
+      "sha256": "a16658ab99fc847c6e6cec8e7a3788b5fcee5fd71e2a173e9ed36a20ab9fbee3"
+    },
+    {
+      "path": "matlab/common/mc_params.m",
+      "bytes": 214,
+      "sha256": "b4aee66cb14b1ed37b47fa316b38c1c5ecbc03769cd0269db15798364e3532f8"
+    },
+    {
+      "path": "matlab/common/mc_plot.m",
+      "bytes": 500,
+      "sha256": "f9e5eef535d0c4a7e831c9e93fdf7a7f4d589868eb94e605af5ae354a857a695"
+    },
+    {
+      "path": "matlab/common/mc_pmsm_rhs.m",
+      "bytes": 360,
+      "sha256": "17089a62364e3a8b3e7dc5426322dfcb30907c66d562aa61ef8bed4289202155"
+    },
+    {
+      "path": "matlab/common/mc_rk4.m",
+      "bytes": 113,
+      "sha256": "8d833772f7e385eb5b3150bab6683ce2dc2472d0207dc28af91e88a429401753"
+    },
+    {
+      "path": "matlab/common/mc_root.m",
+      "bytes": 83,
+      "sha256": "1a86159cdc37123677e8fdd60ddfd657dda676917b52a579cb3309edf9c78f7b"
+    },
+    {
+      "path": "matlab/common/mc_save.m",
+      "bytes": 861,
+      "sha256": "5605c28280101e652793a35c097f98fbd4bcaac139145a3ce794b2878db35c9f"
+    },
+    {
+      "path": "matlab/common/mc_servo_sim.m",
+      "bytes": 536,
+      "sha256": "915814b6980130e47efaeff32a0c1869b013c0a8ad13cda1bffe10d2f27db130"
+    },
+    {
+      "path": "matlab/common/mc_svpwm.m",
+      "bytes": 579,
+      "sha256": "6772fa817daf1915042143da0eb32719b68965e16dd78f3e84b2d79c2b0b2837"
+    },
+    {
+      "path": "matlab/common/mc_wrap.m",
+      "bytes": 110,
+      "sha256": "219e20f002e4012b60fb06c58cad5a8ed886d284fe9a6bee67a28172dcae85aa"
+    },
+    {
+      "path": "matlab/lab_manifest.json",
+      "bytes": 590,
+      "sha256": "c1689a110d7a6b5aa5069b2c5408b7bcb71443d81ccbba227281b6f91ee559cf"
+    },
+    {
+      "path": "matlab/labs/lab01_rotating_field.m",
+      "bytes": 1029,
+      "sha256": "4156d2da7d999accee2b440cc8689abab40f90e9eb6ffde7986eb77fda786313"
+    },
+    {
+      "path": "matlab/labs/lab02_rl_mechanics.m",
+      "bytes": 1170,
+      "sha256": "07f55465baa966a35022b41dd28a8eec9cb132e14290a4c2b21e3e327cfe43f3"
+    },
+    {
+      "path": "matlab/labs/lab03_sixstep.m",
+      "bytes": 1432,
+      "sha256": "17985b48e49919d6d79cac28e59ca9be3293e7e22369ec0becc0b05e59320652"
+    },
+    {
+      "path": "matlab/labs/lab04_transforms.m",
+      "bytes": 1194,
+      "sha256": "e0baa219716d893411fc8f64ef6f974651579419c80e19dcb1712afe68074796"
+    },
+    {
+      "path": "matlab/labs/lab05_pmsm_model.m",
+      "bytes": 1254,
+      "sha256": "43f85ed572be1f2faa08c1ace84e6d905748a024ea1fb0e27a7cf91ba422a64a"
+    },
+    {
+      "path": "matlab/labs/lab06_svpwm.m",
+      "bytes": 1329,
+      "sha256": "3c2e582cc62ec84ec344adcb4c2608f86b77e549e0a66077e1e4762f9e254acf"
+    },
+    {
+      "path": "matlab/labs/lab07_current_pi.m",
+      "bytes": 1043,
+      "sha256": "71927336e2eb635479d8355f153873089e2033db09b807ee346466a8f73b3880"
+    },
+    {
+      "path": "matlab/labs/lab08_windup_delay.m",
+      "bytes": 1322,
+      "sha256": "590daf824664bf02eda23e7bca255888aec5fe62f632f90dd3f2c4e7d62eff00"
+    },
+    {
+      "path": "matlab/labs/lab09_current_sensing.m",
+      "bytes": 1514,
+      "sha256": "84a4b9f041f9dfdc83090a818ed9d3b709a88e6257b491b96c70fb1b85221e97"
+    },
+    {
+      "path": "matlab/labs/lab10_encoder.m",
+      "bytes": 1324,
+      "sha256": "b0b40e1119c338b054bd9bdeee7dff3654e36f7232aa1192cae0dfdf41d32357"
+    },
+    {
+      "path": "matlab/labs/lab11_foc_closedloop.m",
+      "bytes": 1587,
+      "sha256": "ea38c7f54935b585d27bc06daf9791ed3453bd3646ce178881ab3e06bfe6ff30"
+    },
+    {
+      "path": "matlab/labs/lab12_sensorless_observer.m",
+      "bytes": 2310,
+      "sha256": "aa39b05dcad96fe4393aaf4f44523a7cd25e5534ff0036185b3663b72323852e"
+    },
+    {
+      "path": "matlab/labs/lab13_mtpa.m",
+      "bytes": 1247,
+      "sha256": "346e28815b1854090c3793bca6d3fc71a2f47fd32b3b0098b1020fc913bb4a64"
+    },
+    {
+      "path": "matlab/labs/lab14_field_weakening.m",
+      "bytes": 1565,
+      "sha256": "c33fb92684e64653e3d848e8259fbbb6447316c7e50d1abfb927c6a03c121e3e"
+    },
+    {
+      "path": "matlab/labs/lab15_servo_trajectory.m",
+      "bytes": 1156,
+      "sha256": "b71a7ded645560c34250aeec309f066c5c9f73cc98c105378504f1e7f9a665dd"
+    },
+    {
+      "path": "matlab/labs/lab16_two_inertia.m",
+      "bytes": 1080,
+      "sha256": "74d8df0f037e1c7afc8487c942e58fba8346f5b9e21a171470c9e7c9f5196e3c"
+    },
+    {
+      "path": "matlab/labs/lab17_joint_impedance.m",
+      "bytes": 1209,
+      "sha256": "ae0df2dd6a4049f8b1c7dcf203e3ce16d94f1d06fe4a82e5957312a3c715d4b7"
+    },
+    {
+      "path": "matlab/labs/lab18_regeneration.m",
+      "bytes": 1474,
+      "sha256": "042b3eb4664f26113d9c590860f944ea3a7c4b25ff1e53ceffaf6e01fb3ac012"
+    },
+    {
+      "path": "matlab/labs/lab19_protection_state.m",
+      "bytes": 1343,
+      "sha256": "91d5108d77b0bdbbd35431fdfd97beae22c2119cc39d96e677013331a8ff52fd"
+    },
+    {
+      "path": "matlab/labs/lab20_parameter_identification.m",
+      "bytes": 1482,
+      "sha256": "2d03176ae725c3c25e459be65c78a25eedc5f20280e6c571c89375a08cfdc028"
+    },
+    {
+      "path": "matlab/labs/lab21_multi_axis_timing.m",
+      "bytes": 1038,
+      "sha256": "a9d2fe0f2827ec3ab46cb0b7347813357faa14fac69cca722ab85eadd70f05a4"
+    },
+    {
+      "path": "matlab/labs/lab22_fixedpoint.m",
+      "bytes": 1129,
+      "sha256": "0602c31e3054ed132428d1f3c3463f706c6575f0dc6b685d40a336ca5568e971"
+    },
+    {
+      "path": "matlab/labs/lab23_other_motors.m",
+      "bytes": 1107,
+      "sha256": "8312c453d6cc8243eff0cf0f0131edb8d296d9b0f1dce5ec9bf511106e7cbba1"
+    },
+    {
+      "path": "matlab/labs/lab24_loss_thermal.m",
+      "bytes": 1181,
+      "sha256": "48eee592ef22be078b2cd36d0948122d32aa451a6fd6edbe118ec50181e716df"
+    },
+    {
+      "path": "matlab/run_all.m",
+      "bytes": 511,
+      "sha256": "1f093e987ad821b00f9938f8d56e7ac4c5face8e92ee1e664930d15da1463e72"
+    },
+    {
+      "path": "matlab/run_lab.m",
+      "bytes": 880,
+      "sha256": "90c83a90cdfea077c24a1d054813c6a989ca03d718cdb4e5c8e00089a284c333"
+    },
+    {
+      "path": "matlab/selftest_math.m",
+      "bytes": 548,
+      "sha256": "feefe607e845b4de3ee74ff5fa95f012a12dc254a84e7577c9937cd2b03ba264"
+    },
+    {
+      "path": "matlab/simulink/build_rl_pi_model.m",
+      "bytes": 2265,
+      "sha256": "ab2b09ab7a7b14d0cacbca4281c1b8fe9bd40529fbcd4ddcd5e2d0b09fc29c7f"
+    },
+    {
+      "path": "matlab/simulink/check_environment.m",
+      "bytes": 376,
+      "sha256": "b9d3d31dd37bbdc6aa655a7e9d8258721945d16ed81a573e38199ae7f6a53bfc"
+    },
+    {
+      "path": "matlab/startup_course.m",
+      "bytes": 360,
+      "sha256": "82c5cd62013e710a5f3e2530e0bd86283a8a1165981efad43a7f74ac8f73ae06"
+    },
+    {
+      "path": "matlab/verify_reference.m",
+      "bytes": 2173,
+      "sha256": "5606e8c96b638ad7f9fb4fec8ca8efeada7f9af2040178eec69de76123ca2671"
+    },
+    {
+      "path": "package_integrity.json",
+      "bytes": 376,
+      "sha256": "3340427f7f384522abc220e42b56fb975b5e06ca34abff53480dcef2138310e2"
+    },
+    {
+      "path": "reference_python/README.md",
+      "bytes": 766,
+      "sha256": "b1cab76d61308f4184a61b745ef21ee4f2c71ef349da8084b045d1aceed1afc0"
+    },
+    {
+      "path": "reference_python/requirements.txt",
+      "bytes": 32,
+      "sha256": "4c40934e438ae009a1eb0b5a9322cce029fba6ca1af6e314c088c1957cee0c04"
+    },
+    {
+      "path": "reference_python/run_reference.py",
+      "bytes": 28635,
+      "sha256": "8f7ee1ad5cd150e095ea8ebd8821d2350fc590effe26f9b7dc209fdb359e9ae7"
+    },
+    {
+      "path": "reference_results/L01_data.csv",
+      "bytes": 164643,
+      "sha256": "3bab22ecb6ff174b4a186a6866cbd6a8eafa8ec03e46dc1d5ac25a461aa825e1"
+    },
+    {
+      "path": "reference_results/L01_metrics.json",
+      "bytes": 86,
+      "sha256": "df5d1c05245bae3cb8b8899dac8085902cacc0ac04cd864ae65db1d7b23352b8"
+    },
+    {
+      "path": "reference_results/L02_data.csv",
+      "bytes": 99294,
+      "sha256": "b07ac35f0f31213336e3463ca39ff8247d55af5ce543cda5bf8ace15ee36bc4a"
+    },
+    {
+      "path": "reference_results/L02_metrics.json",
+      "bytes": 72,
+      "sha256": "28f915ef5450f232423ae10c7ee9e6f58857b1dbcc5fb8b139c2aa779305ac69"
+    },
+    {
+      "path": "reference_results/L03_data.csv",
+      "bytes": 176222,
+      "sha256": "75ac7c815328332f21519c4b6a274bb74ac4648de9fb803c3e05173690ff17cf"
+    },
+    {
+      "path": "reference_results/L03_metrics.json",
+      "bytes": 100,
+      "sha256": "840ad817e604d0b648ead9e02dbb68d05c77fa67b666a3a934c0a17ce5dded72"
+    },
+    {
+      "path": "reference_results/L04_data.csv",
+      "bytes": 200815,
+      "sha256": "f63919b7c33ecc147a204f7bbbc19708800181d5f5a32da8b7b46ed5a1fe6e87"
+    },
+    {
+      "path": "reference_results/L04_metrics.json",
+      "bytes": 118,
+      "sha256": "1214de7041b08e7430310a41d0be07e4ab95a378b077ea3237673f520753f7a0"
+    },
+    {
+      "path": "reference_results/L05_data.csv",
+      "bytes": 130426,
+      "sha256": "c7b75417a141d1aa2ba37e0e91c01f7e3f8d19343478274f52e6900a8717de5a"
+    },
+    {
+      "path": "reference_results/L05_metrics.json",
+      "bytes": 83,
+      "sha256": "a23754b54a96e2bc85cd1f0594773b53263cd86c49bd539e0aa28b20bda9c350"
+    },
+    {
+      "path": "reference_results/L06_data.csv",
+      "bytes": 166741,
+      "sha256": "6ea768d41f36e7b4842277df8b9ac65ad740b317396822fd0c62ecb4d1cbd3ae"
+    },
+    {
+      "path": "reference_results/L06_metrics.json",
+      "bytes": 108,
+      "sha256": "644b46f4400d5b46fb8a3860c4b99557287fed559ad7fe9ab3a1892c2c7a99c6"
+    },
+    {
+      "path": "reference_results/L07_data.csv",
+      "bytes": 70973,
+      "sha256": "98c5d37a5ceed78ee057c955928360389852747a7dafaa4fc5cbbbdc05c0c438"
+    },
+    {
+      "path": "reference_results/L07_metrics.json",
+      "bytes": 92,
+      "sha256": "ae18baf59ea569eeef4c108406040ab4d6f732d2145707aaa9e691e5a35f6846"
+    },
+    {
+      "path": "reference_results/L08_data.csv",
+      "bytes": 133613,
+      "sha256": "abb3b95dab94185af112bc543d68d49b045818e53a8f1f01427c49d6db907f8b"
+    },
+    {
+      "path": "reference_results/L08_metrics.json",
+      "bytes": 119,
+      "sha256": "68456b062346b24835c7951c952f9e284007f66a8ed680b706081dbd88211f58"
+    },
+    {
+      "path": "reference_results/L09_data.csv",
+      "bytes": 30547,
+      "sha256": "4869f3f387f07c9578b1c86ab7e2d47e01bea10f1082ac4dbccf302c0be68c68"
+    },
+    {
+      "path": "reference_results/L09_metrics.json",
+      "bytes": 119,
+      "sha256": "1880735f51cc0c5e58b5f0d059675ae3c29879240105de70de757a552944cd23"
+    },
+    {
+      "path": "reference_results/L10_data.csv",
+      "bytes": 113352,
+      "sha256": "4e91c4283b08e84d8a788b1fe9969adccd4eb960e6ed263224a371faa998706a"
+    },
+    {
+      "path": "reference_results/L10_metrics.json",
+      "bytes": 121,
+      "sha256": "15461f8555de9c6f1db95824f90044e0a0026aa17bd0c0455ad2b0526d4d767e"
+    },
+    {
+      "path": "reference_results/L11_data.csv",
+      "bytes": 1360743,
+      "sha256": "b3217567be343bc04ae84ca53abad5035f3e58aef7c851eb08ae04e18cc6dd5a"
+    },
+    {
+      "path": "reference_results/L11_metrics.json",
+      "bytes": 163,
+      "sha256": "8f2f0044f46987408b6e5cef31916a9052453a7f51c0a20176a499ad7ee77d7e"
+    },
+    {
+      "path": "reference_results/L12_data.csv",
+      "bytes": 1063298,
+      "sha256": "b1becadde6bb9f9c4861e461b41fc73244701332fbffe7651b57077fe75b54c1"
+    },
+    {
+      "path": "reference_results/L12_metrics.json",
+      "bytes": 126,
+      "sha256": "82fbdb58ceb42685851e9ce81d41e2af9f0bb797df2d4c2c64802fbad72f953b"
+    },
+    {
+      "path": "reference_results/L13_data.csv",
+      "bytes": 4283,
+      "sha256": "a282b0155a93c4eb8814a22dcb0a43e7793334e92ae9514f388ffe40125e7f2a"
+    },
+    {
+      "path": "reference_results/L13_metrics.json",
+      "bytes": 100,
+      "sha256": "d29808e708692170d112338a4b43013f8a13d8246623f5915a6b5542bd003031"
+    },
+    {
+      "path": "reference_results/L14_data.csv",
+      "bytes": 5028,
+      "sha256": "429d5fbf56ce751196127105ce38274580f21055e4e37b7c2553196d455d9d0f"
+    },
+    {
+      "path": "reference_results/L14_metrics.json",
+      "bytes": 118,
+      "sha256": "d23550ee7d9ab41e389254d353e4bc92c0ca1ba59d7962633fdc99d5cddd05e6"
+    },
+    {
+      "path": "reference_results/L15_data.csv",
+      "bytes": 805452,
+      "sha256": "00248a0a213914d306addf8e90c0923bd6e46b85605494dcbc6ab7fad4cfae38"
+    },
+    {
+      "path": "reference_results/L15_metrics.json",
+      "bytes": 89,
+      "sha256": "930f912eaa14794c0f2431a23e2bbbef74aa9b859796e7c6e0da9816ede7b384"
+    },
+    {
+      "path": "reference_results/L16_data.csv",
+      "bytes": 68981,
+      "sha256": "8c615f7a64397ea482980d747a8653c8f7f2f47ab3748d51b9869ffaaca1208a"
+    },
+    {
+      "path": "reference_results/L16_metrics.json",
+      "bytes": 100,
+      "sha256": "a918e684e138e50f239d9ddfcb7cbb8dad283bc9ef13de3ea3d640a6e17fabd2"
+    },
+    {
+      "path": "reference_results/L17_data.csv",
+      "bytes": 484947,
+      "sha256": "8b992d108aebfe59da60dc2f46d374b8935e3ededfc94400cdc734d4e33c4594"
+    },
+    {
+      "path": "reference_results/L17_metrics.json",
+      "bytes": 89,
+      "sha256": "425a9d39726d49b8febadd85c5a14882bbdb6a0a32506b79efa32e9c72962a1f"
+    },
+    {
+      "path": "reference_results/L18_data.csv",
+      "bytes": 249754,
+      "sha256": "84b2f48b611205f66fbcf325800f864bd1feeda491d94642770e52b589565c8a"
+    },
+    {
+      "path": "reference_results/L18_metrics.json",
+      "bytes": 169,
+      "sha256": "8b0d99824b4b6cc2488654e9483d84a882c2b34e4998d50ad9e0dfc4e99d0226"
+    },
+    {
+      "path": "reference_results/L19_data.csv",
+      "bytes": 5201,
+      "sha256": "f775591794e355ec55fe424c47612d3ec6adf6e6a354c8682d086a3bc3771b66"
+    },
+    {
+      "path": "reference_results/L19_metrics.json",
+      "bytes": 36,
+      "sha256": "a72018c6fd8bb092243adae2029ccf360d4471c61333219cdb8e78d2d84480d7"
+    },
+    {
+      "path": "reference_results/L20_data.csv",
+      "bytes": 159253,
+      "sha256": "44a84d87c7388708fe4a73e3377cb5893b08c8cf75fa42ac38003dc48c2f937a"
+    },
+    {
+      "path": "reference_results/L20_metrics.json",
+      "bytes": 203,
+      "sha256": "ad9766d812a3ed829c806f14a9620412c1c03c95786c39b3d788706b2f384f8a"
+    },
+    {
+      "path": "reference_results/L21_data.csv",
+      "bytes": 169,
+      "sha256": "2dfe0e27a9053c1e85f38378c2f31c945f1ca33de408329212d9ddead28d9938"
+    },
+    {
+      "path": "reference_results/L21_metrics.json",
+      "bytes": 66,
+      "sha256": "31267006d5f74da56c84ef10ea5b3dcffa2940dab11d89796e06a64d1bd5e1be"
+    },
+    {
+      "path": "reference_results/L22_data.csv",
+      "bytes": 238872,
+      "sha256": "5bfcd1992b57ac092a8669404a5af5c077a3d33b0daf89b9ce85f72d3d8924ad"
+    },
+    {
+      "path": "reference_results/L22_metrics.json",
+      "bytes": 82,
+      "sha256": "25348eba86e0f5be2987c6c0ab4186c74d935b2d190ec69a924b2968ae2baeda"
+    },
+    {
+      "path": "reference_results/L23_data.csv",
+      "bytes": 43481,
+      "sha256": "15312586f6fb436f372c8dfd01a7489ace2dd8e93b63a9369f10d18644c0d312"
+    },
+    {
+      "path": "reference_results/L23_metrics.json",
+      "bytes": 100,
+      "sha256": "3e50507b336db430fbd8afd0ccba333c26eb446b228640ac66f95f48811071a4"
+    },
+    {
+      "path": "reference_results/L24_data.csv",
+      "bytes": 440463,
+      "sha256": "511445b76e1e53d0cfbf9458482a817b8d172d0a0c592e4beee42e8367590e13"
+    },
+    {
+      "path": "reference_results/L24_metrics.json",
+      "bytes": 71,
+      "sha256": "58d5dc5b7047aa4a31264ce0c281c81823e8e420c9308d8fde22b650c5b62c9d"
+    },
+    {
+      "path": "reference_results/metrics_all.json",
+      "bytes": 2966,
+      "sha256": "54ca7ef81b0b35ab192b8446231e82615e1288b9736f939f40a688971e517ae4"
+    },
+    {
+      "path": "reference_results/plot_manifest.json",
+      "bytes": 1192,
+      "sha256": "3e08559bdd1ba32fb1df25047274d285baf1724b35170873002fc2ffaaf2e6c9"
+    },
+    {
+      "path": "reference_results/validation_report.json",
+      "bytes": 1673,
+      "sha256": "758805758de7e916315300c911f2ccf3e70099e80d1204effacfe90bcd23c88e"
+    },
+    {
+      "path": "source/original_question_bank.md",
+      "bytes": 200593,
+      "sha256": "7a5e5d148a5ab82fcce89c053a4347d10528129b212dc454ad56ed9f39b8876a"
+    },
+    {
+      "path": "templates/01_实验报告模板.md",
+      "bytes": 1467,
+      "sha256": "90a152765e7861d47ee88e2fd71e19c347094cd81faf378d7708350e2e870271"
+    },
+    {
+      "path": "templates/02_电机参数台账.md",
+      "bytes": 990,
+      "sha256": "783344abda21707a4ac80c030fb4eb487ccebe1d5823a8912b6e9ba7ff1628b8"
+    },
+    {
+      "path": "templates/03_故障复盘模板.md",
+      "bytes": 940,
+      "sha256": "6b34bda8df6176c14905b4bbacde51e9aa9bab85a65336cdfc9162584845cb38"
+    },
+    {
+      "path": "templates/04_实机准入与验证矩阵.md",
+      "bytes": 1236,
+      "sha256": "4822feb4bddca0c79247225f73ae9070abbc6b36aae919ccec89da9d21c27434"
+    }
+  ]
+}

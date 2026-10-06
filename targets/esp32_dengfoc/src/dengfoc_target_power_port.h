@@ -1,0 +1,30 @@
+#ifndef DENGFOC_TARGET_POWER_PORT_H
+#define DENGFOC_TARGET_POWER_PORT_H
+
+#ifndef FLUXRT_DENGFOC_MCPWM_TIMING_ONLY
+#define FLUXRT_DENGFOC_MCPWM_TIMING_ONLY 0
+#endif
+
+#if FLUXRT_DENGFOC_MCPWM_TIMING_ONLY
+#include "dengfoc_mcpwm_power_port.h"
+using dengfoc_target_power_port_t = dengfoc_mcpwm_power_port_t;
+using dengfoc_target_power_snapshot_t = dengfoc_mcpwm_power_snapshot_t;
+#define dengfoc_target_power_port_init dengfoc_mcpwm_power_port_init
+#define dengfoc_target_power_port_force_disabled \
+    dengfoc_mcpwm_power_port_force_disabled
+#define dengfoc_target_power_port_is_disabled \
+    dengfoc_mcpwm_power_port_is_disabled
+#define dengfoc_target_power_port_snapshot dengfoc_mcpwm_power_port_snapshot
+#else
+#include "dengfoc_arduino_power_port.h"
+using dengfoc_target_power_port_t = dengfoc_arduino_power_port_t;
+using dengfoc_target_power_snapshot_t = dengfoc_arduino_power_snapshot_t;
+#define dengfoc_target_power_port_init dengfoc_arduino_power_port_init
+#define dengfoc_target_power_port_force_disabled \
+    dengfoc_arduino_power_port_force_disabled
+#define dengfoc_target_power_port_is_disabled \
+    dengfoc_arduino_power_port_is_disabled
+#define dengfoc_target_power_port_snapshot dengfoc_arduino_power_port_snapshot
+#endif
+
+#endif /* DENGFOC_TARGET_POWER_PORT_H */

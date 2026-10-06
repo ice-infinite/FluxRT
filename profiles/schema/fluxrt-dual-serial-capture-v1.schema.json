@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fluxrt.local/schema/fluxrt-dual-serial-capture-v1.schema.json",
+  "title": "FluxRT read-only common-clock dual serial capture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "version",
+    "status",
+    "read_only",
+    "commands_sent",
+    "clock",
+    "sources",
+    "static_h2_association",
+    "artifacts",
+    "errors",
+    "parameter_approval",
+    "target_capability_approval"
+  ],
+  "properties": {
+    "contract": {"const": "fluxrt-dual-serial-capture"},
+    "version": {"const": 1},
+    "status": {"enum": ["capture-complete", "capture-failed"]},
+    "read_only": {"const": true},
+    "commands_sent": {"const": 0},
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "shared_origin", "origin_ns", "end_ns", "elapsed_s"],
+      "properties": {
+        "source": {"const": "time.monotonic_ns"},
+        "shared_origin": {"const": true},
+        "origin_ns": {"type": "integer", "minimum": 0},
+        "end_ns": {"type": "integer", "minimum": 0},
+        "elapsed_s": {"type": "number", "minimum": 0}
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["g431", "dengfoc"],
+      "properties": {
+        "g431": {"$ref": "#/$defs/source"},
+        "dengfoc": {"$ref": "#/$defs/source"}
+      }
+    },
+    "static_h2_association": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "dynamic_alignment_valid",
+        "g431_raw_window_start_s",
+        "g431_raw_window_end_s"
+      ],
+      "properties": {
+        "kind": {"const": "common-host-static-window-only"},
+        "dynamic_alignment_valid": {"const": false},
+        "g431_raw_window_start_s": {"type": ["number", "null"], "minimum": 0},
+        "g431_raw_window_end_s": {"type": ["number", "null"], "minimum": 0}
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "combined_lines_path",
+        "combined_lines_sha256",
+        "angle_csv_path",
+        "angle_csv_sha256"
+      ],
+      "properties": {
+        "combined_lines_path": {"const": "combined-lines.csv"},
+        "combined_lines_sha256": {"type": "string", "pattern": "^[0-9A-F]{64}$"},
+        "angle_csv_path": {"const": "dengfoc-angle.csv"},
+        "angle_csv_sha256": {"type": "string", "pattern": "^[0-9A-F]{64}$"}
+      }
+    },
+    "errors": {"type": "array", "items": {"type": "string"}},
+    "parameter_approval": {"const": "not-granted"},
+    "target_capability_approval": {"const": "not-granted"}
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port", "baud", "line_count", "first_host_time_s", "last_host_time_s"],
+      "properties": {
+        "port": {"type": "string", "minLength": 1},
+        "baud": {"type": "integer", "minimum": 1},
+        "line_count": {"type": "integer", "minimum": 0},
+        "first_host_time_s": {"type": ["number", "null"], "minimum": 0},
+        "last_host_time_s": {"type": ["number", "null"], "minimum": 0},
+        "flsi_raw_line_count": {"type": "integer", "minimum": 0},
+        "parsed_angle_sample_count": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

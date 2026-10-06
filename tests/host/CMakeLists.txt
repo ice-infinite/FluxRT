@@ -3,6 +3,22 @@ project(fluxrt_host_tests C)
 
 enable_testing()
 
+add_executable(foc_as5600_alignment_trial_tests
+    test_foc_as5600_alignment_trial.c
+    ../../foc/runtime/foc_as5600_alignment_trial.c
+)
+target_include_directories(foc_as5600_alignment_trial_tests PRIVATE
+    ../../foc/include
+)
+if(MSVC)
+    target_compile_options(foc_as5600_alignment_trial_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(foc_as5600_alignment_trial_tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
+endif()
+add_test(NAME foc_as5600_alignment_exact_envelope_and_hard_stop
+    COMMAND foc_as5600_alignment_trial_tests)
+
 add_executable(foc_arm_diagnostics_tests
     test_foc_arm_diagnostics.c
     ../../foc/runtime/foc_arm_diagnostics.c
@@ -400,6 +416,51 @@ endif()
 add_test(NAME foc_feedback_adapter_normalization
     COMMAND foc_feedback_adapter_tests)
 
+add_executable(foc_as5600_dengfoc_tests
+    test_foc_as5600_dengfoc.c
+    ../../foc/runtime/foc_as5600.c
+    ../../foc/runtime/foc_feedback_adapter.c
+    ../../foc/platform/esp32_dengfoc/foc_board_dengfoc_v04.c
+    ../../foc/platform/esp32_dengfoc/foc_dengfoc_as5600_port.c
+    ../../foc/platform/esp32_dengfoc/foc_dengfoc_current_sense.c
+    ../../foc/platform/esp32_dengfoc/foc_time_sync_dengfoc.c
+    ../../foc/runtime/foc_time_sync.c
+)
+target_include_directories(foc_as5600_dengfoc_tests PRIVATE
+    ../../foc/include
+    ../../foc/platform/esp32_dengfoc
+)
+target_compile_features(foc_as5600_dengfoc_tests PRIVATE c_std_11)
+if(MSVC)
+    target_compile_options(foc_as5600_dengfoc_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(foc_as5600_dengfoc_tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
+    target_link_libraries(foc_as5600_dengfoc_tests PRIVATE m)
+endif()
+add_test(NAME foc_as5600_dengfoc_profile_and_normalization
+    COMMAND foc_as5600_dengfoc_tests)
+
+add_executable(foc_dengfoc_power_stage_tests
+    test_foc_dengfoc_power_stage.c
+    ../../foc/platform/esp32_dengfoc/foc_board_dengfoc_v04.c
+    ../../foc/platform/esp32_dengfoc/foc_dengfoc_power_stage.c
+)
+target_include_directories(foc_dengfoc_power_stage_tests PRIVATE
+    ../../foc/include
+    ../../foc/platform/esp32_dengfoc
+)
+target_compile_features(foc_dengfoc_power_stage_tests PRIVATE c_std_11)
+if(MSVC)
+    target_compile_options(foc_dengfoc_power_stage_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(foc_dengfoc_power_stage_tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
+    target_link_libraries(foc_dengfoc_power_stage_tests PRIVATE m)
+endif()
+add_test(NAME foc_dengfoc_power_stage_default_off_and_fault_latch
+    COMMAND foc_dengfoc_power_stage_tests)
+
 add_executable(foc_config_apply_executor_tests
     test_foc_config_apply_executor.c
     ../../foc/runtime/foc_config_apply_executor.c
@@ -524,6 +585,39 @@ else()
 endif()
 add_test(NAME foc_advanced_power_trial_bounded_fail_closed
     COMMAND foc_advanced_power_trial_tests)
+
+add_executable(foc_sensorless_bridge_layout_tests
+    test_foc_sensorless_bridge.c
+)
+target_include_directories(foc_sensorless_bridge_layout_tests PRIVATE
+    ../../foc/include
+)
+target_compile_features(foc_sensorless_bridge_layout_tests PRIVATE c_std_11)
+if(MSVC)
+    target_compile_options(foc_sensorless_bridge_layout_tests PRIVATE /W4 /WX /utf-8)
+else()
+    target_compile_options(foc_sensorless_bridge_layout_tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
+endif()
+add_test(NAME foc_sensorless_bridge_fixed_layout
+    COMMAND foc_sensorless_bridge_layout_tests)
+
+add_executable(foc_sensorless_platform_default_off_tests
+    test_foc_sensorless_platform.c
+    ../../foc/platform/stm32g431/foc_sensorless_stm32g431.c
+)
+target_include_directories(foc_sensorless_platform_default_off_tests PRIVATE
+    ../../foc/include
+)
+target_compile_features(foc_sensorless_platform_default_off_tests PRIVATE c_std_11)
+if(MSVC)
+    target_compile_options(foc_sensorless_platform_default_off_tests PRIVATE /W4 /WX /utf-8)
+else()
+    target_compile_options(foc_sensorless_platform_default_off_tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
+endif()
+add_test(NAME foc_sensorless_platform_capability_default_zero
+    COMMAND foc_sensorless_platform_default_off_tests)
 
 add_executable(foc_motion_torque_trial_tests
     test_foc_motion_torque_trial.c
@@ -884,6 +978,72 @@ target_compile_definitions(foc_build_profile_advanced_candidate_test PRIVATE
 add_test(NAME foc_build_profile_advanced_candidate
     COMMAND foc_build_profile_advanced_candidate_test)
 
+add_executable(foc_build_profile_h3_dynamic_candidate_test
+    test_foc_build_profile.c
+    ../../applications/foc_lsi_identification.c)
+target_include_directories(foc_build_profile_h3_dynamic_candidate_test PRIVATE
+    ../../applications
+    ../../foc/include)
+target_compile_features(foc_build_profile_h3_dynamic_candidate_test PRIVATE c_std_11)
+target_compile_definitions(foc_build_profile_h3_dynamic_candidate_test PRIVATE
+    FLUXRT_DIAGNOSTIC_BUILD=1
+    FLUXRT_G431_PROFILE_ADVANCED_LAB=1
+    FOC_ADVANCED_CONTROL_CANDIDATE=1
+    FOC_H3_DYNAMIC_QUERY_CANDIDATE=1
+    TEST_EXPECTED_G431_PRODUCT_PROFILE_ID=2
+    TEST_EXPECT_H3_DYNAMIC_CANDIDATE=1)
+add_test(NAME foc_build_profile_h3_dynamic_candidate
+    COMMAND foc_build_profile_h3_dynamic_candidate_test)
+
+add_executable(foc_build_profile_as5600_truth_test
+    test_foc_build_profile.c
+    ../../applications/foc_lsi_identification.c)
+target_include_directories(foc_build_profile_as5600_truth_test PRIVATE
+    ../../applications
+    ../../foc/include)
+target_compile_features(foc_build_profile_as5600_truth_test PRIVATE c_std_11)
+target_compile_definitions(foc_build_profile_as5600_truth_test PRIVATE
+    FLUXRT_DIAGNOSTIC_BUILD=1
+    FLUXRT_G431_PROFILE_BASIC_DRIVE=1
+    FOC_AS5600_TRUTH_DIAGNOSTIC=1
+    TEST_EXPECTED_G431_PRODUCT_PROFILE_ID=1
+    TEST_EXPECT_AS5600_TRUTH=1)
+add_test(NAME foc_build_profile_as5600_truth
+    COMMAND foc_build_profile_as5600_truth_test)
+
+add_executable(foc_build_profile_as5600_alignment_test
+    test_foc_build_profile.c
+    ../../applications/foc_lsi_identification.c)
+target_include_directories(foc_build_profile_as5600_alignment_test PRIVATE
+    ../../applications
+    ../../foc/include)
+target_compile_features(foc_build_profile_as5600_alignment_test PRIVATE c_std_11)
+target_compile_definitions(foc_build_profile_as5600_alignment_test PRIVATE
+    FLUXRT_DIAGNOSTIC_BUILD=1
+    FLUXRT_G431_PROFILE_BASIC_DRIVE=1
+    FOC_AS5600_TRUTH_DIAGNOSTIC=1
+    FOC_AS5600_ALIGNMENT_CANDIDATE=1
+    TEST_EXPECTED_G431_PRODUCT_PROFILE_ID=1
+    TEST_EXPECT_AS5600_ALIGNMENT=1)
+add_test(NAME foc_build_profile_as5600_alignment
+    COMMAND foc_build_profile_as5600_alignment_test)
+
+add_executable(foc_build_profile_sensorless_candidate_test
+    test_foc_build_profile.c
+    ../../applications/foc_lsi_identification.c)
+target_include_directories(foc_build_profile_sensorless_candidate_test PRIVATE
+    ../../applications
+    ../../foc/include)
+target_compile_features(foc_build_profile_sensorless_candidate_test PRIVATE c_std_11)
+target_compile_definitions(foc_build_profile_sensorless_candidate_test PRIVATE
+    FLUXRT_DIAGNOSTIC_BUILD=1
+    FLUXRT_G431_PROFILE_ADVANCED_LAB=1
+    FOC_SENSORLESS_CONTROL_CANDIDATE=1
+    TEST_EXPECTED_G431_PRODUCT_PROFILE_ID=2
+    TEST_EXPECT_SENSORLESS_CANDIDATE=1)
+add_test(NAME foc_build_profile_sensorless_candidate
+    COMMAND foc_build_profile_sensorless_candidate_test)
+
 add_executable(foc_build_profile_power_candidate_test
     test_foc_build_profile.c
     ../../applications/foc_lsi_identification.c)
@@ -937,3 +1097,69 @@ target_include_directories(foc_native_fake_driver_test PRIVATE
     ../../foc/include)
 target_compile_features(foc_native_fake_driver_test PRIVATE c_std_11)
 add_test(NAME foc_native_fake_driver COMMAND foc_native_fake_driver_test)
+
+add_executable(foc_encoder_realtime_bridge_layout_test
+    test_foc_encoder_realtime_bridge.c)
+target_include_directories(foc_encoder_realtime_bridge_layout_test PRIVATE
+    ../../foc/include)
+target_compile_features(foc_encoder_realtime_bridge_layout_test PRIVATE c_std_11)
+if(MSVC)
+    target_compile_options(foc_encoder_realtime_bridge_layout_test PRIVATE /W4 /WX)
+else()
+    target_compile_options(foc_encoder_realtime_bridge_layout_test PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
+endif()
+add_test(NAME foc_encoder_realtime_bridge_layout
+    COMMAND foc_encoder_realtime_bridge_layout_test)
+
+add_executable(foc_time_sync_tests
+    test_foc_time_sync.c
+    ../../foc/runtime/foc_time_sync.c
+    ../../foc/platform/stm32g431/foc_time_sync_stm32g431.c
+    ../../foc/platform/esp32_dengfoc/foc_time_sync_dengfoc.c
+    ../../foc/platform/esp32_dengfoc/foc_board_dengfoc_v04.c)
+target_include_directories(foc_time_sync_tests PRIVATE
+    ../../foc/include
+    ../../foc/platform/stm32g431
+    ../../foc/platform/esp32_dengfoc)
+target_compile_features(foc_time_sync_tests PRIVATE c_std_11)
+if(MSVC)
+    target_compile_options(foc_time_sync_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(foc_time_sync_tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
+    target_link_libraries(foc_time_sync_tests PRIVATE m)
+endif()
+add_test(NAME foc_time_sync_fixed_spsc_and_fail_closed_identity
+    COMMAND foc_time_sync_tests)
+
+add_executable(foc_time_sync_wire_tests
+    test_foc_time_sync_wire.c
+    ../../foc/runtime/foc_time_sync_wire.c)
+target_include_directories(foc_time_sync_wire_tests PRIVATE
+    ../../foc/include)
+target_compile_features(foc_time_sync_wire_tests PRIVATE c_std_11)
+if(MSVC)
+    target_compile_options(foc_time_sync_wire_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(foc_time_sync_wire_tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
+endif()
+add_test(NAME foc_time_sync_wire_codec_fail_closed
+    COMMAND foc_time_sync_wire_tests)
+
+add_executable(foc_time_sync_toggle_plan_tests
+    test_foc_time_sync_toggle_plan.c
+    ../../foc/runtime/foc_time_sync_toggle_plan.c
+    ../../foc/runtime/foc_time_sync_wire.c)
+target_include_directories(foc_time_sync_toggle_plan_tests PRIVATE
+    ../../foc/include)
+target_compile_features(foc_time_sync_toggle_plan_tests PRIVATE c_std_11)
+if(MSVC)
+    target_compile_options(foc_time_sync_toggle_plan_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(foc_time_sync_toggle_plan_tests PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
+endif()
+add_test(NAME foc_time_sync_toggle_plan_fixed_capacity
+    COMMAND foc_time_sync_toggle_plan_tests)

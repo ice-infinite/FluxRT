@@ -1,0 +1,12 @@
+{
+  "contract": "fluxrt-h3-dynamic-board-capture",
+  "version": 1,
+  "status": "capture-failed",
+  "motor_power_enabled": true,
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "raw-lines.csv": "3E2CC4DBAE8FB8A323CD1EC62E3F40AE4FD375DC061DE501FF0D126BF8FD4361"
+  },
+  "error": "H3 result schema mismatch"
+}

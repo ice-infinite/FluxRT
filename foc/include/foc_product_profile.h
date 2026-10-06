@@ -84,6 +84,41 @@
 #error "Advanced FOC candidate requires the STM32G431RB Advanced Lab profile"
 #endif
 
+#if defined(FOC_SENSORLESS_CONTROL_CANDIDATE) && \
+    !defined(FLUXRT_G431_PROFILE_ADVANCED_LAB)
+#error "Sensorless FOC candidate requires the STM32G431RB Advanced Lab profile"
+#endif
+
+#if defined(FOC_H3_DYNAMIC_QUERY_CANDIDATE) && \
+    !defined(FLUXRT_G431_PROFILE_ADVANCED_LAB)
+#error "H3 dynamic query requires the STM32G431RB Advanced Lab profile"
+#endif
+
+#if defined(FOC_H3_DYNAMIC_QUERY_CANDIDATE) && \
+    !defined(FOC_ADVANCED_CONTROL_CANDIDATE)
+#error "H3 dynamic query requires the Advanced FOC candidate"
+#endif
+
+#if defined(FOC_AS5600_TRUTH_DIAGNOSTIC) && \
+    !defined(FLUXRT_G431_PROFILE_BASIC_DRIVE)
+#error "AS5600 truth diagnostic requires the STM32G431RB Basic Drive profile"
+#endif
+
+#if defined(FOC_AS5600_TRUTH_DIAGNOSTIC) && \
+    !defined(FLUXRT_DIAGNOSTIC_BUILD)
+#error "AS5600 truth diagnostic requires the Diagnostic build profile"
+#endif
+
+#if defined(FOC_AS5600_ALIGNMENT_CANDIDATE) && \
+    !defined(FOC_AS5600_TRUTH_DIAGNOSTIC)
+#error "AS5600 alignment candidate requires the AS5600 truth diagnostic"
+#endif
+
+#if defined(FOC_ADVANCED_CONTROL_CANDIDATE) && \
+    defined(FOC_SENSORLESS_CONTROL_CANDIDATE)
+#error "STM32G431RB Advanced Lab permits one large FOC candidate at a time"
+#endif
+
 #if defined(FOC_MOTION_CONTROL_CANDIDATE) && \
     !defined(FLUXRT_G431_PROFILE_MOTION_LAB)
 #error "Motion candidate requires the STM32G431RB Motion Lab profile"

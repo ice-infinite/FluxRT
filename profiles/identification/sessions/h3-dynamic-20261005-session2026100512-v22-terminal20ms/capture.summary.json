@@ -1,0 +1,12 @@
+{
+  "contract": "fluxrt-h3-dynamic-board-capture",
+  "version": 1,
+  "status": "capture-failed",
+  "motor_power_enabled": true,
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "raw-lines.csv": "12054F9EC2EFF1A2B903AC2C42D03D38495CD5D0D8D55D25D7092B9EF565ECDC"
+  },
+  "error": "AS5600 valid truth gap 14000 us exceeds 10000 us"
+}

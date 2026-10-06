@@ -1,0 +1,29 @@
+{
+  "contract": "fluxrt-h3-time-map",
+  "version": 1,
+  "motor_id": "DengFOC-M0-AS5600-on-G431",
+  "reference_firmware_sha256": "CE249C6B3E95AAF8EB62E0AE974109CFF4D39A794C1B34CEC799F0F231F32DF7",
+  "truth_firmware_sha256": "4BCB8E1C1F501D78B74EC66D8CA68F703A94FD195D9050F63A84A290872E496C",
+  "pole_pairs": 7,
+  "mechanical_direction": 1,
+  "electrical_offset_rad": 0.9658693323147879,
+  "reference_tick_hz": 12000,
+  "truth_tick_hz": 1000000,
+  "requirements": {
+    "minimum_anchor_count": 15,
+    "maximum_anchor_residual_ticks": 1.0,
+    "maximum_clock_drift_ppm": 100.0,
+    "maximum_truth_gap_ticks": 10000,
+    "maximum_truth_missing_samples": 3,
+    "maximum_anchors_outside_truth_window": 1,
+    "maximum_queries_outside_anchor_span": 25
+  },
+  "anchors_csv_path": "profiles/identification/sessions/h3-dynamic-20261005-session2026100513-deng250hz/anchors.csv",
+  "anchors_csv_sha256": "6922211EADE2D312ECFBAB6F406FA1B4DE885D101F6B286455D018948DADFAC4",
+  "truth_csv_path": "profiles/identification/sessions/h3-dynamic-20261005-session2026100513-deng250hz/truth.csv",
+  "truth_csv_sha256": "A745E400560AF24936D79399F38CCCC9C2E641968C301597E277F9807C1BADCB",
+  "queries_csv_path": "profiles/identification/sessions/h3-dynamic-20261005-session2026100513-deng250hz/queries.csv",
+  "queries_csv_sha256": "33AF2E7924E63A7021FD9472BF540158DE36456A92E52DA58DD11B4AC4DDE751",
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted"
+}

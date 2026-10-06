@@ -1,0 +1,43 @@
+{
+  "contract": "fluxrt-h3-partial-diagnostic",
+  "version": 1,
+  "status": "partial-diagnostic-not-approved",
+  "source_capture_status": "capture-failed",
+  "source_raw_sha256": "7BE43D5914411693E26DE8750EE233C70029BD76FA98A916710DBA4B6A0F9CC2",
+  "motor_power_enabled": true,
+  "reported_anchor_count": 16,
+  "g431_anchor_count": 16,
+  "dengfoc_anchor_count": 15,
+  "paired_anchor_count": 15,
+  "g431_only_sequences": [
+    5000
+  ],
+  "dengfoc_only_sequences": [],
+  "query_count": 0,
+  "query_alignment_status": "unavailable-source-anchor-domain",
+  "loopback": {
+    "valid_count": 15,
+    "timer_tick": 100,
+    "delta_cycles_min": -121,
+    "delta_cycles_max": 49,
+    "delta_cycles_mean": -7.666666666666667,
+    "delta_cycles_median": 49,
+    "absolute_max_us": 0.711764705882353
+  },
+  "clock_mapping": {
+    "reference_tick_hz": 170000000,
+    "truth_tick_hz": 1000000,
+    "slope_reference_ticks_per_truth_tick": 169.99606390038238,
+    "clock_drift_ppm": -23.153527162422805,
+    "maximum_anchor_residual_ticks": 240.2427215576172,
+    "rms_anchor_residual_ticks": 131.82589844372163,
+    "maximum_anchor_residual_us": 1.4131924797506894,
+    "rms_anchor_residual_us": 0.7754464614336566
+  },
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "paired-anchors.csv": "F71B77CC70A4E078AA6125B72A3E93449EC5CEB1C68A35491B6D21D356005235",
+    "bracketed-queries.csv": "95EAAFD3706A9AD19DF1073EA18E328C82E257187B33D8D7BE1207874C56B437"
+  }
+}

@@ -102,8 +102,8 @@
         "observer_run_reliability", "angle_compensation", "inverter_voltage_model"
       ],
       "properties": {
-        "struct_size": {"type": "integer", "enum": [284, 296]},
-        "config_version": {"type": "integer", "enum": [8, 11]},
+        "struct_size": {"type": "integer", "enum": [284, 296, 300]},
+        "config_version": {"type": "integer", "enum": [8, 11, 12]},
         "observer_backend": {"type": "integer", "enum": [0, 1, 2]},
         "observer_enable": {"type": "integer", "enum": [0, 1]},
         "closed_loop_enable": {"type": "integer", "enum": [0, 1]},
@@ -130,6 +130,7 @@
         "observer_smo_k_slide_v": {"$ref": "#/$defs/finiteNumber"},
         "observer_smo_boundary_a": {"$ref": "#/$defs/finiteNumber"},
         "observer_emf_filter_alpha": {"$ref": "#/$defs/finiteNumber"},
+        "observer_emf_phase_advance_ratio": {"$ref": "#/$defs/finiteNumber"},
         "observer_pll_kp": {"$ref": "#/$defs/finiteNumber"},
         "observer_acquisition_pll_kp_ratio": {"$ref": "#/$defs/finiteNumber"},
         "observer_pll_ki": {"$ref": "#/$defs/finiteNumber"},
@@ -201,6 +202,21 @@
             "properties": {"struct_size": {"const": 296}},
             "required": [
               "startup_alignment_current_a",
+              "observer_acquisition_maximum_phase_error_rad",
+              "handoff_torque_support_ratio"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {"config_version": {"const": 12}},
+            "required": ["config_version"]
+          },
+          "then": {
+            "properties": {"struct_size": {"const": 300}},
+            "required": [
+              "startup_alignment_current_a",
+              "observer_emf_phase_advance_ratio",
               "observer_acquisition_maximum_phase_error_rad",
               "handoff_torque_support_ratio"
             ]

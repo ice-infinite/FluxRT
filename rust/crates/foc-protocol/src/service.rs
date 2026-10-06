@@ -248,7 +248,7 @@ mod tests {
             IdentityPayload {
                 schema_version: 1,
                 product_contract_version: 0x0001_0000,
-                firmware_abi_version: 0x0015_0000,
+                firmware_abi_version: 0x0016_0000,
                 config_abi_version: 0x0004_0000,
                 board_id: 0x4311_6001,
                 motor_id: 0x2804_1007,

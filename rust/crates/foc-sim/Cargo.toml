@@ -40,3 +40,19 @@ path = "src/advanced_contract_main.rs"
 [[bin]]
 name = "foc-full-speed-contract-check"
 path = "src/full_speed_contract_main.rs"
+
+[[bin]]
+name = "foc-hfi-contract-check"
+path = "src/hfi_contract_main.rs"
+
+[[bin]]
+name = "foc-hfi-dynamic-contract-check"
+path = "src/hfi_dynamic_contract_main.rs"
+
+[[bin]]
+name = "foc-sensorless-full-speed-contract-check"
+path = "src/sensorless_full_speed_contract_main.rs"
+
+[[bin]]
+name = "foc-lsi-h2-replay-contract-check"
+path = "src/lsi_h2_replay_contract_main.rs"

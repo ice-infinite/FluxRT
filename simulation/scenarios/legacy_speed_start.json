@@ -6,7 +6,7 @@
   "seed": 0,
   "units": "SI",
   "profile_id": "fluxrt.stm32g431.ihm16m1.gbm2804h.reference",
-  "profile_revision": 1,
+  "profile_revision": 2,
   "duration_s": 3.0,
   "trace_decimation": 10,
   "initial_velocity_rad_s": 0.0,

@@ -45,7 +45,7 @@ enum
 
 /* record_crc32 covers every preceding word, including runtime_config_crc32 and
  * approval_flags. It does not cover itself. runtime_config_crc32 is computed by
- * Rust over all 74 ABI words of foc_runtime_config_t. */
+ * Rust over all 75 ABI words of foc_runtime_config_t. */
 typedef struct
 {
     uint32_t magic;

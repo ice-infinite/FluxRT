@@ -409,6 +409,13 @@ foc_status_t foc_platform_get_telemetry(foc_telemetry_t *telemetry);
  * target-side realtime probe. Management code must not start console/logging
  * traffic in that window because some board UART backends briefly mask IRQs. */
 uint32_t foc_platform_realtime_work_active(void);
+/* Identification/H3 helper for an ISR that already owns a same-clock-domain
+ * edge timestamp.  Returns the latest injected-control sample count at or
+ * before edge_cycle_tick.  This is a single-word, non-blocking snapshot: it
+ * must not refresh diagnostics, mask interrupts, or call Rust. */
+uint32_t foc_platform_time_sync_control_tick_isr(
+    uint32_t edge_cycle_tick,
+    uint32_t *control_tick);
 /* 复制同拍时序统计。与诊断里的三个独立峰值不同，这里的 total 与三个分段
  * 来自同一拍，可以互相比较。
  * Copies the same-tick timing statistics. Unlike the three independent peaks in
@@ -461,5 +468,101 @@ void foc_platform_trial_disarm(void);
  * still only a request; all live hardware preflight gates run before it is
  * consumed. Other profiles return FOC_STATUS_DISABLED/NOT_CONFIGURED. */
 foc_status_t foc_platform_lsi_start(uint32_t confirmation);
+
+/* Identification-only no-power Break2 self-test.  It may briefly set TIM1
+ * MOE only while CH1..CH3 and every external gate remain disabled, then uses
+ * the timer's internal B2G event to prove that hardware clears MOE.  This is
+ * not evidence for the external BKIN2 pin path and does not grant the
+ * sensorless HARDWARE_FAST_SHUTDOWN capability. */
+#define FOC_LSI_BREAK_TEST_RESULT_VERSION (1UL)
+typedef struct
+{
+    uint32_t version;
+    uint32_t before_sr;
+    uint32_t before_bdtr;
+    uint32_t armed_bdtr;
+    uint32_t event_sr;
+    uint32_t event_bdtr;
+    uint32_t rearm_facts;
+    uint32_t after_sr;
+    uint32_t after_bdtr;
+    uint32_t gate_low_before;
+    uint32_t gate_low_after;
+    uint32_t phase_outputs_before;
+    uint32_t phase_outputs_after;
+} foc_lsi_break_test_result_t;
+
+foc_status_t foc_platform_lsi_break2_self_test(
+    uint32_t confirmation,
+    foc_lsi_break_test_result_t *result);
+
+/* Identification-only, no-power external Break2 network test.  PB12 is
+ * temporarily configured as an open-drain low stimulus so the assembled
+ * IHM16M1 route PB12->R37->EN_FAULT->R35->PA11->TIM1_BKIN2 can be checked
+ * without asking the operator to short a board node.  The original PB12
+ * configuration is restored before return.  This proves the passive board
+ * route and timer action, but not the STSPIN830's own fault transistor or the
+ * Break ISR software path. */
+#define FOC_LSI_BREAK_EXTERNAL_TEST_RESULT_VERSION (1UL)
+typedef struct
+{
+    uint32_t version;
+    uint32_t before_sr;
+    uint32_t before_bdtr;
+    uint32_t armed_bdtr;
+    uint32_t event_sr;
+    uint32_t event_bdtr;
+    uint32_t rearm_facts;
+    uint32_t after_sr;
+    uint32_t after_bdtr;
+    uint32_t line_high_before;
+    uint32_t line_low_event;
+    uint32_t line_high_after;
+    uint32_t stimulus_restored;
+    uint32_t gate_low_before;
+    uint32_t gate_low_after;
+    uint32_t phase_outputs_before;
+    uint32_t phase_outputs_after;
+} foc_lsi_break_external_test_result_t;
+
+foc_status_t foc_platform_lsi_break2_external_self_test(
+    uint32_t confirmation,
+    foc_lsi_break_external_test_result_t *result);
+
+/* Identification-only one-shot Break IRQ test.  It uses the same no-power
+ * PB12 open-drain stimulus, but enables BIE and deliberately leaves the normal
+ * ISR fault latch intact.  A passing call therefore ends in the faulted,
+ * outputs-off state and requires a hardware reset before any later test. */
+#define FOC_LSI_BREAK_ISR_TEST_RESULT_VERSION (1UL)
+typedef struct
+{
+    uint32_t version;
+    uint32_t before_sr;
+    uint32_t before_bdtr;
+    uint32_t armed_bdtr;
+    uint32_t event_sr;
+    uint32_t event_bdtr;
+    uint32_t break_count_before;
+    uint32_t break_count_after;
+    uint32_t fault_count_before;
+    uint32_t fault_count_after;
+    uint32_t fault_epoch_before;
+    uint32_t fault_epoch_after;
+    uint32_t safety_state_after;
+    uint32_t line_high_before;
+    uint32_t line_low_event;
+    uint32_t line_high_after;
+    uint32_t stimulus_restored;
+    uint32_t gate_low_before;
+    uint32_t gate_low_after;
+    uint32_t phase_outputs_before;
+    uint32_t phase_outputs_after;
+    uint32_t break_irq_disabled_after;
+    uint32_t timer_stopped_after;
+} foc_lsi_break_isr_test_result_t;
+
+foc_status_t foc_platform_lsi_break2_isr_self_test(
+    uint32_t confirmation,
+    foc_lsi_break_isr_test_result_t *result);
 
 #endif

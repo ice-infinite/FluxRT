@@ -1,0 +1,37 @@
+{
+  "contract": "fluxrt-h3-board-capture",
+  "version": 1,
+  "status": "captured-not-approved",
+  "anchor_count": 20,
+  "first_edge_sequence": 161,
+  "last_edge_sequence": 180,
+  "truth_sample_count": 8294,
+  "loopback": {
+    "valid_count": 20,
+    "timer_tick": 100,
+    "delta_cycles_min": -121,
+    "delta_cycles_max": 49,
+    "delta_cycles_mean": 40.5,
+    "delta_cycles_median": 49.0,
+    "absolute_max_us": 0.711764705882353
+  },
+  "clock_mapping": {
+    "reference_tick_hz": 170000000,
+    "truth_tick_hz": 1000000,
+    "slope_reference_ticks_per_truth_tick": 169.99603416929372,
+    "clock_drift_ppm": -23.328415919232626,
+    "maximum_anchor_residual_ticks": 225.45635986328125,
+    "rms_anchor_residual_ticks": 94.79314059271151,
+    "maximum_anchor_residual_us": 1.3262138815487132,
+    "rms_anchor_residual_us": 0.5576067093688912
+  },
+  "motor_power_enabled": false,
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "anchors.csv": "D873A735F2EB3027DFAE8586E7FD48772A12638704B2C2122A3F6048D6842D16",
+    "raw-anchors.csv": "017984F62927CD32801A4270360AEDB75A5C8A5CB58E8A515FB9BE6138BC6F25",
+    "truth.csv": "A5FE28309504A730247D52ACFEA0153F82F9725EFDCF02A2450C0B6D9BB3B65C",
+    "raw-lines.csv": "52B7A676C1AA599F4E83A5416682D2683F18B9DED8043C55B36BC8B19FB5073B"
+  }
+}

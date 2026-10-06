@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <string.h>
 
 #include "foc_lsi_management.h"
 
@@ -35,12 +36,47 @@ int main(void)
         ((1U + config.offset_sample_count + config.bias_settle_ticks +
           (2U * config.pulse_ticks_per_polarity * config.pulse_pair_count) +
           config.cooldown_zero_ticks) != 377U) ||
-        (config.bias_current_a != 0.2f) ||
-        (config.perturbation_voltage_v != 0.4f) ||
+        (config.bias_current_a != FOC_LSI_H2_FIRST_MAX_BIAS_CURRENT_A) ||
+        (config.perturbation_voltage_v !=
+         FOC_LSI_H2_FIRST_MAX_PERTURBATION_V) ||
+        (config.current_trip_a != FOC_LSI_H2_FIRST_CURRENT_TRIP_A) ||
         (config.max_active_ticks != 600U) ||
         (config.total_timeout_ticks != 6000U))
     {
         return 1;
+    }
+    {
+        foc_lsi_actuation_config_t actuation = {0};
+        foc_lsi_actuation_config_t original;
+        foc_lsi_config_t widened = config;
+
+        actuation.struct_size = sizeof(actuation);
+        actuation.version = FOC_LSI_ACTUATION_CONFIG_VERSION;
+        actuation.maximum_bias_current_a = 0.2f;
+        actuation.maximum_perturbation_voltage_v = 0.4f;
+        actuation.current_trip_a = 1.15f;
+        actuation.minimum_bus_voltage_v = 7.0f;
+        actuation.maximum_bus_voltage_v = 18.0f;
+        if ((foc_lsi_management_apply_h2_actuation_envelope(
+                 &config, &actuation) == 0U) ||
+            (actuation.maximum_bias_current_a !=
+             FOC_LSI_H2_FIRST_MAX_BIAS_CURRENT_A) ||
+            (actuation.maximum_perturbation_voltage_v !=
+             FOC_LSI_H2_FIRST_MAX_PERTURBATION_V) ||
+            (actuation.current_trip_a != FOC_LSI_H2_FIRST_CURRENT_TRIP_A))
+        {
+            return 15;
+        }
+
+        widened.perturbation_voltage_v = 0.4f;
+        widened.current_trip_a = 1.15f;
+        original = actuation;
+        if ((foc_lsi_management_apply_h2_actuation_envelope(
+                 &widened, &actuation) != 0U) ||
+            (memcmp(&actuation, &original, sizeof(actuation)) != 0))
+        {
+            return 16;
+        }
     }
     if ((foc_lsi_management_init(&management) == 0U) ||
         (foc_lsi_management_get_status(&management, &status) == 0U) ||

@@ -400,10 +400,40 @@ impl CurrentLoop {
         };
         let injection_limited =
             injection_active && final_magnitude > limit && final_magnitude > 0.0;
+        let mut applied_injection = policy.injection_voltage_alpha_beta;
         if injection_limited {
             let scale = limit / final_magnitude;
             voltage_alpha_beta.alpha *= scale;
             voltage_alpha_beta.beta *= scale;
+            applied_injection.alpha *= scale;
+            applied_injection.beta *= scale;
+            // The final circle is downstream of stationary-frame injection, so
+            // saturation here also reduces the fundamental vector that the PI
+            // actually applied. Reconstruct that applied fundamental (the
+            // injection is scaled by the same factor), rotate it back to dq and
+            // track both integrators. Without this second anti-windup point a
+            // persistent HFI request can silently wind the current PI against
+            // headroom that no longer exists.
+            if policy.vector_anti_windup {
+                let applied_fundamental = AlphaBeta {
+                    alpha: voltage_alpha_beta.alpha - applied_injection.alpha,
+                    beta: voltage_alpha_beta.beta - applied_injection.beta,
+                };
+                voltage_dq = Dq {
+                    d: applied_fundamental.alpha * reverse_park_cos
+                        + applied_fundamental.beta * reverse_park_sin,
+                    q: -applied_fundamental.alpha * reverse_park_sin
+                        + applied_fundamental.beta * reverse_park_cos,
+                };
+                let tracked_id_pi = voltage_dq.d - policy.voltage_feedforward_dq.d;
+                let tracked_iq_pi = voltage_dq.q - policy.voltage_feedforward_dq.q;
+                let _ = self
+                    .id_pi
+                    .track_output_from_last_error(&params.id_pi, tracked_id_pi);
+                let _ = self
+                    .iq_pi
+                    .track_output_from_last_error(&params.iq_pi, tracked_iq_pi);
+            }
         }
         let duty_window_valid = policy.minimum_duty.is_finite()
             && policy.maximum_duty.is_finite()
@@ -475,10 +505,12 @@ impl CurrentLoop {
                 current_dq,
                 voltage_dq,
                 voltage_alpha_beta,
+                applied_injection_alpha_beta: applied_injection,
                 // 机械角速度 [rad/s] → 机械转速 [rpm]：乘 30/pi。
                 // Mechanical speed [rad/s] to [rpm]: multiply by 30/pi.
                 measured_speed_rpm: feedback.rotor.mechanical_speed_rad_s * 30.0 / PI,
                 voltage_limited: voltage_limited || injection_limited,
+                injection_limited,
             },
         )
     }
@@ -1031,6 +1063,66 @@ mod tests {
         assert!(pwm.is_valid());
         assert!(telemetry.voltage_limited);
         assert!(final_magnitude <= 5.0 + 1.0e-5);
+    }
+
+    #[test]
+    fn injection_circle_limit_back_calculates_current_pi_before_next_tick() {
+        let mut params = st_gbm2804_reference_parameters();
+        params.id_pi = foc_algorithm::PiParam {
+            kp: 0.0,
+            ki: 1_000.0,
+            ts: 0.001,
+            out_min: -20.0,
+            out_max: 20.0,
+            integrator_min: -20.0,
+            integrator_max: 20.0,
+        };
+        let feedback = FeedbackSnapshot {
+            currents: PhaseCurrents::default(),
+            dc_bus_voltage: 12.0,
+            rotor: RotorFeedback::default(),
+        };
+        let frame = PrecomputedCurrentFrame {
+            current_dq: Dq::default(),
+            base_sin: 0.0,
+            base_cos: 1.0,
+        };
+        let saturated_policy = CurrentLoopPolicy {
+            injection_voltage_alpha_beta: AlphaBeta {
+                alpha: 10.0,
+                beta: 0.0,
+            },
+            voltage_limit_v: 2.0,
+            vector_anti_windup: true,
+            ..CurrentLoopPolicy::default()
+        };
+        let mut tracked = CurrentLoop::default();
+        let (_, limited) = tracked.update_from_precomputed_current_frame_with_policy_and_math(
+            &params,
+            &feedback,
+            CurrentCommand {
+                id_ref_a: 1.0,
+                iq_ref_a: 0.0,
+            },
+            ControlAngleOffsets::default(),
+            frame,
+            saturated_policy,
+            &mut CpuMath,
+        );
+        assert!(limited.voltage_limited);
+        assert!(limited.voltage_dq.d < 0.2);
+
+        let (_, released) = tracked.update_from_precomputed_current_frame_with_policy_and_math(
+            &params,
+            &feedback,
+            CurrentCommand::default(),
+            ControlAngleOffsets::default(),
+            frame,
+            CurrentLoopPolicy::default(),
+            &mut CpuMath,
+        );
+        assert!(released.voltage_dq.d < 0.2);
+        assert!(!released.voltage_limited);
     }
 
     #[test]

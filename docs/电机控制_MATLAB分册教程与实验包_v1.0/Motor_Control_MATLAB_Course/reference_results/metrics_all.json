@@ -1,0 +1,111 @@
+{
+  "L01": {
+    "sum_abc_max": 8.215650382226158e-15,
+    "magnitude_error": 4.440892098500626e-15
+  },
+  "L02": {
+    "RL_max_error": 5.3290705182007514e-14,
+    "time_constant_s": 0.002
+  },
+  "L03": {
+    "sixstep_relative_ripple": 0.1403015320431413,
+    "sine_relative_ripple": 1.538370149106851e-15
+  },
+  "L04": {
+    "dq_error": 1.7763568394002505e-15,
+    "id_offset_mean": 1.5529142706151235,
+    "iq_offset_mean": 5.79555495773441
+  },
+  "L05": {
+    "power_residual_max": 2.842170943040401e-14,
+    "final_iq": 4.0000264227652655
+  },
+  "L06": {
+    "reconstruction_error": 1.0658141036401503e-14,
+    "duty_min": 0.010000000000000009,
+    "duty_max": 0.99
+  },
+  "L07": {
+    "final_error_slow": 7.105427357601002e-15,
+    "final_error_fast": 8.881784197001252e-16
+  },
+  "L08": {
+    "windup_peak": 169.9612137497675,
+    "aw_integral_peak": 21.361371577596937,
+    "delay4_rms": 9.946149605260407e-14
+  },
+  "L09": {
+    "edge_RMS_error": 3.9999616404220015,
+    "center_RMS_error": 0.002598431444391809,
+    "LSB_A": 0.008056640624999998
+  },
+  "L10": {
+    "rms_speed12": 14.552515325659355,
+    "rms_speed18": 0.17319983575792783,
+    "highspeed_delay_deg": 5.040000000000002
+  },
+  "L11": {
+    "final_speed_error": 0.0007915601410672934,
+    "max_voltage": 18.32109658326482,
+    "max_current": 8.002363812171003,
+    "offset_final_id": -0.36853984076049356
+  },
+  "L12": {
+    "smo_comp_rms_deg": 1.4209446071620326,
+    "low_emf_rms_deg": 14.6215137490974,
+    "high_emf_rms_deg": 0.35782886715912376
+  },
+  "L13": {
+    "max_current_saving_A": 0.574327050351993,
+    "recomputed_torque_error": 1.1102230246251565e-16
+  },
+  "L14": {
+    "current_max": 11.998541578041891,
+    "voltage_max": 27.71054939621371,
+    "highspeed_torque": 0.23046000000000003
+  },
+  "L15": {
+    "tracking_RMS_noFF": 0.3369097996144745,
+    "tracking_RMS_FF": 0.0004687361579220353
+  },
+  "L16": {
+    "resonance_undamped_Hz": 24.656177762459993,
+    "antiresonance_undamped_Hz": 10.065842420897408
+  },
+  "L17": {
+    "peak_contact_soft": 3.6177467487759474,
+    "peak_contact_stiff": 22.163004564469723
+  },
+  "L18": {
+    "analytic_final_no_sink": 102.400284090515,
+    "numeric_final_no_sink": 102.41626291312775,
+    "max_braked_voltage": 52.05771061375816,
+    "initial_mechanical_J": 9.0
+  },
+  "L19": {
+    "unsafe_permission_count": 0.0
+  },
+  "L20": {
+    "R_est_Ohm": 0.2000159433216492,
+    "L_est_H": 0.0003999879460218419,
+    "R_relative_error": 7.971660824598881e-05,
+    "L_relative_error": 3.0134945395310234e-05,
+    "condition_Phi": 1.2236733957151906
+  },
+  "L21": {
+    "four_axis_budget_us": 42.0,
+    "four_axis_CAN_fraction": 1.2
+  },
+  "L22": {
+    "d_max_error": 3.690049052240685e-05,
+    "q_max_error": 3.138743340974637e-05
+  },
+  "L23": {
+    "microstep_mechanical_deg": 0.11250000000000002,
+    "static_load_error_deg": 0.3491520624744418
+  },
+  "L24": {
+    "final_temperature_C": 91.39789659159409,
+    "gate_drive_W": 0.006
+  }
+}

@@ -718,7 +718,7 @@ pub unsafe extern "C" fn foc_rust_feedback_stage_config_update(
     bundle.axis.direction = update.axis_direction;
     bundle.calibration.valid_flags |= update.calibration_flags_to_set;
     match FeedbackMode::try_from(update.feedback_mode) {
-        Ok(FeedbackMode::IncrementalEncoder) => {
+        Ok(FeedbackMode::IncrementalEncoder | FeedbackMode::AbsoluteEncoder) => {
             bundle.calibration.encoder_offset_rad = update.encoder_offset_rad;
             bundle.calibration.encoder_counts_per_revolution = update.encoder_counts_per_revolution;
         }

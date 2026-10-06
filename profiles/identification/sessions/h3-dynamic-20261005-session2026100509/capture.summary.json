@@ -1,0 +1,12 @@
+{
+  "contract": "fluxrt-h3-dynamic-board-capture",
+  "version": 1,
+  "status": "capture-failed",
+  "motor_power_enabled": true,
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "raw-lines.csv": "B908656DF5D2E8207D2212FA88F984E82448EC1076D9FBBEDF4B7BFDE16FB8E5"
+  },
+  "error": "AS5600 truth contains an invalid sample"
+}

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fluxrt.local/schema/fluxrt-h3-bidirectional-consistency-v1.schema.json",
+  "title": "FluxRT H3 forward/reverse consistency manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract", "version", "forward", "reverse", "requirements",
+    "parameter_approval", "target_capability_approval"
+  ],
+  "properties": {
+    "contract": {"const": "fluxrt-h3-bidirectional-consistency"},
+    "version": {"const": 1},
+    "forward": {"$ref": "#/$defs/side"},
+    "reverse": {"$ref": "#/$defs/side"},
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimum_anchor_count", "minimum_query_count", "minimum_reliable_sample_count",
+        "maximum_absolute_clock_drift_ppm", "maximum_anchor_residual_ticks",
+        "maximum_rms_angle_error_rad", "maximum_angle_error_rad",
+        "maximum_alignment_candidate_deviation_rad", "maximum_alignment_offset_delta_rad",
+        "maximum_terminal_speed_magnitude_delta_rpm", "maximum_rms_angle_error_delta_rad",
+        "maximum_angle_error_delta_rad"
+      ],
+      "properties": {
+        "minimum_anchor_count": {"type": "integer", "minimum": 3},
+        "minimum_query_count": {"type": "integer", "minimum": 1},
+        "minimum_reliable_sample_count": {"type": "integer", "minimum": 1},
+        "maximum_absolute_clock_drift_ppm": {"type": "number", "minimum": 0},
+        "maximum_anchor_residual_ticks": {"type": "number", "minimum": 0},
+        "maximum_rms_angle_error_rad": {"type": "number", "minimum": 0},
+        "maximum_angle_error_rad": {"type": "number", "minimum": 0},
+        "maximum_alignment_candidate_deviation_rad": {"type": "number", "minimum": 0},
+        "maximum_alignment_offset_delta_rad": {"type": "number", "minimum": 0},
+        "maximum_terminal_speed_magnitude_delta_rpm": {"type": "number", "minimum": 0},
+        "maximum_rms_angle_error_delta_rad": {"type": "number", "minimum": 0},
+        "maximum_angle_error_delta_rad": {"type": "number", "minimum": 0}
+      }
+    },
+    "parameter_approval": {"const": "not-granted"},
+    "target_capability_approval": {"const": "not-granted"}
+  },
+  "$defs": {
+    "side": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commanded_direction", "capture_summary_path", "capture_summary_sha256",
+        "time_map_manifest_path", "time_map_manifest_sha256", "time_map_result_path",
+        "time_map_result_sha256", "alignment_offset_result_path",
+        "alignment_offset_result_sha256"
+      ],
+      "properties": {
+        "commanded_direction": {"enum": [-1, 1]},
+        "capture_summary_path": {"type": "string", "minLength": 1},
+        "capture_summary_sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+        "time_map_manifest_path": {"type": "string", "minLength": 1},
+        "time_map_manifest_sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+        "time_map_result_path": {"type": "string", "minLength": 1},
+        "time_map_result_sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+        "alignment_offset_result_path": {"type": "string", "minLength": 1},
+        "alignment_offset_result_sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"}
+      }
+    }
+  }
+}

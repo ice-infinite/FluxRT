@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fluxrt.local/schema/fluxrt-h3-time-map-v1.schema.json",
+  "title": "FluxRT H3 dynamic truth/control-tick time mapping manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "version",
+    "motor_id",
+    "reference_firmware_sha256",
+    "truth_firmware_sha256",
+    "pole_pairs",
+    "mechanical_direction",
+    "electrical_offset_rad",
+    "reference_tick_hz",
+    "truth_tick_hz",
+    "requirements",
+    "anchors_csv_path",
+    "anchors_csv_sha256",
+    "truth_csv_path",
+    "truth_csv_sha256",
+    "queries_csv_path",
+    "queries_csv_sha256",
+    "parameter_approval",
+    "target_capability_approval"
+  ],
+  "properties": {
+    "contract": {"const": "fluxrt-h3-time-map"},
+    "version": {"const": 1},
+    "motor_id": {"type": "string", "minLength": 1},
+    "reference_firmware_sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "truth_firmware_sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "pole_pairs": {"type": "integer", "minimum": 1, "maximum": 255},
+    "mechanical_direction": {"enum": [-1, 1]},
+    "electrical_offset_rad": {"type": "number"},
+    "reference_tick_hz": {"type": "integer", "minimum": 1},
+    "truth_tick_hz": {"type": "integer", "minimum": 1},
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimum_anchor_count",
+        "maximum_anchor_residual_ticks",
+        "maximum_clock_drift_ppm",
+        "maximum_truth_gap_ticks"
+      ],
+      "properties": {
+        "minimum_anchor_count": {"type": "integer", "minimum": 3},
+        "maximum_anchor_residual_ticks": {"type": "number", "minimum": 0},
+        "maximum_clock_drift_ppm": {"type": "number", "minimum": 0},
+        "maximum_truth_gap_ticks": {"type": "integer", "minimum": 1},
+        "maximum_truth_missing_samples": {"type": "integer", "minimum": 0},
+        "maximum_anchors_outside_truth_window": {"type": "integer", "minimum": 0},
+        "maximum_queries_outside_anchor_span": {"type": "integer", "minimum": 0}
+      }
+    },
+    "anchors_csv_path": {"type": "string", "minLength": 1},
+    "anchors_csv_sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "truth_csv_path": {"type": "string", "minLength": 1},
+    "truth_csv_sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "queries_csv_path": {"type": "string", "minLength": 1},
+    "queries_csv_sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"},
+    "parameter_approval": {"const": "not-granted"},
+    "target_capability_approval": {"const": "not-granted"}
+  }
+}

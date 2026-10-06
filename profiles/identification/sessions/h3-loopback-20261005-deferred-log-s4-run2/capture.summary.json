@@ -1,0 +1,12 @@
+{
+  "contract": "fluxrt-h3-board-capture",
+  "version": 1,
+  "status": "capture-failed",
+  "motor_power_enabled": false,
+  "parameter_approval": "not-granted",
+  "target_capability_approval": "not-granted",
+  "artifacts": {
+    "raw-lines.csv": "94EB7A0A1BF4F5ECB1F900BB96A07EEC08842CCEFC847F2B388A41C0098950BA"
+  },
+  "error": "H3 transmitter init did not reach ABI v3 READY"
+}

@@ -1530,7 +1530,7 @@ mod tests {
 
     #[test]
     fn runtime_config_crc_probe() {
-        assert_eq!(current_runtime_config_crc32().unwrap(), "0x9835ee59");
+        assert_eq!(current_runtime_config_crc32().unwrap(), "0x51d3b0a5");
     }
 
     #[test]

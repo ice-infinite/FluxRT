@@ -1,0 +1,97 @@
+{
+  "1": [
+    "L01_abc",
+    "L01_vector"
+  ],
+  "2": [
+    "L02_rl",
+    "L02_mechanical"
+  ],
+  "3": [
+    "L03_commutation",
+    "L03_power"
+  ],
+  "4": [
+    "L04_dq"
+  ],
+  "5": [
+    "L05_dq",
+    "L05_energy"
+  ],
+  "6": [
+    "L06_duty",
+    "L06_switching"
+  ],
+  "7": [
+    "L07_response",
+    "L07_voltage"
+  ],
+  "8": [
+    "L08_aw",
+    "L08_integral",
+    "L08_delay"
+  ],
+  "9": [
+    "L09_samples",
+    "L09_error"
+  ],
+  "10": [
+    "L10_angle",
+    "L10_speed"
+  ],
+  "11": [
+    "L11_speed",
+    "L11_current",
+    "L11_voltage",
+    "L11_fault_effect"
+  ],
+  "12": [
+    "L12_emf",
+    "L12_angle",
+    "L12_low_speed"
+  ],
+  "13": [
+    "L13_currents",
+    "L13_saving"
+  ],
+  "14": [
+    "L14_envelope",
+    "L14_idiq"
+  ],
+  "15": [
+    "L15_position",
+    "L15_error"
+  ],
+  "16": [
+    "L16_resonance"
+  ],
+  "17": [
+    "L17_position",
+    "L17_contact"
+  ],
+  "18": [
+    "L18_bus",
+    "L18_power"
+  ],
+  "19": [
+    "L19_states"
+  ],
+  "20": [
+    "L20_fit",
+    "L20_residual"
+  ],
+  "21": [
+    "L21_budget"
+  ],
+  "22": [
+    "L22_quantization"
+  ],
+  "23": [
+    "L23_induction",
+    "L23_stepper"
+  ],
+  "24": [
+    "L24_temperature",
+    "L24_losses"
+  ]
+}

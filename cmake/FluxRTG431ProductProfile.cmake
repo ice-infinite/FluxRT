@@ -8,7 +8,7 @@ function(fluxrt_validate_g431_product_profile)
     cmake_parse_arguments(
         ARG
         ""
-        "PROFILE;BUILD_PROFILE;ADVANCED;MOTION;POWER;EXTERNAL_IO;NATIVE;PWM_PULSE;ANALOG;STEP_DIR"
+        "PROFILE;BUILD_PROFILE;ADVANCED;SENSORLESS;H3_DYNAMIC;AS5600_TRUTH;AS5600_ALIGNMENT;MOTION;POWER;EXTERNAL_IO;NATIVE;PWM_PULSE;ANALOG;STEP_DIR"
         ""
         ${ARGN})
 
@@ -32,6 +32,29 @@ function(fluxrt_validate_g431_product_profile)
 
     if(ARG_ADVANCED AND NOT ARG_PROFILE STREQUAL "advanced-lab")
         message(FATAL_ERROR "Advanced FOC candidate requires advanced-lab")
+    endif()
+    if(ARG_SENSORLESS AND NOT ARG_PROFILE STREQUAL "advanced-lab")
+        message(FATAL_ERROR "Sensorless FOC candidate requires advanced-lab")
+    endif()
+    if(ARG_ADVANCED AND ARG_SENSORLESS)
+        message(FATAL_ERROR
+            "STM32G431RB Advanced Lab permits one large FOC candidate at a time")
+    endif()
+    if(ARG_H3_DYNAMIC AND NOT ARG_PROFILE STREQUAL "advanced-lab")
+        message(FATAL_ERROR "H3 dynamic query requires advanced-lab")
+    endif()
+    if(ARG_H3_DYNAMIC AND NOT ARG_ADVANCED)
+        message(FATAL_ERROR "H3 dynamic query requires the Advanced FOC candidate")
+    endif()
+    if(ARG_AS5600_TRUTH AND NOT ARG_PROFILE STREQUAL "basic-drive")
+        message(FATAL_ERROR "AS5600 truth diagnostic requires basic-drive")
+    endif()
+    if(ARG_AS5600_TRUTH AND NOT ARG_BUILD_PROFILE STREQUAL "diagnostic")
+        message(FATAL_ERROR "AS5600 truth diagnostic is Diagnostic-only")
+    endif()
+    if(ARG_AS5600_ALIGNMENT AND NOT ARG_AS5600_TRUTH)
+        message(FATAL_ERROR
+            "AS5600 alignment candidate requires the AS5600 truth diagnostic")
     endif()
     if(ARG_MOTION AND NOT ARG_PROFILE STREQUAL "motion-lab")
         message(FATAL_ERROR "Motion candidate requires motion-lab")

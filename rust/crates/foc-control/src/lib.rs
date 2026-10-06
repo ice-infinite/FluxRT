@@ -58,6 +58,9 @@
 //   controller 电流环、速度环与串级控制器（MCSDK 参考拓扑）
 //   identification EXP-B3 Ls(I) 状态请求到 PWM 的纯计划层（不拥有硬件）
 //   advanced_foc MTPA/弱磁/MTPV、解耦、调制、HFI与飞车捕获的统一监督器
+//   hfi_polarity HFI磁极极性辨识的有界脉冲时序与失败回退
+//   sensorless_fusion HFI低速角度与BEMF/SMO中高速角度的可信切换和融合
+//   sensorless_chain 旋转HFI轴获取、磁极极性与HFI/BEMF融合的全速域组合
 //   observer   SMO+PLL 与浮点反电势观测器，含可靠性门控
 //   voltage    观察器电压来源策略；当前默认/唯一批准路径为 CommandModel
 //   power_supervisor 热降额、母线窗口、source/sink与再生/制动安全策略
@@ -75,6 +78,8 @@ pub mod config_transaction;
 pub mod contract;
 pub mod controller;
 pub mod feedback;
+#[cfg(any(test, feature = "advanced-foc", feature = "sensorless-foc"))]
+pub mod hfi_polarity;
 pub mod identification;
 pub mod math;
 #[cfg(any(test, feature = "motion-control"))]
@@ -88,6 +93,10 @@ pub mod params;
 pub mod ports;
 pub mod power_supervisor;
 pub mod runtime;
+#[cfg(any(test, feature = "advanced-foc", feature = "sensorless-foc"))]
+pub mod sensorless_chain;
+#[cfg(any(test, feature = "advanced-foc", feature = "sensorless-foc"))]
+pub mod sensorless_fusion;
 pub mod startup;
 pub mod types;
 pub mod voltage;
@@ -104,6 +113,8 @@ pub use config_transaction::*;
 pub use contract::*;
 pub use controller::*;
 pub use feedback::*;
+#[cfg(any(test, feature = "advanced-foc", feature = "sensorless-foc"))]
+pub use hfi_polarity::*;
 pub use identification::*;
 pub use math::*;
 #[cfg(any(test, feature = "motion-control"))]
@@ -117,6 +128,10 @@ pub use params::*;
 pub use ports::*;
 pub use power_supervisor::*;
 pub use runtime::*;
+#[cfg(any(test, feature = "advanced-foc", feature = "sensorless-foc"))]
+pub use sensorless_chain::*;
+#[cfg(any(test, feature = "advanced-foc", feature = "sensorless-foc"))]
+pub use sensorless_fusion::*;
 pub use startup::*;
 pub use types::*;
 pub use voltage::*;

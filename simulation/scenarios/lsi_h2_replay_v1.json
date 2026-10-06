@@ -1,0 +1,19 @@
+{
+  "contract": "fluxrt-lsi-h2-replay",
+  "version": 1,
+  "sample_rate_hz": 12000,
+  "resistance_ohm": 4.9666667,
+  "candidate_inductance_h": [0.001058, 0.0011133333, 0.00195, 0.00210],
+  "cases": [
+    {
+      "id": "historical_g431_s5_4_locked_6x6",
+      "trace_path": "profiles/identification/evidence/lsi-20260927/s5_4_locked_6x6_run_01.csv",
+      "pole_pairs": 7,
+      "mechanical_angle_rad": 0.0,
+      "angle_index_valid": 0,
+      "angle_source": "unavailable-historical",
+      "angle_sample_count": 0,
+      "angle_span_counts": 0
+    }
+  ]
+}

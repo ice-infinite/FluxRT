@@ -22,7 +22,7 @@ use crate::{
 };
 
 const HALF_RANGE: u32 = 0x8000_0000;
-const FEEDBACK_SOURCE_COUNT: usize = 3;
+const FEEDBACK_SOURCE_COUNT: usize = 4;
 
 /// Normalized, source-local sample. All positions are radians and velocities
 /// radians per second. Fields without a matching valid bit must be zero.
@@ -228,9 +228,9 @@ enum ActiveSource {
     Backup,
 }
 
-/// Fixed-capacity feedback source router for Sensorless, Hall and incremental
-/// encoder sources. Call `ingest` for every new source sample and `route` once
-/// per management/control selection cycle.
+/// Fixed-capacity feedback source router for Sensorless, Hall, incremental and
+/// absolute encoder sources. Call `ingest` for every new source sample and
+/// `route` once per management/control selection cycle.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FeedbackRouter {
     config: FeedbackRouterConfig,
@@ -446,6 +446,14 @@ fn sample_meets_mode_gate(sample: &FeedbackSourceSample) -> bool {
             sample.valid_flags & required_valid == required_valid
                 && sample.quality_flags & required_quality == required_quality
         }
+        FeedbackMode::AbsoluteEncoder => {
+            let required_valid = common_valid
+                | PRODUCT_FEEDBACK_VALID_MECHANICAL_POSITION
+                | PRODUCT_FEEDBACK_VALID_MULTI_TURN_POSITION;
+            let required_quality = direction | PRODUCT_FEEDBACK_QUALITY_CALIBRATED;
+            sample.valid_flags & required_valid == required_valid
+                && sample.quality_flags & required_quality == required_quality
+        }
         _ => false,
     }
 }
@@ -455,7 +463,8 @@ fn source_index(mode: FeedbackMode) -> Option<usize> {
         FeedbackMode::Sensorless => Some(0),
         FeedbackMode::Hall => Some(1),
         FeedbackMode::IncrementalEncoder => Some(2),
-        FeedbackMode::AbsoluteEncoder | FeedbackMode::Resolver | FeedbackMode::Fused => None,
+        FeedbackMode::AbsoluteEncoder => Some(3),
+        FeedbackMode::Resolver | FeedbackMode::Fused => None,
     }
 }
 
@@ -583,7 +592,10 @@ impl FeedbackCalibrationManager {
         if !calibration_guard_is_safe(guard) {
             return Err(FeedbackCalibrationError::UnsafeState);
         }
-        if !matches!(mode, FeedbackMode::Hall | FeedbackMode::IncrementalEncoder) {
+        if !matches!(
+            mode,
+            FeedbackMode::Hall | FeedbackMode::IncrementalEncoder | FeedbackMode::AbsoluteEncoder
+        ) {
             return Err(FeedbackCalibrationError::UnsupportedMode);
         }
         self.next_token = self.next_token.wrapping_add(1);
@@ -639,8 +651,10 @@ impl FeedbackCalibrationManager {
         sample_count: u32,
     ) -> Result<(), FeedbackCalibrationError> {
         self.check_collecting(token)?;
-        if self.mode != FeedbackMode::IncrementalEncoder
-            || !offset_rad.is_finite()
+        if !matches!(
+            self.mode,
+            FeedbackMode::IncrementalEncoder | FeedbackMode::AbsoluteEncoder
+        ) || !offset_rad.is_finite()
             || !(-TAU..TAU).contains(&offset_rad)
             || sample_count < self.policy.minimum_offset_samples
         {
@@ -684,15 +698,17 @@ impl FeedbackCalibrationManager {
             return Err(FeedbackCalibrationError::UnsafeState);
         }
         let update = match self.mode {
-            FeedbackMode::IncrementalEncoder => FeedbackCalibrationUpdate {
-                feedback_mode: self.mode as u32,
-                axis_direction: self.direction,
-                calibration_flags_to_set: CALIBRATION_ENCODER_VALID,
-                encoder_offset_rad: self.encoder_offset_rad,
-                encoder_counts_per_revolution: self.policy.encoder_counts_per_revolution,
-                hall_sequence_packed: 0,
-                evidence_steps: self.completed_steps,
-            },
+            FeedbackMode::IncrementalEncoder | FeedbackMode::AbsoluteEncoder => {
+                FeedbackCalibrationUpdate {
+                    feedback_mode: self.mode as u32,
+                    axis_direction: self.direction,
+                    calibration_flags_to_set: CALIBRATION_ENCODER_VALID,
+                    encoder_offset_rad: self.encoder_offset_rad,
+                    encoder_counts_per_revolution: self.policy.encoder_counts_per_revolution,
+                    hall_sequence_packed: 0,
+                    evidence_steps: self.completed_steps,
+                }
+            }
             FeedbackMode::Hall => FeedbackCalibrationUpdate {
                 feedback_mode: self.mode as u32,
                 axis_direction: self.direction,
@@ -792,6 +808,9 @@ fn required_calibration_steps(mode: FeedbackMode) -> u32 {
                 | FEEDBACK_CALIBRATION_STEP_ENCODER_INDEX
                 | FEEDBACK_CALIBRATION_STEP_ENCODER_OFFSET
         }
+        FeedbackMode::AbsoluteEncoder => {
+            FEEDBACK_CALIBRATION_STEP_DIRECTION | FEEDBACK_CALIBRATION_STEP_ENCODER_OFFSET
+        }
         FeedbackMode::Hall => {
             FEEDBACK_CALIBRATION_STEP_DIRECTION | FEEDBACK_CALIBRATION_STEP_HALL_SEQUENCE
         }
@@ -856,6 +875,26 @@ mod tests {
             mechanical_velocity_rad_s: 10.0,
             electrical_angle_rad: 1.75,
             electrical_velocity_rad_s: 70.0,
+            ..FeedbackSourceSample::default()
+        }
+    }
+
+    fn absolute_encoder(sequence: u32, sampled_at_us: u32) -> FeedbackSourceSample {
+        FeedbackSourceSample {
+            mode: FeedbackMode::AbsoluteEncoder as u32,
+            sequence,
+            sampled_at_ms: sampled_at_us / 1000,
+            sampled_at_us,
+            valid_flags: PRODUCT_FEEDBACK_VALID_KNOWN_MASK,
+            quality_flags: PRODUCT_FEEDBACK_QUALITY_CALIBRATED
+                | PRODUCT_FEEDBACK_QUALITY_DIRECTION_VALID,
+            direction: 1,
+            pole_pair_revision: 9,
+            mechanical_position_rad: 0.5,
+            multi_turn_position_rad: 6.75,
+            mechanical_velocity_rad_s: 4.0,
+            electrical_angle_rad: 3.5,
+            electrical_velocity_rad_s: 28.0,
             ..FeedbackSourceSample::default()
         }
     }
@@ -957,6 +996,30 @@ mod tests {
     }
 
     #[test]
+    fn absolute_encoder_routes_without_an_incremental_index() {
+        let mut router = FeedbackRouter::new(router_config(
+            FeedbackMode::AbsoluteEncoder,
+            FeedbackMode::Sensorless,
+        ))
+        .unwrap();
+        for sequence in 1..=2 {
+            router
+                .ingest(absolute_encoder(sequence, sequence * 100))
+                .unwrap();
+            router.ingest(sensorless(sequence, sequence * 100)).unwrap();
+            let decision = router.route(sequence, sequence * 100).unwrap();
+            if sequence == 2 {
+                assert_eq!(decision.state, FeedbackRouteState::Primary);
+                assert_eq!(
+                    decision.snapshot.active_feedback_mode,
+                    FeedbackMode::AbsoluteEncoder as u32
+                );
+                assert_eq!(decision.snapshot.mechanical_position_rad, 0.5);
+            }
+        }
+    }
+
+    #[test]
     fn stale_sequence_unknown_mode_and_noncanonical_fields_are_rejected() {
         let mut router = FeedbackRouter::new(router_config(
             FeedbackMode::Sensorless,
@@ -969,7 +1032,7 @@ mod tests {
             Err(FeedbackError::StaleSequence)
         );
         let mut bad = sensorless(3, 120);
-        bad.mode = FeedbackMode::AbsoluteEncoder as u32;
+        bad.mode = FeedbackMode::Resolver as u32;
         assert_eq!(router.ingest(bad), Err(FeedbackError::UnsupportedMode));
         bad = sensorless(3, 120);
         bad.valid_flags &= !PRODUCT_FEEDBACK_VALID_MECHANICAL_VELOCITY;
@@ -1049,6 +1112,35 @@ mod tests {
         assert_eq!(manager.state(), FeedbackCalibrationState::Approved);
         manager.finish_applied(safe_guard()).unwrap();
         assert_eq!(manager.state(), FeedbackCalibrationState::Idle);
+    }
+
+    #[test]
+    fn absolute_encoder_calibration_requires_direction_and_offset_but_no_index() {
+        let mut manager = FeedbackCalibrationManager::new(FeedbackCalibrationPolicy {
+            minimum_direction_samples: 8,
+            minimum_index_samples: 2,
+            minimum_offset_samples: 16,
+            minimum_hall_samples: 12,
+            encoder_counts_per_revolution: 4096,
+        })
+        .unwrap();
+        let token = manager
+            .begin(FeedbackMode::AbsoluteEncoder, safe_guard())
+            .unwrap();
+        manager.record_direction(token, 1, 8).unwrap();
+        assert_eq!(manager.state(), FeedbackCalibrationState::Collecting);
+        manager.record_encoder_offset(token, 0.4, 16).unwrap();
+        assert_eq!(manager.state(), FeedbackCalibrationState::ReadyForReview);
+        let update = manager.approve(token, safe_guard()).unwrap();
+        assert_eq!(update.feedback_mode, FeedbackMode::AbsoluteEncoder as u32);
+        assert_eq!(update.axis_direction, 1);
+        assert_eq!(update.encoder_offset_rad, 0.4);
+        assert_eq!(update.encoder_counts_per_revolution, 4096);
+        assert_eq!(update.calibration_flags_to_set, CALIBRATION_ENCODER_VALID);
+        assert_eq!(
+            update.evidence_steps,
+            FEEDBACK_CALIBRATION_STEP_DIRECTION | FEEDBACK_CALIBRATION_STEP_ENCODER_OFFSET
+        );
     }
 
     #[test]

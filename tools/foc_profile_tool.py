@@ -22,7 +22,7 @@ import zlib
 PROFILE_MAGIC = 0x46505246
 PROFILE_STRUCT_SIZE = 40
 PROFILE_SCHEMA_VERSION = 1
-SUPPORTED_RUNTIME_LAYOUTS = {(284, 8), (296, 11)}
+SUPPORTED_RUNTIME_LAYOUTS = {(284, 8), (296, 11), (300, 12)}
 
 PARAMETER_APPROVAL = 1 << 0
 CLOSED_LOOP_APPROVAL = 1 << 1
@@ -155,9 +155,23 @@ def layout_with_v11_fields() -> list[tuple[str, str]]:
 
 
 RUNTIME_LAYOUT_V11 = layout_with_v11_fields()
+
+
+def layout_with_v12_fields() -> list[tuple[str, str]]:
+    """Add the configurable EMF phase-advance ratio without rewriting V11."""
+    output: list[tuple[str, str]] = []
+    for item in RUNTIME_LAYOUT_V11:
+        output.append(item)
+        if item[0] == "observer_emf_filter_alpha":
+            output.append(("observer_emf_phase_advance_ratio", "f32"))
+    return output
+
+
+RUNTIME_LAYOUT_V12 = layout_with_v12_fields()
 RUNTIME_LAYOUT_BY_ABI = {
     (284, 8): RUNTIME_LAYOUT_V8,
     (296, 11): RUNTIME_LAYOUT_V11,
+    (300, 12): RUNTIME_LAYOUT_V12,
 }
 
 
@@ -285,6 +299,15 @@ def validate_runtime_shape(runtime: object) -> dict:
             )
         if not 0.0 <= runtime["handoff_torque_support_ratio"] <= 1.0:
             raise CandidateError("handoff_torque_support_ratio must be in 0..1")
+    if runtime["config_version"] >= 12:
+        phase_advance_ratio = require_finite_number(
+            runtime["observer_emf_phase_advance_ratio"],
+            "runtime_config.observer_emf_phase_advance_ratio",
+        )
+        if not 0.0 <= phase_advance_ratio <= 1.0:
+            raise CandidateError(
+                "observer_emf_phase_advance_ratio must stay in [0,1]"
+            )
     inverter = runtime["inverter_voltage_model"]
     for field in (
         "enabled",

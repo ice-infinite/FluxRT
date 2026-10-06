@@ -241,7 +241,7 @@ static void test_abort_paths_are_fail_closed(void)
     input = safe_input();
     start_and_enter_offset(&context, &output, &input);
     advance_to(&context, &output, &input, FOC_LSI_STATE_PULSE_POSITIVE);
-    input.abs_phase_current_a = 1.16f;
+    input.abs_phase_current_a = 1.15f;
     assert(foc_lsi_step(&context, &input, &output) == FOC_LSI_STATE_ABORTED);
     assert(output.abort_reason == FOC_LSI_ABORT_CURRENT_LIMIT);
     assert_safe(&output);

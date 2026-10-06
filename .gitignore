@@ -2,7 +2,9 @@
 /cmake-build/
 /cmake-build-*/
 /tests/host/build-*/
+/tests/host/build/
 /rust/target/
+/rust/target-*/
 /packages/
 /CMakeLists.txt
 *.o
@@ -25,3 +27,6 @@ __pycache__/
 /simulink/*.slxc
 /simulink/*.autosave
 *.asv
+/targets/esp32_dengfoc/.pio/
+/targets/esp32_dengfoc/captures/
+/tmp/

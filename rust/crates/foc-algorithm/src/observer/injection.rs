@@ -62,7 +62,8 @@
 
 use super::{BemfInput, BemfParam, BemfState};
 use crate::math::{
-    atan2_angle_0_to_2pi, clamp, wrap_angle_0_to_2pi, wrap_angle_minus_pi_to_pi, TWO_PI,
+    atan2_angle_0_to_2pi, clamp, fast_atan2_angle_0_to_2pi, fast_sin_cos, wrap_angle_0_to_2pi,
+    wrap_angle_minus_pi_to_pi, TWO_PI,
 };
 use crate::transform::AlphaBeta;
 
@@ -322,6 +323,134 @@ impl RotatingHfState {
         self.demod.beta += alpha * (current_response.beta * s - self.demod.beta);
         self.theta_est_rad =
             wrap_angle_0_to_2pi(0.5 * atan2_angle_0_to_2pi(self.demod.beta, self.demod.alpha));
+        self.voltage
+    }
+}
+
+/// 旋转高频注入负序解调参数。
+/// Rotating high-frequency negative-sequence demodulation parameters.
+///
+/// 与 [`RotatingHfParam`] 的旧两轴同相解调不同，本参数用于完整的复数负序解调：
+/// 将高频电流矢量乘以正向载波 `exp(+j*carrier)`，把凸极产生的负序分量搬移到直流，
+/// 再低通得到 `2*theta`。`phase_offset_rad` 用来扣除电机 `R/L`、采样延迟和电流极性
+/// 形成的确定性相移，必须由 PC 模型和受控角度实测共同标定，不能靠增大注入幅值掩盖。
+/// Unlike the legacy per-axis in-phase demodulator, this parameter belongs to a
+/// full complex negative-sequence demodulator. `phase_offset_rad` removes the
+/// deterministic phase of the motor/measurement path before halving the angle.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RotatingHfSequenceParam {
+    pub amplitude: f32,
+    pub freq_hz: f32,
+    pub ts: f32,
+    pub demod_alpha: f32,
+    pub phase_offset_rad: f32,
+}
+
+/// 旋转高频注入的完整负序解调状态。
+/// Complete negative-sequence demodulator state for rotating HF injection.
+///
+/// `theta_est_mod_pi_rad` 仍然只在 `[0, pi)` 有效；负序解调修正载波分离，不会自动
+/// 消除永磁体 N/S 极性造成的 `pi` 模糊。`response_magnitude_a` 是低通后负序响应幅值，
+/// 上层必须以它和独立噪声底共同决定可信度。
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RotatingHfSequenceState {
+    pub carrier_angle_rad: f32,
+    pub voltage: AlphaBeta,
+    pub negative_sequence: AlphaBeta,
+    pub theta_est_mod_pi_rad: f32,
+    pub response_magnitude_a: f32,
+}
+
+impl RotatingHfSequenceState {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// 解调上一拍高频电流并产生下一拍旋转注入电压。
+    /// Demodulates the current response to the previously applied carrier and
+    /// produces the rotating injection voltage for the next control tick.
+    ///
+    /// 先解调、后推进载波是有意的：ADC 电流来自上一拍已经生效的 PWM，而返回电压要在
+    /// 本拍计算结束后才写入下一次 PWM。这样算法接口显式保留一拍因果关系，不需要调用者
+    /// 伪造“当前电压产生当前电流”的非因果采样。
+    pub fn update(
+        &mut self,
+        param: &RotatingHfSequenceParam,
+        high_frequency_current: AlphaBeta,
+    ) -> AlphaBeta {
+        self.update_with_math(
+            param,
+            high_frequency_current,
+            |angle| (libm::sinf(angle), libm::cosf(angle)),
+            atan2_angle_0_to_2pi,
+        )
+    }
+
+    /// Executes the same causal negative-sequence demodulation with the
+    /// repository's bounded-error polynomial `sin/cos` and `atan2` backend.
+    ///
+    /// This entry is intended for measured MCU fast loops where the exact
+    /// `libm` path cannot meet the deadline.  The portable [`Self::update`]
+    /// remains the numerical reference.  Callers must keep the carrier angle
+    /// bounded and must validate the declared approximation envelopes against
+    /// their angle-error and WCET budgets before selecting this path.
+    #[inline]
+    pub fn update_fast(
+        &mut self,
+        param: &RotatingHfSequenceParam,
+        high_frequency_current: AlphaBeta,
+    ) -> AlphaBeta {
+        self.update_with_math(
+            param,
+            high_frequency_current,
+            fast_sin_cos,
+            fast_atan2_angle_0_to_2pi,
+        )
+    }
+
+    #[inline]
+    fn update_with_math<S, A>(
+        &mut self,
+        param: &RotatingHfSequenceParam,
+        high_frequency_current: AlphaBeta,
+        sin_cos: S,
+        atan2: A,
+    ) -> AlphaBeta
+    where
+        S: Fn(f32) -> (f32, f32),
+        A: Fn(f32, f32) -> f32,
+    {
+        if !param.ts.is_finite() || param.ts <= 0.0 {
+            self.voltage = AlphaBeta::default();
+            return self.voltage;
+        }
+
+        let (s, c) = sin_cos(self.carrier_angle_rad);
+        // (i_alpha + j*i_beta) * exp(+j*carrier).  The saliency-created
+        // negative-sequence component becomes DC; the positive sequence moves
+        // to twice the carrier frequency and is rejected by the LPF.
+        let demod_alpha = high_frequency_current.alpha * c - high_frequency_current.beta * s;
+        let demod_beta = high_frequency_current.alpha * s + high_frequency_current.beta * c;
+        let alpha = clamp(param.demod_alpha, 0.0, 1.0);
+        self.negative_sequence.alpha += alpha * (demod_alpha - self.negative_sequence.alpha);
+        self.negative_sequence.beta += alpha * (demod_beta - self.negative_sequence.beta);
+        self.response_magnitude_a = libm::sqrtf(
+            self.negative_sequence.alpha * self.negative_sequence.alpha
+                + self.negative_sequence.beta * self.negative_sequence.beta,
+        );
+        let twice_theta = wrap_angle_0_to_2pi(
+            atan2(self.negative_sequence.beta, self.negative_sequence.alpha)
+                - param.phase_offset_rad,
+        );
+        self.theta_est_mod_pi_rad = 0.5 * twice_theta;
+
+        self.carrier_angle_rad =
+            wrap_angle_0_to_2pi(self.carrier_angle_rad + TWO_PI * param.freq_hz * param.ts);
+        let (next_s, next_c) = sin_cos(self.carrier_angle_rad);
+        self.voltage.alpha = param.amplitude * next_c;
+        self.voltage.beta = param.amplitude * next_s;
         self.voltage
     }
 }
@@ -688,6 +817,101 @@ mod tests {
         near(state.demod.alpha, 0.0, 1e-5);
         near(state.demod.beta, 2.0, 1e-5);
         near(state.theta_est_rad, PI * 0.25, 1e-5);
+    }
+
+    #[test]
+    fn rotating_hf_sequence_extracts_negative_sequence_mod_pi_angle() {
+        let param = RotatingHfSequenceParam {
+            amplitude: 2.0,
+            freq_hz: 1_000.0,
+            ts: 1.0 / 12_000.0,
+            demod_alpha: 0.05,
+            phase_offset_rad: 0.35,
+        };
+        let theta = 1.1_f32;
+        let response = 0.2_f32;
+        let mut state = RotatingHfSequenceState::default();
+        for _ in 0..2_000 {
+            let phase = state.carrier_angle_rad;
+            let negative_phase = 2.0 * theta - phase + param.phase_offset_rad;
+            let current = AlphaBeta {
+                alpha: response * libm::cosf(negative_phase),
+                beta: response * libm::sinf(negative_phase),
+            };
+            state.update(&param, current);
+        }
+        near(state.theta_est_mod_pi_rad, theta, 2.0e-4);
+        near(state.response_magnitude_a, response, 2.0e-4);
+    }
+
+    #[test]
+    fn rotating_hf_sequence_fast_math_stays_close_to_reference() {
+        let param = RotatingHfSequenceParam {
+            amplitude: 2.0,
+            freq_hz: 1_000.0,
+            ts: 1.0 / 12_000.0,
+            demod_alpha: 0.05,
+            phase_offset_rad: 0.35,
+        };
+        let theta = 1.1_f32;
+        let response = 0.2_f32;
+        let mut reference = RotatingHfSequenceState::default();
+        let mut fast = RotatingHfSequenceState::default();
+        for _ in 0..2_000 {
+            let phase = reference.carrier_angle_rad;
+            let negative_phase = 2.0 * theta - phase + param.phase_offset_rad;
+            let current = AlphaBeta {
+                alpha: response * libm::cosf(negative_phase),
+                beta: response * libm::sinf(negative_phase),
+            };
+            let reference_voltage = reference.update(&param, current);
+            let fast_voltage = fast.update_fast(&param, current);
+            near(fast_voltage.alpha, reference_voltage.alpha, 6.0e-5);
+            near(fast_voltage.beta, reference_voltage.beta, 6.0e-5);
+        }
+        near(
+            fast.theta_est_mod_pi_rad,
+            reference.theta_est_mod_pi_rad,
+            3.0e-5,
+        );
+        near(
+            fast.response_magnitude_a,
+            reference.response_magnitude_a,
+            1.0e-5,
+        );
+    }
+
+    #[test]
+    fn rotating_hf_sequence_invalid_period_fails_to_zero_voltage() {
+        let mut state = RotatingHfSequenceState {
+            voltage: AlphaBeta {
+                alpha: 1.0,
+                beta: -1.0,
+            },
+            ..RotatingHfSequenceState::default()
+        };
+        let voltage = state.update(
+            &RotatingHfSequenceParam {
+                amplitude: 3.0,
+                freq_hz: 1_000.0,
+                ts: f32::NAN,
+                demod_alpha: 0.1,
+                phase_offset_rad: 0.0,
+            },
+            AlphaBeta::default(),
+        );
+        assert_eq!(voltage, AlphaBeta::default());
+        let fast_voltage = state.update_fast(
+            &RotatingHfSequenceParam {
+                amplitude: 3.0,
+                freq_hz: 1_000.0,
+                ts: f32::NAN,
+                demod_alpha: 0.1,
+                phase_offset_rad: 0.0,
+            },
+            AlphaBeta::default(),
+        );
+        assert_eq!(fast_voltage, AlphaBeta::default());
     }
 
     /// C 参考向量：脉冲注入的极性翻转顺序、响应记录与 `saliency` 差值。

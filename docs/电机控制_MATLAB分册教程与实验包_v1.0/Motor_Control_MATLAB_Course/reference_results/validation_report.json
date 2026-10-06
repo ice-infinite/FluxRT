@@ -1,0 +1,110 @@
+{
+  "engine": "Python reference only",
+  "python": "3.13.5",
+  "numpy": "2.3.5",
+  "matplotlib": "3.10.8",
+  "matlab_executed": false,
+  "simulink_executed": false,
+  "cross_language_numeric_equivalence_proven": false,
+  "experiments": [
+    {
+      "lab": "L01",
+      "status": "PASS"
+    },
+    {
+      "lab": "L02",
+      "status": "PASS"
+    },
+    {
+      "lab": "L03",
+      "status": "PASS"
+    },
+    {
+      "lab": "L04",
+      "status": "PASS"
+    },
+    {
+      "lab": "L05",
+      "status": "PASS"
+    },
+    {
+      "lab": "L06",
+      "status": "PASS"
+    },
+    {
+      "lab": "L07",
+      "status": "PASS"
+    },
+    {
+      "lab": "L08",
+      "status": "PASS"
+    },
+    {
+      "lab": "L09",
+      "status": "PASS"
+    },
+    {
+      "lab": "L10",
+      "status": "PASS"
+    },
+    {
+      "lab": "L11",
+      "status": "PASS"
+    },
+    {
+      "lab": "L12",
+      "status": "PASS"
+    },
+    {
+      "lab": "L13",
+      "status": "PASS"
+    },
+    {
+      "lab": "L14",
+      "status": "PASS"
+    },
+    {
+      "lab": "L15",
+      "status": "PASS"
+    },
+    {
+      "lab": "L16",
+      "status": "PASS"
+    },
+    {
+      "lab": "L17",
+      "status": "PASS"
+    },
+    {
+      "lab": "L18",
+      "status": "PASS"
+    },
+    {
+      "lab": "L19",
+      "status": "PASS"
+    },
+    {
+      "lab": "L20",
+      "status": "PASS"
+    },
+    {
+      "lab": "L21",
+      "status": "PASS"
+    },
+    {
+      "lab": "L22",
+      "status": "PASS"
+    },
+    {
+      "lab": "L23",
+      "status": "PASS"
+    },
+    {
+      "lab": "L24",
+      "status": "PASS"
+    }
+  ],
+  "math_assertion_cases": 507,
+  "figure_count": 47,
+  "elapsed_s": 9.239472389221191
+}

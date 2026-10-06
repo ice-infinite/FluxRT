@@ -1,0 +1,29 @@
+{
+  "contract": "fluxrt-g431-as5600-direction-candidate",
+  "version": 1,
+  "status": "mechanical-direction-confirmed-electrical-calibration-pending",
+  "motor_id": "DengFOC-M0-AS5600-on-G431",
+  "viewpoint": "motor-shaft-extension-end",
+  "commanded_manual_motion": "clockwise",
+  "as5600_raw_count_direction": "increasing",
+  "mechanical_direction": 1,
+  "sample_count": 100,
+  "valid_sample_count": 100,
+  "net_motion_count": 1721,
+  "net_motion_rev": 0.420166015625,
+  "positive_motion_count": 1785,
+  "negative_motion_count": 64,
+  "directional_dominance_ratio": 0.965386695511087,
+  "maximum_error_count": 0,
+  "bus_healthy": true,
+  "source_csv": "profiles/identification/sessions/g431-as5600-direct-20261006-clockwise-v2.csv",
+  "pole_pairs_candidate": 7,
+  "pole_pairs_evidence": [
+    "E:/File/PlatformIO/DengFOC/src/main.cpp:kPolePairs=7",
+    "docs/更换电机流程与参数匹配.md:Profiler readback=7"
+  ],
+  "electrical_offset_candidate_rad": 0.9658693323147879,
+  "electrical_offset_source": "profiles/identification/sessions/h3-dynamic-20261005-session2026100513-deng250hz/alignment-offset.result.json",
+  "electrical_offset_approval": "not-granted-requires-direct-sensor-powered-repeat",
+  "target_capability_approval": "not-granted"
+}

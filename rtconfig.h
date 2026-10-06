@@ -455,6 +455,8 @@
 
 /* FOC advanced-control candidates */
 
+#define FOC_AS5600_TRUTH_DIAGNOSTIC
+#define FOC_AS5600_ALIGNMENT_CANDIDATE
 /* end of FOC advanced-control candidates */
 
 /* FOC power-management candidates */

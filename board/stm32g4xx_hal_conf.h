@@ -17,10 +17,10 @@
  *   foc/platform/stm32g431/.
  *
  * FluxRT 的选择 / FluxRT's choices:
- *   - 使能：GPIO、EXTI、DMA、RCC、FLASH、PWR、CORTEX、UART、ADC、TIM。
+ *   - 使能：GPIO、EXTI、DMA、RCC、FLASH、PWR、CORTEX、UART、ADC、TIM、I2C。
  *     这正好覆盖控制台（LPUART1）、功率级（TIM1 + 注入组 ADC）、时钟与低层中断，
  *     没有为未使用的外设支付任何 Flash。
- *     Enabled: GPIO, EXTI, DMA, RCC, FLASH, PWR, CORTEX, UART, ADC and TIM. That is
+ *     Enabled: GPIO, EXTI, DMA, RCC, FLASH, PWR, CORTEX, UART, ADC, TIM and I2C. That is
  *     exactly the console (LPUART1), the power stage (TIM1 plus the injected-group ADC),
  *     the clocks and the low-level interrupts, with no Flash spent on unused peripherals.
  *   - 所有 USE_HAL_*_REGISTER_CALLBACKS 保持 0：HAL 句柄只由 RT-Thread 驱动与 FOC 平台
@@ -55,10 +55,10 @@
  *   PA2/PA3, ADC for injected-group synchronous sampling and static monitoring (driven by
  *   the FOC platform layer) and TIM for the TIM1 centre-aligned PWM with its CH4 internal
  *   trigger.
- * 未使能 / Not enabled: COMP、CORDIC、HRTIM、I2C、SPI、DAC、OPAMP、RTC 等。其中 CORDIC
+ * 未使能 / Not enabled: COMP、CORDIC、HRTIM、SPI、DAC、OPAMP、RTC 等。其中 CORDIC
  * 只通过 foc_math_accel_stm32g431.c 直接操作寄存器使用，不需要 HAL CORDIC 模块；未来
  * 若改用 HAL CORDIC API，必须同时打开对应模块与回调设置。
- * COMP, CORDIC, HRTIM, I2C, SPI, DAC, OPAMP, RTC and the rest stay off. CORDIC is driven
+ * COMP, CORDIC, HRTIM, SPI, DAC, OPAMP, RTC and the rest stay off. CORDIC is driven
  * through direct register access in foc_math_accel_stm32g431.c and needs no HAL module;
  * switching to the HAL CORDIC API later would require enabling the module here. */
 #define HAL_MODULE_ENABLED
@@ -72,6 +72,7 @@
 #define HAL_UART_MODULE_ENABLED
 #define HAL_ADC_MODULE_ENABLED
 #define HAL_TIM_MODULE_ENABLED
+#define HAL_I2C_MODULE_ENABLED
 
 /* 全部回调注册保持关闭 [0/1]；见文件头"所有 USE_HAL_*_REGISTER_CALLBACKS 保持 0"。
  * Every callback registration stays off (0/1); see the file header. */
@@ -169,6 +170,7 @@
 #include "stm32g4xx_hal_uart.h"
 #include "stm32g4xx_hal_adc.h"
 #include "stm32g4xx_hal_tim.h"
+#include "stm32g4xx_hal_i2c.h"
 
 /* USE_FULL_ASSERT 默认未定义，assert_param 展开为无操作：HAL 的参数检查只在开发排错时
  * 打开，量产/日常构建不留这部分代码与字符串（Flash 只有 128 KiB）。

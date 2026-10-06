@@ -6,6 +6,7 @@
 #include "foc_advanced_bridge.h"
 #include "foc_advanced_power_trial.h"
 #include "foc_advanced_probe.h"
+#include "foc_sensorless_bridge.h"
 #include "foc_types.h"
 
 /* Advanced-Lab only.  Configuration, start and finish execute while stopped;
@@ -20,6 +21,18 @@ foc_status_t foc_platform_advanced_candidate_probe_get_status(
     foc_advanced_probe_status_t *status,
     foc_advanced_telemetry_t *telemetry);
 foc_status_t foc_platform_advanced_candidate_probe_finish(void);
+
+/* P5.5 Sensorless-Lab no-power ADC-ISR owner.
+ * mode 1 exercises high-speed BEMF/fusion; mode 2 exercises rotating HFI and
+ * the one-tick request ledger. Synthetic capabilities exist only inside this
+ * physically-off probe and never change the board capability provider. */
+foc_status_t foc_platform_sensorless_candidate_probe_start(
+    uint32_t mode,
+    uint32_t requested_ticks);
+foc_status_t foc_platform_sensorless_candidate_probe_get_status(
+    foc_advanced_probe_status_t *status,
+    foc_sensorless_realtime_output_t *output);
+foc_status_t foc_platform_sensorless_candidate_probe_finish(void);
 
 /* No-power S4 register-path proof. Generates a software Break2 event with all
  * outputs closed, then exercises the same bounded re-arm used by motor start. */

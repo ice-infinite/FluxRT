@@ -77,6 +77,40 @@ pub fn run_advanced_contract(
                 ))
             })?;
         let input = parse_input(case)?;
+        let warmup_steps = optional_u32_value(case, "warmup_steps")?.unwrap_or(0);
+        if warmup_steps > frequency.saturating_mul(10) {
+            return Err(SimulationContractError::Invalid(format!(
+                "case {case_id} has invalid warmup_steps"
+            )));
+        }
+        if warmup_steps > 0 {
+            let mut warmup = input;
+            warmup.previous_voltage_dq = Dq {
+                d: optional_f32_value(case, "warmup_previous_vd_v")?.ok_or_else(|| {
+                    SimulationContractError::Invalid(format!(
+                        "case {case_id} warmup_previous_vd_v is required"
+                    ))
+                })?,
+                q: optional_f32_value(case, "warmup_previous_vq_v")?.ok_or_else(|| {
+                    SimulationContractError::Invalid(format!(
+                        "case {case_id} warmup_previous_vq_v is required"
+                    ))
+                })?,
+            };
+            warmup.estimated_electrical_speed_rad_s =
+                optional_f32_value(case, "warmup_electrical_speed_rad_s")?.ok_or_else(|| {
+                    SimulationContractError::Invalid(format!(
+                        "case {case_id} warmup_electrical_speed_rad_s is required"
+                    ))
+                })?;
+            for _ in 0..warmup_steps {
+                supervisor.step(&motor, warmup).map_err(|error| {
+                    SimulationContractError::Invalid(format!(
+                        "case {case_id} warmup rejected: {error:?}"
+                    ))
+                })?;
+            }
+        }
         let steps = u32_value(case, "steps")?;
         if steps == 0 || steps > frequency.saturating_mul(10) {
             return Err(SimulationContractError::Invalid(format!(
@@ -88,6 +122,22 @@ pub fn run_advanced_contract(
             output = supervisor.step(&motor, input).map_err(|error| {
                 SimulationContractError::Invalid(format!("case {case_id} step rejected: {error:?}"))
             })?;
+        }
+        if let Some(expected) = optional_u32_value(case, "expected_region")? {
+            if output.region as u32 != expected {
+                return Err(SimulationContractError::Invalid(format!(
+                    "case {case_id} region {} != expected {expected}",
+                    output.region as u32
+                )));
+            }
+        }
+        if let Some(expected) = optional_u32_value(case, "expected_active_features")? {
+            if output.active_features != expected {
+                return Err(SimulationContractError::Invalid(format!(
+                    "case {case_id} active_features {} != expected {expected}",
+                    output.active_features
+                )));
+            }
         }
         writeln!(
             trace,
@@ -243,6 +293,28 @@ fn f32_value(
     Ok(value as f32)
 }
 
+fn optional_u32_value(
+    object: &std::collections::BTreeMap<String, crate::simulation_contract::JsonValue>,
+    key: &str,
+) -> Result<Option<u32>, SimulationContractError> {
+    if object.contains_key(key) {
+        u32_value(object, key).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
+fn optional_f32_value(
+    object: &std::collections::BTreeMap<String, crate::simulation_contract::JsonValue>,
+    key: &str,
+) -> Result<Option<f32>, SimulationContractError> {
+    if object.contains_key(key) {
+        f32_value(object, key).map(Some)
+    } else {
+        Ok(None)
+    }
+}
+
 fn bool_u32(
     object: &std::collections::BTreeMap<String, crate::simulation_contract::JsonValue>,
     key: &str,
@@ -275,6 +347,6 @@ mod tests {
             .unwrap()
             .to_path_buf();
         let result = run_advanced_contract(&root).unwrap();
-        assert_eq!(result.case_count, 9);
+        assert_eq!(result.case_count, 15);
     }
 }

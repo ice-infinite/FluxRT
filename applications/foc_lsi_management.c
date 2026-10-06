@@ -2,6 +2,7 @@
 
 #include "foc_lsi_management.h"
 
+#include <math.h>
 #include <string.h>
 
 #if defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
@@ -40,12 +41,54 @@ void foc_lsi_management_default_config(foc_lsi_config_t *config)
     config->cooldown_zero_ticks = 24U;      /* 2 ms below threshold. */
     config->max_active_ticks = 600U;        /* 50 ms hard active cap. */
     config->total_timeout_ticks = 6000U;    /* 500 ms total cap. */
-    config->bias_current_a = 0.2f;
-    config->perturbation_voltage_v = 0.4f;
-    config->current_trip_a = 1.15f;
+    config->bias_current_a = FOC_LSI_H2_FIRST_MAX_BIAS_CURRENT_A;
+    config->perturbation_voltage_v =
+        FOC_LSI_H2_FIRST_MAX_PERTURBATION_V;
+    config->current_trip_a = FOC_LSI_H2_FIRST_CURRENT_TRIP_A;
     config->cooldown_current_threshold_a = 0.05f;
     config->bus_voltage_min_v = 7.0f;
     config->bus_voltage_max_v = 18.0f;
+}
+
+uint32_t foc_lsi_management_apply_h2_actuation_envelope(
+    const foc_lsi_config_t *sequence,
+    foc_lsi_actuation_config_t *actuation)
+{
+    foc_lsi_actuation_config_t tightened;
+
+    if ((sequence == 0) || (actuation == 0) ||
+        (foc_lsi_config_is_valid(sequence) == 0U) ||
+        (actuation->struct_size != sizeof(*actuation)) ||
+        (actuation->version != FOC_LSI_ACTUATION_CONFIG_VERSION) ||
+        !isfinite(actuation->maximum_bias_current_a) ||
+        !isfinite(actuation->maximum_perturbation_voltage_v) ||
+        !isfinite(actuation->current_trip_a) ||
+        !isfinite(actuation->minimum_bus_voltage_v) ||
+        !isfinite(actuation->maximum_bus_voltage_v) ||
+        (sequence->bias_current_a >
+         FOC_LSI_H2_FIRST_MAX_BIAS_CURRENT_A) ||
+        (sequence->perturbation_voltage_v >
+         FOC_LSI_H2_FIRST_MAX_PERTURBATION_V) ||
+        (sequence->current_trip_a > FOC_LSI_H2_FIRST_CURRENT_TRIP_A) ||
+        (sequence->bias_current_a > actuation->maximum_bias_current_a) ||
+        (sequence->perturbation_voltage_v >
+         actuation->maximum_perturbation_voltage_v) ||
+        (sequence->current_trip_a > actuation->current_trip_a) ||
+        (sequence->bus_voltage_min_v < actuation->minimum_bus_voltage_v) ||
+        (sequence->bus_voltage_max_v > actuation->maximum_bus_voltage_v))
+    {
+        return 0U;
+    }
+
+    tightened = *actuation;
+    tightened.maximum_bias_current_a = sequence->bias_current_a;
+    tightened.maximum_perturbation_voltage_v =
+        sequence->perturbation_voltage_v;
+    tightened.current_trip_a = sequence->current_trip_a;
+    tightened.minimum_bus_voltage_v = sequence->bus_voltage_min_v;
+    tightened.maximum_bus_voltage_v = sequence->bus_voltage_max_v;
+    *actuation = tightened;
+    return 1U;
 }
 
 uint32_t foc_lsi_management_init(foc_lsi_management_t *management)

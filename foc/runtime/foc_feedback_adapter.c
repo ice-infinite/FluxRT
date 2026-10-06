@@ -181,3 +181,44 @@ bool foc_feedback_adapt_incremental_encoder(
     }
     return true;
 }
+
+bool foc_feedback_adapt_absolute_encoder(
+    const foc_absolute_encoder_feedback_port_t *input,
+    foc_feedback_source_sample_t *output)
+{
+    if ((input == NULL) || (input->calibrated > 1U) ||
+        !foc_feedback_adapter_begin(&input->common,
+                                    FOC_FEEDBACK_MODE_ABSOLUTE_ENCODER,
+                                    output))
+    {
+        return false;
+    }
+    if (input->common.available == 0U)
+    {
+        return true;
+    }
+    if (!isfinite(input->mechanical_position_rad) ||
+        !isfinite(input->multi_turn_position_rad) ||
+        !foc_feedback_three_values_finite(input->mechanical_velocity_rad_s,
+                                          input->electrical_angle_rad,
+                                          input->electrical_velocity_rad_s))
+    {
+        (void)memset(output, 0, sizeof(*output));
+        return false;
+    }
+    output->valid_flags = FOC_PRODUCT_FEEDBACK_VALID_KNOWN_MASK;
+    output->mechanical_position_rad = input->mechanical_position_rad;
+    output->multi_turn_position_rad = input->multi_turn_position_rad;
+    output->mechanical_velocity_rad_s = input->mechanical_velocity_rad_s;
+    output->electrical_angle_rad = input->electrical_angle_rad;
+    output->electrical_velocity_rad_s = input->electrical_velocity_rad_s;
+    if (input->calibrated != 0U)
+    {
+        output->quality_flags |= FOC_PRODUCT_FEEDBACK_QUALITY_CALIBRATED;
+    }
+    else
+    {
+        output->quality_flags |= FOC_PRODUCT_FEEDBACK_QUALITY_DEGRADED;
+    }
+    return true;
+}

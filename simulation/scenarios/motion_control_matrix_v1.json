@@ -5,7 +5,7 @@
   "revision": 2,
   "units": "SI",
   "profile_id": "fluxrt.stm32g431.ihm16m1.gbm2804h.reference",
-  "profile_revision": 1,
+  "profile_revision": 2,
   "model_revision": "fluxrt.motion.reference.v2",
   "runtime": {
     "control_frequency_hz": 12000,

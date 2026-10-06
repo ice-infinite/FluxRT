@@ -28,6 +28,57 @@ _Static_assert(
 #endif
 #define TEST_EXPECTED_CAPABILITY_MASK (143UL)
 #define TEST_EXPECTED_LSI_AUTHORIZED (0UL)
+#elif defined(TEST_EXPECT_SENSORLESS_CANDIDATE)
+#if !defined(FLUXRT_DIAGNOSTIC_BUILD) || \
+    !defined(FLUXRT_SENSORLESS_CANDIDATE_BUILD) || \
+    !defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD)
+#error "Sensorless FOC candidate capability contract changed"
+#endif
+#if defined(FLUXRT_RUNTIME_TUNING_BUILD) || defined(FLUXRT_TRACE_BUILD) || \
+    defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD) || \
+    defined(FLUXRT_MATH_DIAGNOSTICS_BUILD) || \
+    defined(FLUXRT_ADVANCED_CANDIDATE_BUILD) || \
+    defined(FLUXRT_MOTION_CANDIDATE_BUILD) || \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+#error "Sensorless candidate must contain only its dedicated no-power capability"
+#endif
+#define TEST_EXPECTED_CAPABILITY_MASK (256UL)
+#define TEST_EXPECTED_LSI_AUTHORIZED (0UL)
+#elif defined(TEST_EXPECT_AS5600_ALIGNMENT)
+#if !defined(FLUXRT_DIAGNOSTIC_BUILD) || \
+    !defined(FLUXRT_AS5600_TRUTH_BUILD) || \
+    !defined(FLUXRT_AS5600_ALIGNMENT_BUILD) || \
+    !defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD)
+#error "AS5600 alignment candidate capability contract changed"
+#endif
+#if defined(FLUXRT_RUNTIME_TUNING_BUILD) || defined(FLUXRT_TRACE_BUILD) || \
+    defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD) || \
+    defined(FLUXRT_MATH_DIAGNOSTICS_BUILD) || \
+    defined(FLUXRT_ADVANCED_CANDIDATE_BUILD) || \
+    defined(FLUXRT_SENSORLESS_CANDIDATE_BUILD) || \
+    defined(FLUXRT_MOTION_CANDIDATE_BUILD) || \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+#error "AS5600 alignment image must contain only truth and bounded alignment"
+#endif
+#define TEST_EXPECTED_CAPABILITY_MASK (3072UL)
+#define TEST_EXPECTED_LSI_AUTHORIZED (0UL)
+#elif defined(TEST_EXPECT_AS5600_TRUTH)
+#if !defined(FLUXRT_DIAGNOSTIC_BUILD) || \
+    !defined(FLUXRT_AS5600_TRUTH_BUILD) || \
+    !defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD)
+#error "AS5600 truth diagnostic capability contract changed"
+#endif
+#if defined(FLUXRT_RUNTIME_TUNING_BUILD) || defined(FLUXRT_TRACE_BUILD) || \
+    defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD) || \
+    defined(FLUXRT_MATH_DIAGNOSTICS_BUILD) || \
+    defined(FLUXRT_ADVANCED_CANDIDATE_BUILD) || \
+    defined(FLUXRT_SENSORLESS_CANDIDATE_BUILD) || \
+    defined(FLUXRT_MOTION_CANDIDATE_BUILD) || \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD)
+#error "AS5600 truth diagnostic must contain only its no-power capability"
+#endif
+#define TEST_EXPECTED_CAPABILITY_MASK (1024UL)
+#define TEST_EXPECTED_LSI_AUTHORIZED (0UL)
 #elif defined(TEST_EXPECT_ADVANCED_CANDIDATE)
 #if !defined(FLUXRT_DIAGNOSTIC_BUILD) || \
     !defined(FLUXRT_ADVANCED_CANDIDATE_BUILD) || \
@@ -43,6 +94,25 @@ _Static_assert(
 #error "Advanced FOC candidate must extend only the normal Diagnostic profile"
 #endif
 #define TEST_EXPECTED_CAPABILITY_MASK (79UL)
+#define TEST_EXPECTED_LSI_AUTHORIZED (0UL)
+#elif defined(TEST_EXPECT_H3_DYNAMIC_CANDIDATE)
+#if !defined(FLUXRT_DIAGNOSTIC_BUILD) || \
+    !defined(FLUXRT_ADVANCED_CANDIDATE_BUILD) || \
+    !defined(FLUXRT_H3_TIME_SYNC_BUILD) || \
+    !defined(FLUXRT_H3_DYNAMIC_QUERY_BUILD) || \
+    !defined(FLUXRT_H3_EDGE_CONTROL_TICK_BUILD) || \
+    !defined(FLUXRT_TRACE_BUILD)
+#error "H3 dynamic query candidate capability contract changed"
+#endif
+#if defined(FLUXRT_RUNTIME_TUNING_BUILD) || \
+    defined(FLUXRT_PHASE_VOLTAGE_CAPTURE_BUILD) || \
+    defined(FLUXRT_MATH_DIAGNOSTICS_BUILD) || \
+    defined(FLUXRT_MOTION_CANDIDATE_BUILD) || \
+    defined(FLUXRT_LSI_IDENTIFICATION_BUILD) || \
+    defined(FLUXRT_MOTOR_ARM_DISABLED_BUILD)
+#error "H3 dynamic query must be a stripped bounded Advanced image"
+#endif
+#define TEST_EXPECTED_CAPABILITY_MASK (578UL)
 #define TEST_EXPECTED_LSI_AUTHORIZED (0UL)
 #elif defined(TEST_EXPECT_MOTION_CANDIDATE)
 #if !defined(FLUXRT_DIAGNOSTIC_BUILD) || \
