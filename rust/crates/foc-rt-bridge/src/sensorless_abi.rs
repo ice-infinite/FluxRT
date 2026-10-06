@@ -1044,6 +1044,84 @@ mod tests {
         assert_eq!(output.request_apply_sequence, 43);
     }
 
+    /// Reproduces the G431 mode 3 no-power composite probe input on the host.
+    ///
+    /// The board run rejects on its very first tick with FSLSO reporting
+    /// `CONFIGURED | ENABLED | INJECTION_REQUESTED` and no fault-latched bit,
+    /// which rules out CapabilityMissing, SequenceMismatch and the applied
+    /// request checks (all of which latch).  That leaves the chain itself.
+    /// This test pins the exact probe configuration -- axis acquisition held
+    /// for the whole window, injection permitted, zero applied injection on the
+    /// first tick and the real unpowered ADC readings -- so the returned status
+    /// names the rejecting stage.
+    #[test]
+    fn mode3_probe_configuration_survives_axis_acquisition() {
+        let mut storage = storage();
+        unsafe { foc_rust_sensorless_init(&mut storage) };
+        let mut config = FocSensorlessRuntimeConfig::disabled_default();
+        config.enabled = 1;
+        // The platform holds acquisition for the whole probe window.
+        config.hfi.axis_stable_samples = u32::MAX;
+        assert_eq!(
+            unsafe {
+                foc_rust_sensorless_configure(
+                    &mut storage,
+                    &config,
+                    &safe_guard(FOC_SENSORLESS_REQUIRED_CAPABILITIES),
+                )
+            },
+            FocSensorlessStatus::Ok
+        );
+
+        let mut output = FocSensorlessRealtimeOutput::default();
+        // Tick 0: the real board reads an unpowered bus, so the currents are
+        // the ~2048-count offset translated to amperes.  The applied injection
+        // is zero because nothing has been requested yet.
+        let mut tick_input = input(0, AlphaBeta::default());
+        tick_input.input_flags = FOC_SENSORLESS_INPUT_INJECTION_PERMITTED;
+        tick_input.measured_current_alpha_a = 0.0015;
+        tick_input.measured_current_beta_a = 0.0013;
+        let first = unsafe { foc_rust_sensorless_step(&mut storage, &tick_input, &mut output) };
+        assert_eq!(
+            first,
+            FocSensorlessStatus::Ok,
+            "mode 3 first tick rejected: status={:?} flags={:#010x} stage={} failure={}",
+            first,
+            output.status_flags,
+            output.stage,
+            output.failure
+        );
+
+        // Then run the ledger forward the way the platform does: each tick
+        // applies the previous tick's request at the current sequence.
+        let mut applied = AlphaBeta {
+            alpha: output.injection_alpha_v,
+            beta: output.injection_beta_v,
+        };
+        for sequence in 1..64u32 {
+            let mut next = input(sequence, applied);
+            next.input_flags = FOC_SENSORLESS_INPUT_INJECTION_PERMITTED;
+            next.measured_current_alpha_a = 0.0015;
+            next.measured_current_beta_a = 0.0013;
+            let status = unsafe { foc_rust_sensorless_step(&mut storage, &next, &mut output) };
+            assert_eq!(
+                status,
+                FocSensorlessStatus::Ok,
+                "mode 3 tick {sequence} rejected: status={:?} flags={:#010x} stage={} failure={}",
+                status,
+                output.status_flags,
+                output.stage,
+                output.failure
+            );
+            assert_eq!(output.sample_sequence, sequence);
+            assert_eq!(output.request_apply_sequence, sequence + 1);
+            applied = AlphaBeta {
+                alpha: output.injection_alpha_v,
+                beta: output.injection_beta_v,
+            };
+        }
+    }
+
     #[test]
     fn skipped_tick_or_unapplied_request_latches_fail_zero() {
         let mut storage = storage();

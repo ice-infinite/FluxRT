@@ -459,7 +459,6 @@ static volatile uint32_t g_foc_sensorless_probe_mode;
  * ISR boundary.  These objects live only in the compile-time motor-arm-disabled
  * commissioning image and are cleared at every probe start/finish. */
 static foc_sensorless_composite_output_t g_foc_sensorless_composite_probe_output;
-static volatile uint32_t g_foc_sensorless_composite_applied_sequence;
 static volatile float g_foc_sensorless_composite_applied_alpha_v;
 static volatile float g_foc_sensorless_composite_applied_beta_v;
 static volatile uint32_t g_foc_sensorless_composite_applied_limited;
@@ -1853,6 +1852,57 @@ _Static_assert(FOC_SENSORLESS_PROBE_MODE_COMPOSITE == 3UL,
 #if defined(__RTTHREAD__)
 #include "rtthread.h"
 #endif
+/*
+ * Prime the combined entry's sequence water mark for mode 3.
+ *
+ * foc_rust_start_realtime() leaves controller.last_control_sequence at u32::MAX
+ * so that the first realtime call must present sequence 0.  The combined entry
+ * records input.control_sequence as its last accepted sequence and then demands
+ * exactly last + 1 on the next call, while the sensorless chain separately
+ * requires applied_request_sequence == sample_sequence and sample_sequence ==
+ * last_sample + 1.  Those two contracts together mean the first measured tick
+ * must present 1, which the u32::MAX water mark rejects.
+ *
+ * One priming call at sequence 0 resolves both: it moves the water mark to 0 and
+ * advances the chain to its second sample, so tick 1 presents 1 and every later
+ * tick stays contiguous.  The call runs with every output enable already off and
+ * its result is deliberately discarded -- it is not a measured tick, and the
+ * probe only counts ticks that go through complete_control/complete_commit.
+ */
+static void foc_platform_arm_composite_probe_sequence(void)
+{
+    foc_feedback_t feedback = {0};
+    foc_realtime_input_t input;
+    foc_output_t output;
+    foc_sensorless_composite_input_t composite_input = {0};
+
+    feedback.dc_bus_voltage = FOC_SENSORLESS_COMMISSIONING_BUS_VOLTAGE_V;
+    foc_realtime_input_from_legacy(
+        &feedback,
+        g_foc_control_sequence,
+        1.0f / (float)FOC_CONTROL_FREQUENCY_HZ,
+        &input);
+
+    composite_input.struct_size = sizeof(composite_input);
+    composite_input.version = FOC_SENSORLESS_COMPOSITE_INPUT_VERSION;
+    composite_input.platform_capabilities = FOC_SENSORLESS_REQUIRED_CAPABILITIES;
+    composite_input.input_flags = FOC_SENSORLESS_INPUT_INJECTION_PERMITTED;
+    composite_input.applied_request_sequence = input.control_sequence;
+    composite_input.voltage_limit_v = FOC_SENSORLESS_COMMISSIONING_VOLTAGE_LIMIT_V;
+    composite_input.minimum_duty = g_foc_platform_config.minimum_duty;
+    composite_input.maximum_duty = g_foc_platform_config.maximum_duty;
+
+    (void)foc_rust_realtime_step_sensorless(
+        g_foc_controller,
+        &g_foc_sensorless_probe_context,
+        &input,
+        &composite_input,
+        &output,
+        0,
+        &g_foc_sensorless_probe_output,
+        &g_foc_sensorless_composite_probe_output);
+}
+
 static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
     int32_t current_u_counts,
     int32_t current_v_counts,
@@ -1875,15 +1925,35 @@ static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
         goto fail_closed;
     }
 
+    /* The sensorless chain requires applied_request_sequence == sample_sequence
+     * on every tick, not just the first: sensorless_abi.rs compares them
+     * unconditionally and treats a mismatch as a chain fault.  The combined
+     * entry derives sensorless_input.sample_sequence from
+     * input.control_sequence but sensorless_input.applied_request_sequence from
+     * composite_input, so the two only stay equal if the control sequence for
+     * this tick is already the value the previous tick's composite output
+     * published as pwm_sequence.  Advance the counter before building the
+     * input, which makes both fields equal the current tick, and drop the
+     * trailing increment that modes 1/2 use.  probe_start zeroes the counter,
+     * so tick 0 is the first value and start_realtime's u32::MAX water mark
+     * accepts it. */
+    ++g_foc_control_sequence;
+
     /* The formal entry owns the current sample: it Clarkes once and feeds both
      * the full-speed angle chain and the basic current loop from that single
      * snapshot.  Raw ADC codes stay on this side of the ABI. */
     feedback.phase_current_a = (float)current_u_counts / FOC_CURRENT_COUNTS_PER_AMP;
     feedback.phase_current_b = (float)current_v_counts / FOC_CURRENT_COUNTS_PER_AMP;
     feedback.phase_current_c = (float)current_w_counts / FOC_CURRENT_COUNTS_PER_AMP;
-    feedback.dc_bus_voltage =
-        ((float)g_foc_diagnostics.bus_voltage_raw * FOC_ADC_REFERENCE_VOLTAGE) /
-        (FOC_ADC_FULL_SCALE * FOC_BUS_PARTITIONING_FACTOR);
+    /* The combined entry derives its final voltage limit from the bus voltage,
+     * not from composite_input.voltage_limit_v alone, and rejects a zero or
+     * non-finite limit.  A physically depowered bus would therefore abort the
+     * probe before any useful work, so this image substitutes the fixed
+     * commissioning bus voltage exactly as the mode 1/2 compose step already
+     * does.  It is a measurement envelope, never a claim that 12.3 V is
+     * present: no output can reach the pins because every commit stays behind
+     * g_foc_control_armed. */
+    feedback.dc_bus_voltage = FOC_SENSORLESS_COMMISSIONING_BUS_VOLTAGE_V;
     feedback.electrical_angle_rad = 0.0f;
     foc_realtime_input_from_legacy(
         &feedback,
@@ -1905,10 +1975,16 @@ static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
         composite_input.input_flags |=
             FOC_SENSORLESS_INPUT_APPLIED_INJECTION_LIMITED;
     }
-    /* The prior composite tick published this value; the combined entry reads
-     * it as its N/N+1 ledger. */
-    composite_input.applied_request_sequence =
-        g_foc_sensorless_composite_applied_sequence;
+    /* The combined entry checks applied_request_sequence == input.control_sequence
+     * and then forwards that same value as the chain's applied_request_sequence,
+     * which sensorless_abi.rs requires to equal sample_sequence on every tick.
+     * It must therefore carry this tick's number, not the previous tick's
+     * output sequence: the "N+1" relation is already enforced on the Rust side,
+     * which publishes pwm_sequence = control_sequence + 1 and consumes it as the
+     * next tick's applied_request_sequence.  The injection values below stay the
+     * previous tick's published output, because those are what the chain's
+     * N/N+1 ledger actually compares. */
+    composite_input.applied_request_sequence = input.control_sequence;
     composite_input.applied_injection_alpha_v =
         g_foc_sensorless_composite_applied_alpha_v;
     composite_input.applied_injection_beta_v =
@@ -1947,8 +2023,6 @@ static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
      * same mismatch instead of silently resynchronising. */
     if (control_status == FOC_STATUS_OK)
     {
-        g_foc_sensorless_composite_applied_sequence =
-            g_foc_sensorless_composite_probe_output.pwm_sequence;
         g_foc_sensorless_composite_applied_alpha_v =
             g_foc_sensorless_composite_probe_output.applied_injection_alpha_v;
         g_foc_sensorless_composite_applied_beta_v =
@@ -4202,13 +4276,26 @@ foc_status_t foc_platform_sensorless_candidate_probe_start(
          * entry as a sequence mismatch. */
         (void)memset(&g_foc_sensorless_composite_probe_output, 0,
                      sizeof(g_foc_sensorless_composite_probe_output));
-        g_foc_sensorless_composite_applied_sequence = 0U;
         g_foc_sensorless_composite_applied_alpha_v = 0.0f;
         g_foc_sensorless_composite_applied_beta_v = 0.0f;
         g_foc_sensorless_composite_applied_limited = 0U;
         g_foc_sensorless_probe_mode = mode;
         g_foc_advanced_probe_active = 1U;
+        /* Mode 3 advances the control sequence before each combined call (see
+         * the composite probe step), because the sensorless chain requires
+         * applied_request_sequence == sample_sequence on every tick.  The
+         * combined core records input.control_sequence as its last accepted
+         * sequence and the next call must present exactly last + 1, so the
+         * first real tick has to present 1.  Start the counter at 0 and also
+         * move the controller's water mark from foc_rust_start_realtime()'s
+         * u32::MAX to 0 with one priming call, which also lets that first call
+         * advance the chain to its second sample so tick 1 keeps the ledger
+         * contiguous.  Modes 1 and 2 never read this counter. */
         g_foc_control_sequence = 0U;
+        if (mode == FOC_SENSORLESS_PROBE_MODE_COMPOSITE)
+        {
+            (void)foc_platform_arm_composite_probe_sequence();
+        }
         g_foc_diagnostics.realtime_step_count = 0U;
         g_foc_diagnostics.realtime_error_count = 0U;
         g_foc_diagnostics.deadline_miss_count = 0U;
@@ -4285,7 +4372,6 @@ foc_status_t foc_platform_sensorless_candidate_probe_finish(void)
                  sizeof(g_foc_sensorless_composite_output));
     (void)memset(&g_foc_sensorless_composite_probe_output, 0,
                  sizeof(g_foc_sensorless_composite_probe_output));
-    g_foc_sensorless_composite_applied_sequence = 0U;
     g_foc_sensorless_composite_applied_alpha_v = 0.0f;
     g_foc_sensorless_composite_applied_beta_v = 0.0f;
     g_foc_sensorless_composite_applied_limited = 0U;

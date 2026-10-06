@@ -5088,6 +5088,129 @@ mod tests {
 
     #[cfg(feature = "sensorless-foc")]
     #[test]
+    fn sensorless_composite_rejects_a_depowered_bus_before_the_chain_blames_itself() {
+        // G431 mode 3 runs the combined entry with a real but unpowered bus.
+        // The chain itself accepts that input (see
+        // sensorless_abi::tests::mode3_probe_configuration_survives_axis_acquisition);
+        // what fails is the composite voltage limit, which is derived from the
+        // bus voltage rather than from composite_input.voltage_limit_v alone.
+        // Pin that here so the no-power probe cannot be mistaken for a chain
+        // rejection: the whole point of the probe is to measure the cost of a
+        // realistic bus envelope, so the platform must supply the commissioning
+        // bus voltage instead of the depowered ADC reading.
+        let mut context = started_realtime_context();
+        let mut sensorless = FocSensorlessContextStorage {
+            bytes: [0; FOC_SENSORLESS_CONTEXT_CAPACITY],
+        };
+        let mut sensorless_config = FocSensorlessRuntimeConfig::disabled_default();
+        sensorless_config.enabled = 1;
+        sensorless_config.hfi.axis_stable_samples = u32::MAX;
+        let guard = FocSensorlessConfigureGuard {
+            struct_size: core::mem::size_of::<FocSensorlessConfigureGuard>() as u32,
+            version: FOC_SENSORLESS_GUARD_VERSION,
+            controller_stopped: 1,
+            outputs_disabled: 1,
+            no_faults: 1,
+            platform_capabilities: FOC_SENSORLESS_REQUIRED_CAPABILITIES,
+            reserved: 0,
+        };
+        unsafe {
+            assert_eq!(
+                foc_rust_sensorless_init(&mut sensorless),
+                FocSensorlessStatus::Ok
+            );
+            assert_eq!(
+                foc_rust_sensorless_configure(&mut sensorless, &sensorless_config, &guard),
+                FocSensorlessStatus::Ok
+            );
+        }
+        let composite_input = FocSensorlessCompositeInput {
+            struct_size: core::mem::size_of::<FocSensorlessCompositeInput>() as u32,
+            version: FOC_SENSORLESS_COMPOSITE_INPUT_VERSION,
+            platform_capabilities: FOC_SENSORLESS_REQUIRED_CAPABILITIES,
+            input_flags: FOC_SENSORLESS_INPUT_INJECTION_PERMITTED | FOC_SENSORLESS_INPUT_BEMF_VALID,
+            applied_request_sequence: 0,
+            reserved: 0,
+            applied_injection_alpha_v: 0.0,
+            applied_injection_beta_v: 0.0,
+            voltage_limit_v: 6.5,
+            minimum_duty: 0.03,
+            maximum_duty: 0.97,
+        };
+
+        // A depowered bus: the probe's ADC reads a few millivolts.
+        let mut depowered = realtime_input(FocFeedback {
+            phase_current_a: 0.0015,
+            phase_current_b: 0.0013,
+            phase_current_c: -0.0028,
+            dc_bus_voltage: 0.0,
+            electrical_angle_rad: 0.0,
+        });
+        let mut output = FocOutput::default();
+        let mut telemetry = FocTelemetry::default();
+        let mut sensorless_output = FocSensorlessRealtimeOutput::default();
+        let mut composite_output = FocSensorlessCompositeOutput::default();
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step_sensorless(
+                    &mut context,
+                    &mut sensorless,
+                    &depowered,
+                    &composite_input,
+                    &mut output,
+                    &mut telemetry,
+                    &mut sensorless_output,
+                    &mut composite_output,
+                )
+            },
+            FocStatus::HardwareFault,
+            "a depowered bus must not silently produce a composite frame"
+        );
+        // The chain ran first and succeeded; the blame belongs to the envelope.
+        assert_ne!(
+            sensorless_output.status_flags & FOC_SENSORLESS_OUTPUT_INJECTION_REQUESTED,
+            0,
+            "the chain must have produced its request before the envelope rejected it"
+        );
+        assert_eq!(output, FocOutput::default());
+
+        // Add a coherent bus voltage and a fresh context, and the same frame is
+        // accepted.  This is what the platform must supply for mode 3.
+        let mut context = started_realtime_context();
+        let mut sensorless = FocSensorlessContextStorage {
+            bytes: [0; FOC_SENSORLESS_CONTEXT_CAPACITY],
+        };
+        unsafe {
+            assert_eq!(
+                foc_rust_sensorless_init(&mut sensorless),
+                FocSensorlessStatus::Ok
+            );
+            assert_eq!(
+                foc_rust_sensorless_configure(&mut sensorless, &sensorless_config, &guard),
+                FocSensorlessStatus::Ok
+            );
+        }
+        depowered.dc_bus_voltage = 12.3;
+        assert_eq!(
+            unsafe {
+                foc_rust_realtime_step_sensorless(
+                    &mut context,
+                    &mut sensorless,
+                    &depowered,
+                    &composite_input,
+                    &mut output,
+                    &mut telemetry,
+                    &mut sensorless_output,
+                    &mut composite_output,
+                )
+            },
+            FocStatus::Ok
+        );
+        assert_eq!(composite_output.pwm_sequence, 1);
+    }
+
+    #[cfg(feature = "sensorless-foc")]
+    #[test]
     fn sensorless_composite_uses_one_current_sample_and_closes_n_plus_one_ledger() {
         let mut context = started_realtime_context();
         let mut sensorless = FocSensorlessContextStorage {
