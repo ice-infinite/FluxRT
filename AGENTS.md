@@ -105,6 +105,15 @@ seven checks and state the outcome of each:
    to the code under test. Write diagnostics into RAM fields and emit them from a thread after the
    ISR has exited. When a measurement looks implausible, suspect the instrumentation before the
    subject, and say which of the two a number can actually support.
+9. **Edit source by hand, one change at a time, compiling after each** — never batch-rewrite source
+   with regex or scripted line surgery. A single round of that turned eleven edits into a cascade
+   of `attributes on expressions`, missing declarations, and inserted-into-the-wrong-construct
+   errors, ending in line concatenation that damaged code unrelated to the change; the compiler
+   reported locations that pointed away from the real cause, and roughly ten builds were spent
+   before it was abandoned and reverted. `#[cfg]` may not be attached to an expression in Rust, so
+   changes that straddle the statement/expression boundary always need hand editing. If the first
+   unexpected compile error points somewhere unrelated to the edit, revert and redo rather than
+   layering more changes on top.
 
 If a check cannot be satisfied, say so plainly and stop rather than declaring success. When a
 probe or measurement change turns out to be ineffective, remove it from the diff instead of
