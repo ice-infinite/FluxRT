@@ -594,14 +594,45 @@ fn input_valid(input: &FocSensorlessRealtimeInput) -> bool {
         && input.bemf_electrical_speed_rad_s.is_finite()
 }
 
+/// Resets exactly the fields of `FocSensorlessRealtimeOutput` that no other path
+/// fills in for this frame.
+///
+/// The struct is 148 bytes and used to be rebuilt from `default()` here, twice
+/// per tick, which measured as a visible share of the frame.  Sixteen of its
+/// fields are written by `publish_chain_output`, `electrical_speed_rad_s` is
+/// written on both branches of the fused-speed update, and the four cycle fields
+/// are written only when timing is requested (they read 0 otherwise, which is
+/// their documented "not measured" value).  That leaves the identity fields and
+/// the measurement fields below, which is what this clears -- so the output is
+/// still fully defined on every return path, just without the bulk write.
 fn prepare_output(output: &mut FocSensorlessRealtimeOutput, sequence: u32) {
-    *output = FocSensorlessRealtimeOutput {
-        struct_size: size_of::<FocSensorlessRealtimeOutput>() as u32,
-        version: FOC_SENSORLESS_OUTPUT_VERSION,
-        sample_sequence: sequence,
-        request_apply_sequence: sequence.wrapping_add(1),
-        ..FocSensorlessRealtimeOutput::default()
-    };
+    output.struct_size = size_of::<FocSensorlessRealtimeOutput>() as u32;
+    output.version = FOC_SENSORLESS_OUTPUT_VERSION;
+    output.sample_sequence = sequence;
+    output.request_apply_sequence = sequence.wrapping_add(1);
+    // `publish_chain_output` ORs into these rather than assigning, so they must
+    // start clean or a previous frame's bits would carry over.
+    output.status_flags = 0;
+    // A failed step must not leak the previous frame's injection request: a
+    // caller that ignored the status would otherwise see a command that was
+    // never re-issued.  Guarded by
+    // `skipped_tick_or_unapplied_request_latches_fail_zero`.
+    output.injection_alpha_v = 0.0;
+    output.injection_beta_v = 0.0;
+    // Not written by either publish path; they read 0 when the caller did not
+    // request timing, which is their documented "not measured" value.
+    output.chain_cycles = 0;
+    output.chain_hfi_cycles = 0;
+    output.chain_fusion_cycles = 0;
+    output.chain_separator_cycles = 0;
+    output.core_gate_cycles = 0;
+    output.core_observer_cycles = 0;
+    output.core_startup_cycles = 0;
+    output.core_current_loop_cycles = 0;
+    output.tail_setup_cycles = 0;
+    output.reference_cycles = 0;
+    output.tail_finish_cycles = 0;
+    output.core_total_cycles = 0;
 }
 
 fn applied_request_matches(expected: AlphaBeta, applied: AlphaBeta) -> Option<bool> {
