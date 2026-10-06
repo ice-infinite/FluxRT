@@ -54,6 +54,12 @@
 #include "foc_advanced_bridge.h"
 #include "foc_platform_advanced_candidate.h"
 #endif
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_SENSORLESS_CONTROL_CANDIDATE)
+/* Declares FOC_SENSORLESS_PROBE_DECOMP_TICKS and the mode-3 decomposition
+ * getters used by foc_sensorless_wcet_decomp below. */
+#include "foc_sensorless_platform.h"
+#endif
 #if defined(FLUXRT_POWER_CANDIDATE_BUILD)
 #include "foc_power_management.h"
 #endif
@@ -2673,6 +2679,55 @@ static int foc_sensorless_wcet(int argc, char **argv)
     return ((finish_status == FOC_STATUS_OK) && (result == 0)) ? 0 : -1;
 }
 MSH_CMD_EXPORT(foc_sensorless_wcet, -);
+
+/* foc_sensorless_wcet_decomp [max]
+ *
+ * Emits the mode-3 cold-start decomposition recorded by the previous
+ * `foc_sensorless_wcet ... 3` run.  The first composite tick overruns the ISR
+ * deadline; without this buffer the probe stops there and the recurring cost is
+ * unknowable.  The platform records the first N ticks into RAM and this thread
+ * prints them after the ADC ISR has exited -- nothing on the realtime path may
+ * print, because that changes what is being measured.
+ *
+ * Output: `FSLD,n=<count>` then `FSLD,<index>,<total>,<control>` per tick.
+ * Tick 0 is the first measured tick, so tick 0 vs tick 1..n separates the
+ * one-off cold-start cost from the recurring one. */
+static int foc_sensorless_wcet_decomp(int argc, char **argv)
+{
+    static uint16_t totals[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
+    static uint16_t controls[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
+    uint32_t limit = FOC_SENSORLESS_PROBE_DECOMP_TICKS;
+    uint32_t count;
+    uint32_t index;
+
+    if ((argc >= 2) && (foc_shell_parse_u32(argv[1], &limit) == 0U))
+    {
+        rt_kprintf("FSLD,ERR,usage\n");
+        return -1;
+    }
+    if ((argc > 2) || (limit == 0U))
+    {
+        rt_kprintf("FSLD,ERR,usage\n");
+        return -1;
+    }
+    if (limit > FOC_SENSORLESS_PROBE_DECOMP_TICKS)
+    {
+        limit = FOC_SENSORLESS_PROBE_DECOMP_TICKS;
+    }
+    count = foc_platform_sensorless_probe_decomp_copy(totals, controls, limit);
+    rt_kprintf("FSLD,n=%u,deadline=%u\n",
+               (unsigned int)count,
+               (unsigned int)FOC_DEFAULT_ISR_DEADLINE_CYCLES);
+    for (index = 0U; index < count; ++index)
+    {
+        rt_kprintf("FSLD,%u,%u,%u\n",
+                   (unsigned int)index,
+                   (unsigned int)totals[index],
+                   (unsigned int)controls[index]);
+    }
+    return 0;
+}
+MSH_CMD_EXPORT(foc_sensorless_wcet_decomp, -);
 #endif
 
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \

@@ -462,6 +462,40 @@ static foc_sensorless_composite_output_t g_foc_sensorless_composite_probe_output
 static volatile float g_foc_sensorless_composite_applied_alpha_v;
 static volatile float g_foc_sensorless_composite_applied_beta_v;
 static volatile uint32_t g_foc_sensorless_composite_applied_limited;
+#define FOC_SENSORLESS_PROBE_DEADLINE_RELAXED_CYCLES (1000000UL)
+/*
+ * Mode 3 cold-start decomposition recorder.
+ *
+ * The first measured composite tick costs more than the 12,750-cycle deadline,
+ * and a deadline overrun latches a fault, which advances fault_epoch, which the
+ * probe's commit step reads as a changed epoch and stops the run.  So the first
+ * tick is also the last one and nothing is known about steady state.
+ *
+ * To separate the one-off cold-start cost (chain setup, observer reset,
+ * separator initialisation, first sin/cos) from the recurring cost, mode 3 has
+ * to let the probe survive its own overruns and record per-tick cycle counts
+ * into RAM.  That needs exactly one relaxed threshold and nothing else:
+ *
+ *   - ONLY the ISR deadline comparison is widened, and only while a mode-3 probe
+ *     is still filling this buffer.  No fault latch, safety bit, arm gate,
+ *     current limit or bus window is touched, and the overrun is still counted,
+ *     still sets FOC_PLATFORM_DIAG_DEADLINE_MISSED, and is still reported.
+ *   - The relaxation exists solely because the deadline guard protects a live
+ *     control loop, and this probe never has one: the controller is not armed,
+ *     Gate/MOE/CCER are re-verified safe-off on every tick, and no output can
+ *     reach the pins.  It is bounded by the buffer capacity and ends with the
+ *     probe.
+ *
+ * This is a deliberate, reviewable exception.  It must not be copied to any
+ * armed path.
+ *
+ * Written only from the mode-3 probe ISR; read by the Shell through
+ * foc_sensorless_wcet_decomp().  Fixed capacity, no allocation, and never
+ * touched outside a mode-3 probe.
+ */
+static uint16_t g_foc_probe_decomp_total[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
+static uint16_t g_foc_probe_decomp_control[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
+static volatile uint32_t g_foc_probe_decomp_count;
 #define FOC_SENSORLESS_COMMISSIONING_BUS_VOLTAGE_V (12.3f)
 #define FOC_SENSORLESS_COMMISSIONING_VOLTAGE_LIMIT_V (6.5f)
 /* Mode 3 exercises the formal combined transaction in the real ADC ISR while
@@ -4352,6 +4386,8 @@ foc_status_t foc_platform_sensorless_candidate_probe_start(
         {
             (void)foc_platform_arm_composite_probe_sequence();
         }
+        /* The decomposition buffer is only meaningful for one probe run. */
+        g_foc_probe_decomp_count = 0U;
         g_foc_diagnostics.realtime_step_count = 0U;
         g_foc_diagnostics.realtime_error_count = 0U;
         g_foc_diagnostics.deadline_miss_count = 0U;
@@ -4403,6 +4439,55 @@ foc_status_t foc_platform_sensorless_candidate_probe_get_status(
     (void)status;
     (void)output;
     return FOC_STATUS_NOT_CONFIGURED;
+#endif
+}
+
+uint32_t foc_platform_sensorless_probe_decomp_count(void)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_SENSORLESS_CONTROL_CANDIDATE)
+    return g_foc_probe_decomp_count;
+#else
+    return 0U;
+#endif
+}
+
+uint32_t foc_platform_sensorless_probe_decomp_copy(
+    uint16_t *total_cycles,
+    uint16_t *control_cycles,
+    uint32_t capacity)
+{
+#if defined(FOC_TARGET_STM32G431) && \
+    defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_SENSORLESS_CONTROL_CANDIDATE)
+    uint32_t count;
+    uint32_t index;
+
+    if ((total_cycles == 0) || (control_cycles == 0))
+    {
+        return 0U;
+    }
+    count = g_foc_probe_decomp_count;
+    if (count > FOC_SENSORLESS_PROBE_DECOMP_TICKS)
+    {
+        count = FOC_SENSORLESS_PROBE_DECOMP_TICKS;
+    }
+    if (count > capacity)
+    {
+        count = capacity;
+    }
+    for (index = 0U; index < count; ++index)
+    {
+        total_cycles[index] = g_foc_probe_decomp_total[index];
+        control_cycles[index] = g_foc_probe_decomp_control[index];
+    }
+    return count;
+#else
+    (void)total_cycles;
+    (void)control_cycles;
+    (void)capacity;
+    return 0U;
 #endif
 }
 
@@ -5749,6 +5834,29 @@ void ADC1_2_IRQHandler(void)
             timing_sample.trace_sampled = trace_sampled;
             (void)foc_realtime_timing_record(&g_foc_timing_stats, &timing_sample);
 
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_SENSORLESS_CONTROL_CANDIDATE)
+            /* Cold-start decomposition for mode 3.  The first composite tick is
+             * known to overrun, so the probe stops there and nothing is known
+             * about steady state.  Record the first N ticks into a fixed RAM
+             * buffer; the Shell emits them after the ISR has exited, because a
+             * print on this path changes what it measures (AGENTS.md check 8). */
+            if ((g_foc_sensorless_probe_mode ==
+                 FOC_SENSORLESS_PROBE_MODE_COMPOSITE) &&
+                (g_foc_probe_decomp_count < FOC_SENSORLESS_PROBE_DECOMP_TICKS))
+            {
+                uint32_t slot = g_foc_probe_decomp_count;
+
+                g_foc_probe_decomp_total[slot] =
+                    (timing_sample.total_cycles > 0xFFFFU) ?
+                        0xFFFFU : (uint16_t)timing_sample.total_cycles;
+                g_foc_probe_decomp_control[slot] =
+                    (timing_sample.control_cycles > 0xFFFFU) ?
+                        0xFFFFU : (uint16_t)timing_sample.control_cycles;
+                g_foc_probe_decomp_count = slot + 1U;
+            }
+#endif
+
             /* Compatibility fields remain independent peaks; never add them. */
             g_foc_diagnostics.maximum_isr_cycles =
                 g_foc_timing_stats.wcet.total_cycles;
@@ -5758,7 +5866,26 @@ void ADC1_2_IRQHandler(void)
                 g_foc_timing_stats.peak_control_cycles;
             g_foc_diagnostics.maximum_postcontrol_cycles =
                 g_foc_timing_stats.peak_postcontrol_cycles;
-            if (timing_sample.total_cycles > g_foc_platform_config.isr_deadline_cycles)
+            /* The deadline guard protects a live control loop.  A mode-3 probe
+             * never has one, and it has to survive its own overruns or the
+             * first tick is also the last and the steady-state cost stays
+             * unmeasured.  Widen ONLY this comparison, ONLY for the bounded
+             * window in which that probe is still filling its RAM buffer: the
+             * overrun is still counted and still flagged, and every other guard
+             * and fault is untouched.  Never copy this to an armed path. */
+            uint32_t effective_deadline_cycles =
+                g_foc_platform_config.isr_deadline_cycles;
+#if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
+    defined(FOC_SENSORLESS_CONTROL_CANDIDATE)
+            if ((g_foc_sensorless_probe_mode ==
+                 FOC_SENSORLESS_PROBE_MODE_COMPOSITE) &&
+                (g_foc_probe_decomp_count < FOC_SENSORLESS_PROBE_DECOMP_TICKS))
+            {
+                effective_deadline_cycles =
+                    FOC_SENSORLESS_PROBE_DEADLINE_RELAXED_CYCLES;
+            }
+#endif
+            if (timing_sample.total_cycles > effective_deadline_cycles)
             {
                 ++g_foc_diagnostics.deadline_miss_count;
                 g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_DEADLINE_MISSED;
