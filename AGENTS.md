@@ -97,6 +97,14 @@ seven checks and state the outcome of each:
    must not silently continue.
 7. **Test coverage** — new paths need new coverage; existing coverage must still pass. Record what
    ran and what did not run.
+8. **Diagnostics must not perturb what they measure** — never call `rt_kprintf` or any other
+   blocking/formatting function from the realtime ISR, *including* a "print only on failure" form,
+   because the failure path runs inside the same ISR. On the G431 a single per-tick print inflated
+   the same measurement by 67–109× and, by overrunning the ISR, tripped the tail deadline check,
+   latched a fault and advanced `fault_epoch` — manufacturing a fault that looked like it belonged
+   to the code under test. Write diagnostics into RAM fields and emit them from a thread after the
+   ISR has exited. When a measurement looks implausible, suspect the instrumentation before the
+   subject, and say which of the two a number can actually support.
 
 If a check cannot be satisfied, say so plainly and stop rather than declaring success. When a
 probe or measurement change turns out to be ineffective, remove it from the diff instead of
