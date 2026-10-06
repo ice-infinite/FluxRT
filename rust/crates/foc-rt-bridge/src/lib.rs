@@ -5088,6 +5088,124 @@ mod tests {
 
     #[cfg(feature = "sensorless-foc")]
     #[test]
+    fn sensorless_composite_reproduces_the_g431_mode3_probe_call_sequence() {
+        // Replays exactly what the G431 composite probe does, in order, so the
+        // board's first-tick rejection is reproduced and named on the host.
+        // The board reported FSLSC,cst=4 (HardwareFault) with cs == arq == 1,
+        // i.e. the ledger matched and the combined core itself rejected the
+        // tick.  Reproducing it here removes the need to bisect on hardware.
+        let mut context = started_realtime_context();
+        let mut sensorless = FocSensorlessContextStorage {
+            bytes: [0; FOC_SENSORLESS_CONTEXT_CAPACITY],
+        };
+        // The platform holds acquisition for the whole probe window.
+        let mut sensorless_config = FocSensorlessRuntimeConfig::disabled_default();
+        sensorless_config.enabled = 1;
+        sensorless_config.hfi.axis_stable_samples = u32::MAX;
+        let guard = FocSensorlessConfigureGuard {
+            struct_size: core::mem::size_of::<FocSensorlessConfigureGuard>() as u32,
+            version: FOC_SENSORLESS_GUARD_VERSION,
+            controller_stopped: 1,
+            outputs_disabled: 1,
+            no_faults: 1,
+            platform_capabilities: FOC_SENSORLESS_REQUIRED_CAPABILITIES,
+            reserved: 0,
+        };
+        unsafe {
+            assert_eq!(
+                foc_rust_sensorless_init(&mut sensorless),
+                FocSensorlessStatus::Ok
+            );
+            assert_eq!(
+                foc_rust_sensorless_configure(&mut sensorless, &sensorless_config, &guard),
+                FocSensorlessStatus::Ok
+            );
+        }
+
+        // The probe's synthetic, depowered ADC readings and the substituted
+        // commissioning bus voltage.
+        let feedback = FocFeedback {
+            phase_current_a: 0.0015,
+            phase_current_b: 0.0013,
+            phase_current_c: -0.0028,
+            dc_bus_voltage: 12.3,
+            electrical_angle_rad: 0.0,
+        };
+        let composite_input = FocSensorlessCompositeInput {
+            struct_size: core::mem::size_of::<FocSensorlessCompositeInput>() as u32,
+            version: FOC_SENSORLESS_COMPOSITE_INPUT_VERSION,
+            platform_capabilities: FOC_SENSORLESS_REQUIRED_CAPABILITIES,
+            input_flags: FOC_SENSORLESS_INPUT_INJECTION_PERMITTED | FOC_SENSORLESS_INPUT_BEMF_VALID,
+            applied_request_sequence: 0,
+            reserved: 0,
+            applied_injection_alpha_v: 0.0,
+            applied_injection_beta_v: 0.0,
+            voltage_limit_v: 6.5,
+            minimum_duty: 0.03,
+            maximum_duty: 0.97,
+        };
+        let mut output = FocOutput::default();
+        let mut telemetry = FocTelemetry::default();
+        let mut sensorless_output = FocSensorlessRealtimeOutput::default();
+        let mut composite_output = FocSensorlessCompositeOutput::default();
+
+        // Step 1: the discarded priming call at sequence 0.  It moves the
+        // water mark that foc_rust_start_realtime() left at u32::MAX and
+        // advances the chain to its second sample.
+        let mut input = realtime_input(feedback);
+        input.control_sequence = 0;
+        let mut priming = composite_input;
+        priming.applied_request_sequence = input.control_sequence;
+        let prime_status = unsafe {
+            foc_rust_realtime_step_sensorless(
+                &mut context,
+                &mut sensorless,
+                &input,
+                &priming,
+                &mut output,
+                &mut telemetry,
+                &mut sensorless_output,
+                &mut composite_output,
+            )
+        };
+
+        // Step 2: the first measured tick, sequence 1, applying what the
+        // priming call published as pwm_sequence.
+        let mut input = realtime_input(feedback);
+        input.control_sequence = 1;
+        let mut measured = composite_input;
+        measured.applied_request_sequence = input.control_sequence;
+        measured.applied_injection_alpha_v = composite_output.applied_injection_alpha_v;
+        measured.applied_injection_beta_v = composite_output.applied_injection_beta_v;
+        let measured_status = unsafe {
+            foc_rust_realtime_step_sensorless(
+                &mut context,
+                &mut sensorless,
+                &input,
+                &measured,
+                &mut output,
+                &mut telemetry,
+                &mut sensorless_output,
+                &mut composite_output,
+            )
+        };
+
+        assert_eq!(
+            measured_status,
+            FocStatus::Ok,
+            "mode 3 tick 1 rejected on the host: prime={:?} measured={:?} \
+             controller={:?} chain_flags={:#010x} chain_stage={} chain_failure={}",
+            prime_status,
+            measured_status,
+            unsafe { foc_rust_state(&mut context) },
+            sensorless_output.status_flags,
+            sensorless_output.stage,
+            sensorless_output.failure
+        );
+    }
+
+    #[cfg(feature = "sensorless-foc")]
+    #[test]
     fn sensorless_composite_rejects_a_depowered_bus_before_the_chain_blames_itself() {
         // G431 mode 3 runs the combined entry with a real but unpowered bus.
         // The chain itself accepts that input (see

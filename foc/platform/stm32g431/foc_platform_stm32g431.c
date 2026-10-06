@@ -1967,9 +1967,16 @@ static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
      * only inside the compile-time motor-arm-disabled commissioning image so
      * the combined ABI can exercise its ledger; it is never board proof. */
     composite_input.platform_capabilities = FOC_SENSORLESS_REQUIRED_CAPABILITIES;
-    composite_input.input_flags =
-        FOC_SENSORLESS_INPUT_INJECTION_PERMITTED |
-        FOC_SENSORLESS_INPUT_BEMF_VALID;
+    /* Injection-only, matching the deterministic mode 2 configuration.  The
+     * combined entry derives bemf_available itself from
+     * controller.telemetry.observer_reliable, and the priming call runs a real
+     * core tick, so the observer can flip to reliable between the priming call
+     * and the first measured tick.  Asserting BEMF_VALID here would then hand
+     * the chain both an HFI request and a BEMF angle on the first measured
+     * tick but neither on the prime, which makes the measured cost depend on
+     * observer history rather than on the composite frame.  Leaving the bit
+     * clear keeps every measured tick on the same injection-only path. */
+    composite_input.input_flags = FOC_SENSORLESS_INPUT_INJECTION_PERMITTED;
     if (g_foc_sensorless_composite_applied_limited != 0U)
     {
         composite_input.input_flags |=
@@ -2005,17 +2012,28 @@ static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
 
     /* Mode 3 only: surface the first combined-entry rejection.  A silent
      * CONTROL_FAILURE gives no way to tell a rejected envelope from a rejected
-     * ledger, and this image exists precisely to make that measurable. */
+     * ledger, and this image exists precisely to make that measurable.  The
+     * extra fields let a host reproduction be checked field by field instead of
+     * bisected on hardware: `dt` is in microseconds and `vf`/`ovs` are the
+     * envelope and observer-selection selectors the same way the realtime
+     * contract reads them. */
     if ((g_foc_advanced_probe.decision_samples == 0U) &&
         (control_status != FOC_STATUS_OK))
     {
-        rt_kprintf("FSLSC,cst=%u,cs=%u,arq=%u,dmin=%u,dmax=%u,vlim=%u\n",
+        rt_kprintf("FSLSC,cst=%u,cs=%u,arq=%u,dmin=%u,dmax=%u,vlim=%u,"
+                   "dt=%u,vf=%08x,ovs=%u,hw=%08x,ss=%08x,sf=%u\n",
                    (unsigned int)control_status,
                    (unsigned int)input.control_sequence,
                    (unsigned int)composite_input.applied_request_sequence,
                    (unsigned int)(composite_input.minimum_duty * 1000.0f),
                    (unsigned int)(composite_input.maximum_duty * 1000.0f),
-                   (unsigned int)composite_input.voltage_limit_v);
+                   (unsigned int)composite_input.voltage_limit_v,
+                   (unsigned int)(input.actual_dt_s * 1000000.0f),
+                   (unsigned int)input.valid_flags,
+                   (unsigned int)input.observer_voltage_selection,
+                   (unsigned int)input.hardware_fault_flags,
+                   (unsigned int)g_foc_sensorless_probe_output.status_flags,
+                   (unsigned int)g_foc_sensorless_probe_output.failure);
     }
 
     /* Carry the ledger forward only from a Coherent tick.  A rejected tick
@@ -4271,14 +4289,15 @@ foc_status_t foc_platform_sensorless_candidate_probe_start(
                      sizeof(g_foc_sensorless_probe_voltage_output));
         (void)memset(&g_foc_sensorless_composite_output, 0,
                      sizeof(g_foc_sensorless_composite_output));
-        /* Mode 3 restarts the N/N+1 ledger from a known zero-applied state; a
-         * stale value from an earlier probe would be rejected by the combined
-         * entry as a sequence mismatch. */
+        /* Mode 3 restarts the combined-frame snapshot, but the applied-injection
+         * values are deliberately NOT cleared here.  The priming call below runs
+         * a real chain step, and the chain records what it requested as its
+         * expected applied injection; tick 1 must then present exactly that
+         * value or applied_request_matches() rejects it as an
+         * AppliedRequestMismatch.  Clearing them here would make the very first
+         * measured tick fail a ledger check that is actually satisfied. */
         (void)memset(&g_foc_sensorless_composite_probe_output, 0,
                      sizeof(g_foc_sensorless_composite_probe_output));
-        g_foc_sensorless_composite_applied_alpha_v = 0.0f;
-        g_foc_sensorless_composite_applied_beta_v = 0.0f;
-        g_foc_sensorless_composite_applied_limited = 0U;
         g_foc_sensorless_probe_mode = mode;
         g_foc_advanced_probe_active = 1U;
         /* Mode 3 advances the control sequence before each combined call (see
