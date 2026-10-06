@@ -469,6 +469,15 @@ static volatile uint32_t g_foc_sensorless_composite_applied_limited;
  * every output enable stays off.  It is not a drive mode and grants no
  * capability; the public provider stays zero. */
 #define FOC_SENSORLESS_PROBE_MODE_COMPOSITE (3UL)
+/* The combined entry runs foc_rust_realtime_step_core(), whose state gate only
+ * accepts the five startup-chain states and returns Disabled for everything
+ * else.  Mode 3 therefore has to put the controller into Alignment through the
+ * normal foc_rust_start_realtime() ABI, exactly as the P5.3 advanced probe
+ * does.  The controller is stopped again when the probe finishes, and no
+ * output can reach the pins because every commit stays behind
+ * g_foc_control_armed.  The target speed only feeds the startup sequencer that
+ * this probe never follows; it is fixed, not operator-controlled. */
+#define FOC_SENSORLESS_COMMISSIONING_TARGET_SPEED_RPM (582.0f)
 #endif
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_MOTION_CONTROL_CANDIDATE)
@@ -4100,6 +4109,7 @@ foc_status_t foc_platform_sensorless_candidate_probe_start(
     foc_sensorless_configure_guard_t guard;
     foc_sensorless_status_t sensorless_status;
     foc_advanced_probe_result_t probe_result;
+    foc_status_t controller_status;
     uint32_t expected_fault_epoch;
     uint32_t key;
 
@@ -4146,6 +4156,23 @@ foc_status_t foc_platform_sensorless_candidate_probe_start(
         guard.platform_capabilities = FOC_SENSORLESS_REQUIRED_CAPABILITIES;
         sensorless_status = foc_rust_sensorless_configure(
             &g_foc_sensorless_probe_context, &config, &guard);
+    }
+    /* Mode 3 only: the combined entry runs the shared controller core, which
+     * accepts only the five startup-chain states.  Entering Alignment through
+     * the normal ABI is what makes the composite cost measurable without
+     * arming; modes 1 and 2 drive the standalone sensorless ABI and never
+     * needed a runnable controller, so they are deliberately left untouched. */
+    if ((sensorless_status == FOC_SENSORLESS_STATUS_OK) &&
+        (mode == FOC_SENSORLESS_PROBE_MODE_COMPOSITE))
+    {
+        controller_status = foc_rust_start_realtime(
+            g_foc_controller,
+            1U,
+            FOC_SENSORLESS_COMMISSIONING_TARGET_SPEED_RPM);
+        if (controller_status != FOC_STATUS_OK)
+        {
+            sensorless_status = FOC_SENSORLESS_STATUS_UNSAFE_CONFIGURATION_STATE;
+        }
     }
     if (sensorless_status == FOC_SENSORLESS_STATUS_OK)
     {
@@ -4242,6 +4269,7 @@ foc_status_t foc_platform_sensorless_candidate_probe_finish(void)
     defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_SENSORLESS_CONTROL_CANDIDATE)
     uint32_t key = foc_platform_advanced_enter_critical();
+    uint32_t finished_mode = g_foc_sensorless_probe_mode;
 
     foc_platform_disable_power_fast();
     TIM1->CCR1 = 0U;
@@ -4261,6 +4289,13 @@ foc_status_t foc_platform_sensorless_candidate_probe_finish(void)
     g_foc_sensorless_composite_applied_alpha_v = 0.0f;
     g_foc_sensorless_composite_applied_beta_v = 0.0f;
     g_foc_sensorless_composite_applied_limited = 0U;
+    /* Mode 3 put the controller into Alignment so the combined core would run.
+     * Stop it again so a finished probe cannot leave a runnable controller
+     * behind; this is what the P5.3 advanced probe also does on completion. */
+    if (finished_mode == FOC_SENSORLESS_PROBE_MODE_COMPOSITE)
+    {
+        foc_rust_stop(g_foc_controller);
+    }
     (void)foc_rust_sensorless_init(&g_foc_sensorless_probe_context);
     (void)foc_advanced_probe_init(&g_foc_advanced_probe);
     foc_platform_advanced_exit_critical(key);
