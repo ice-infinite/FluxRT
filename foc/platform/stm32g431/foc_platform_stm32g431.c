@@ -507,6 +507,9 @@ static uint16_t g_foc_probe_decomp_core_gate[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
 static uint16_t g_foc_probe_decomp_core_observer[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
 static uint16_t g_foc_probe_decomp_core_startup[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
 static uint16_t g_foc_probe_decomp_core_current[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
+static uint16_t g_foc_probe_decomp_tail_setup[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
+static uint16_t g_foc_probe_decomp_reference[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
+static uint16_t g_foc_probe_decomp_tail_finish[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
 static volatile uint32_t g_foc_probe_decomp_count;
 #define FOC_SENSORLESS_COMMISSIONING_BUS_VOLTAGE_V (12.3f)
 #define FOC_SENSORLESS_COMMISSIONING_VOLTAGE_LIMIT_V (6.5f)
@@ -4530,6 +4533,9 @@ uint32_t foc_platform_sensorless_probe_decomp_copy(
         ticks[index].core_observer = g_foc_probe_decomp_core_observer[index];
         ticks[index].core_startup = g_foc_probe_decomp_core_startup[index];
         ticks[index].core_current_loop = g_foc_probe_decomp_core_current[index];
+        ticks[index].tail_setup = g_foc_probe_decomp_tail_setup[index];
+        ticks[index].reference = g_foc_probe_decomp_reference[index];
+        ticks[index].tail_finish = g_foc_probe_decomp_tail_finish[index];
     }
     return count;
 #else
@@ -5941,6 +5947,15 @@ void ADC1_2_IRQHandler(void)
                     (g_foc_sensorless_probe_output.core_current_loop_cycles > 0xFFFFU) ?
                         0xFFFFU :
                         (uint16_t)g_foc_sensorless_probe_output.core_current_loop_cycles;
+                g_foc_probe_decomp_tail_setup[slot] =
+                    (g_foc_sensorless_probe_output.tail_setup_cycles > 0xFFFFU) ?
+                        0xFFFFU : (uint16_t)g_foc_sensorless_probe_output.tail_setup_cycles;
+                g_foc_probe_decomp_reference[slot] =
+                    (g_foc_sensorless_probe_output.reference_cycles > 0xFFFFU) ?
+                        0xFFFFU : (uint16_t)g_foc_sensorless_probe_output.reference_cycles;
+                g_foc_probe_decomp_tail_finish[slot] =
+                    (g_foc_sensorless_probe_output.tail_finish_cycles > 0xFFFFU) ?
+                        0xFFFFU : (uint16_t)g_foc_sensorless_probe_output.tail_finish_cycles;
                 g_foc_probe_decomp_count = slot + 1U;
             }
 #endif

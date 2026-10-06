@@ -383,6 +383,15 @@ pub(crate) struct CoreTiming {
     /// Everything after the sequencer: reference selection, current loop, Park
     /// and inverse Park, final vector limit and SVPWM.
     pub current_loop_cycles: u32,
+    /// The same span split once more: from the sequencer to the start of the
+    /// `controller.current_reference` evaluation, i.e. the gates, angle
+    /// compensation and mode dispatch that precede the control law.
+    pub tail_setup_cycles: u32,
+    /// The `controller.current_reference` evaluation itself: reference shaping,
+    /// the current loop, Park/inverse Park, the final vector limit and SVPWM.
+    pub reference_cycles: u32,
+    /// After that evaluation: telemetry assembly, the output snapshot and flags.
+    pub tail_finish_cycles: u32,
 }
 
 /// Diagnostic-only entry used by the stopped-state C benchmark to measure the
@@ -3329,6 +3338,9 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
         sensorless_output.core_observer_cycles = core_timing.observer_cycles;
         sensorless_output.core_startup_cycles = core_timing.startup_cycles;
         sensorless_output.core_current_loop_cycles = core_timing.current_loop_cycles;
+        sensorless_output.tail_setup_cycles = core_timing.tail_setup_cycles;
+        sensorless_output.reference_cycles = core_timing.reference_cycles;
+        sensorless_output.tail_finish_cycles = core_timing.tail_finish_cycles;
     }
     if frame.injection_limited {
         composite_output.status_flags |= FOC_SENSORLESS_COMPOSITE_OUTPUT_INJECTION_LIMITED;
@@ -3791,6 +3803,10 @@ unsafe fn foc_rust_realtime_step_core(
     #[cfg(feature = "sensorless-foc")]
     let mut mark_startup: Option<u32> = None;
     #[cfg(feature = "sensorless-foc")]
+    let mut mark_reference: Option<u32> = None;
+    #[cfg(feature = "sensorless-foc")]
+    let mut mark_after_reference: Option<u32> = None;
+    #[cfg(feature = "sensorless-foc")]
     if timing.is_some() {
         mark_entry = Some(composite_mark_cycles());
     }
@@ -4231,6 +4247,12 @@ unsafe fn foc_rust_realtime_step_core(
     // 速度环输出。这是"1 kHz 速度环 + 12 kHz 电流环"之间不产生转矩阶跃的关键。
     // The Iq/Id slew runs every tick, which is what keeps a 1 kHz speed loop from
     // stepping a 12 kHz current loop.
+    // Attribution boundary: everything from the sequencer to here is gates,
+    // angle compensation and mode dispatch; the control law starts now.
+    #[cfg(feature = "sensorless-foc")]
+    if timing.is_some() {
+        mark_reference = Some(composite_mark_cycles());
+    }
     controller.current_reference = if startup.phase == RevUpPhase::ClosedLoop || force_reference {
         match &mut reference_mode {
             RealtimeReferenceMode::Legacy(_) => legacy_closed_loop_reference(
@@ -4323,6 +4345,11 @@ unsafe fn foc_rust_realtime_step_core(
         };
         startup.current_reference
     };
+    // Attribution boundary: the control law and its output shaping end here.
+    #[cfg(feature = "sensorless-foc")]
+    if timing.is_some() {
+        mark_after_reference = Some(composite_mark_cycles());
+    }
 
     // The alignment-boundary observer seed/update, a divided observer update,
     // or the motion outer loop may own one scheduled slot while the power stage
@@ -4399,6 +4426,13 @@ unsafe fn foc_rust_realtime_step_core(
             sink.observer_cycles = observer.wrapping_sub(gate);
             sink.startup_cycles = startup.wrapping_sub(observer);
             sink.current_loop_cycles = end.wrapping_sub(startup);
+            // Split of that span: the reference evaluation is the control law;
+            // what precedes it is gates and dispatch, what follows is telemetry.
+            let reference = mark_reference.unwrap_or(startup);
+            let after_reference = mark_after_reference.unwrap_or(end);
+            sink.tail_setup_cycles = reference.wrapping_sub(startup);
+            sink.reference_cycles = after_reference.wrapping_sub(reference);
+            sink.tail_finish_cycles = end.wrapping_sub(after_reference);
         }
         return FocStatus::Ok;
     }
@@ -4538,6 +4572,13 @@ unsafe fn foc_rust_realtime_step_core(
             sink.observer_cycles = observer.wrapping_sub(gate);
             sink.startup_cycles = startup.wrapping_sub(observer);
             sink.current_loop_cycles = end.wrapping_sub(startup);
+            // Split of that span: the reference evaluation is the control law;
+            // what precedes it is gates and dispatch, what follows is telemetry.
+            let reference = mark_reference.unwrap_or(startup);
+            let after_reference = mark_after_reference.unwrap_or(end);
+            sink.tail_setup_cycles = reference.wrapping_sub(startup);
+            sink.reference_cycles = after_reference.wrapping_sub(reference);
+            sink.tail_finish_cycles = end.wrapping_sub(after_reference);
         }
         return FocStatus::Ok;
     }
@@ -4701,6 +4742,13 @@ unsafe fn foc_rust_realtime_step_core(
         sink.observer_cycles = observer.wrapping_sub(gate);
         sink.startup_cycles = startup.wrapping_sub(observer);
         sink.current_loop_cycles = end.wrapping_sub(startup);
+        // Split of that span: the reference evaluation is the control law;
+        // what precedes it is gates and dispatch, what follows is telemetry.
+        let reference = mark_reference.unwrap_or(startup);
+        let after_reference = mark_after_reference.unwrap_or(end);
+        sink.tail_setup_cycles = reference.wrapping_sub(startup);
+        sink.reference_cycles = after_reference.wrapping_sub(reference);
+        sink.tail_finish_cycles = end.wrapping_sub(after_reference);
     }
     FocStatus::Ok
 }

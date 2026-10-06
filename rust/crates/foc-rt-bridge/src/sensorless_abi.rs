@@ -265,6 +265,16 @@ pub struct FocSensorlessRealtimeOutput {
     pub core_observer_cycles: u32,
     pub core_startup_cycles: u32,
     pub core_current_loop_cycles: u32,
+    /// V3 measurement fields.  The last span split once more, so the trim
+    /// decision can tell the control law from the bookkeeping around it:
+    /// `tail_setup` is the gates, angle compensation and mode dispatch after the
+    /// sequencer; `reference` is the `controller.current_reference` evaluation
+    /// (reference shaping, current loop, Park/inverse Park, final limit, SVPWM);
+    /// `tail_finish` is telemetry assembly and the output snapshot.  Zero unless
+    /// timing was requested, and no control path may read them.
+    pub tail_setup_cycles: u32,
+    pub reference_cycles: u32,
+    pub tail_finish_cycles: u32,
 }
 
 #[repr(C)]
@@ -416,7 +426,7 @@ const _: () = assert!(size_of::<FocSensorlessFusionConfig>() == 40);
 const _: () = assert!(size_of::<FocSensorlessRuntimeConfig>() == 144);
 const _: () = assert!(size_of::<FocSensorlessConfigureGuard>() == 28);
 const _: () = assert!(size_of::<FocSensorlessRealtimeInput>() == 48);
-const _: () = assert!(size_of::<FocSensorlessRealtimeOutput>() == 132);
+const _: () = assert!(size_of::<FocSensorlessRealtimeOutput>() == 144);
 const _: () = assert!(size_of::<SensorlessAbiContext>() <= FOC_SENSORLESS_CONTEXT_CAPACITY);
 const _: () = assert!(size_of::<FocSensorlessVoltageInput>() == 48);
 const _: () = assert!(size_of::<FocSensorlessVoltageOutput>() == 44);

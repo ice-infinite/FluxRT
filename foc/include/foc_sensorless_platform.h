@@ -56,6 +56,10 @@ typedef struct
     uint16_t core_observer;
     uint16_t core_startup;
     uint16_t core_current_loop;
+    /* That span split once more: control law vs the bookkeeping around it. */
+    uint16_t tail_setup;
+    uint16_t reference;
+    uint16_t tail_finish;
 } foc_probe_decomp_tick_t;
 
 /* Copies up to `capacity` ticks into the caller's array and returns the number

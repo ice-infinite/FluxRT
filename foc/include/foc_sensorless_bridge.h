@@ -220,6 +220,16 @@ typedef struct
     uint32_t core_observer_cycles;
     uint32_t core_startup_cycles;
     uint32_t core_current_loop_cycles;
+    /* V3 measurement: that span split once more, so the control law can be told
+     * from the bookkeeping around it.  `tail_setup` is the gates, angle
+     * compensation and mode dispatch after the sequencer; `reference_cycles` is
+     * the controller.current_reference evaluation (reference shaping, current
+     * loop, Park/inverse Park, final limit, SVPWM); `tail_finish` is telemetry
+     * assembly and the output snapshot.  Zero unless timing was requested, and
+     * no control path may read them. */
+    uint32_t tail_setup_cycles;
+    uint32_t reference_cycles;
+    uint32_t tail_finish_cycles;
 } foc_sensorless_realtime_output_t;
 
 /* Deterministic N+1 voltage-composition transaction.  The caller supplies the
@@ -339,7 +349,7 @@ _Static_assert(sizeof(foc_sensorless_configure_guard_t) == 28U,
                "sensorless configure guard ABI mismatch");
 _Static_assert(sizeof(foc_sensorless_realtime_input_t) == 48U,
                "sensorless realtime input ABI mismatch");
-_Static_assert(sizeof(foc_sensorless_realtime_output_t) == 132U,
+_Static_assert(sizeof(foc_sensorless_realtime_output_t) == 144U,
                "sensorless realtime output ABI mismatch");
 _Static_assert(sizeof(foc_sensorless_voltage_input_t) == 48U,
                "sensorless voltage input ABI mismatch");
