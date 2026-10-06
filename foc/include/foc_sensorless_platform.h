@@ -51,6 +51,11 @@ typedef struct
     uint16_t abi_checks;
     uint16_t abi_publish;
     uint16_t abi_tail;
+    /* Attribution of the shared controller core. */
+    uint16_t core_gate;
+    uint16_t core_observer;
+    uint16_t core_startup;
+    uint16_t core_current_loop;
 } foc_probe_decomp_tick_t;
 
 /* Copies up to `capacity` ticks into the caller's array and returns the number

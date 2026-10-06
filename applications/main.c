@@ -2719,7 +2719,7 @@ static int foc_sensorless_wcet_decomp(int argc, char **argv)
                (unsigned int)FOC_DEFAULT_ISR_DEADLINE_CYCLES);
     for (index = 0U; index < count; ++index)
     {
-        rt_kprintf("FSLD,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+        rt_kprintf("FSLD,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
                    (unsigned int)index,
                    (unsigned int)ticks[index].total,
                    (unsigned int)ticks[index].control,
@@ -2730,7 +2730,11 @@ static int foc_sensorless_wcet_decomp(int argc, char **argv)
                    (unsigned int)ticks[index].abi_prepare,
                    (unsigned int)ticks[index].abi_checks,
                    (unsigned int)ticks[index].abi_publish,
-                   (unsigned int)ticks[index].abi_tail);
+                   (unsigned int)ticks[index].abi_tail,
+                   (unsigned int)ticks[index].core_gate,
+                   (unsigned int)ticks[index].core_observer,
+                   (unsigned int)ticks[index].core_startup,
+                   (unsigned int)ticks[index].core_current_loop);
     }
     return 0;
 }

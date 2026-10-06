@@ -366,6 +366,25 @@ extern "C" {
 #[cfg(feature = "sensorless-foc")]
 use crate::sensorless_abi::composite_mark_cycles;
 
+/// Measurement-only attribution of one shared-core tick.
+///
+/// The core is ~9,500 cycles of a 12,750-cycle frame, so knowing which block
+/// owns that is what decides where to trim.  It reaches the core as an
+/// `Option<&mut CoreTiming>` so that every production caller passes `None` and
+/// the compiler removes the marks entirely.  No control decision may read it.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct CoreTiming {
+    /// State gate, feedback validation, snapshot and the shared Clarke.
+    pub gate_cycles: u32,
+    /// The observer block, including its acquisition re-seed and prepare paths.
+    pub observer_cycles: u32,
+    /// The startup sequencer, plus the handoff projection around it.
+    pub startup_cycles: u32,
+    /// Everything after the sequencer: reference selection, current loop, Park
+    /// and inverse Park, final vector limit and SVPWM.
+    pub current_loop_cycles: u32,
+}
+
 /// Diagnostic-only entry used by the stopped-state C benchmark to measure the
 /// portable fast `sin/cos` implementation in the same firmware image as CORDIC.
 ///
@@ -3067,6 +3086,8 @@ pub unsafe extern "C" fn foc_rust_realtime_step(
             output,
             telemetry,
             RealtimeReferenceMode::legacy(),
+            #[cfg(feature = "sensorless-foc")]
+            None,
         )
     }
 }
@@ -3131,6 +3152,8 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
         return FocStatus::InvalidArgument;
     };
     composite_output.pwm_sequence = input.control_sequence.wrapping_add(1);
+    // Whether this frame should be attributed; see `CoreTiming`.
+    let wants_timing = composite_input.reserved == FOC_SENSORLESS_COMPOSITE_TIMING_REQUESTED;
     let composite_finite = composite_input.applied_injection_alpha_v.is_finite()
         && composite_input.applied_injection_beta_v.is_finite()
         && composite_input.voltage_limit_v.is_finite()
@@ -3257,6 +3280,10 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
         controller.state = FocState::Fault;
         return FocStatus::HardwareFault;
     }
+    // Only the caller that asked for timing pays for the core attribution; the
+    // `None` here is what lets the compiler drop every mark in `step_core`.
+    let mut core_timing = CoreTiming::default();
+    let core_timing_out = wants_timing.then_some(&mut core_timing);
     let mut frame = SensorlessCompositeFrame {
         angle_rad: sensorless_output.electrical_angle_rad,
         mechanical_speed_rad_s: sensorless_output.electrical_speed_rad_s / pole_pairs,
@@ -3283,6 +3310,7 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
             output,
             telemetry,
             RealtimeReferenceMode::SensorlessComposite(&mut frame),
+            core_timing_out,
         )
     };
     if status != FocStatus::Ok {
@@ -3295,6 +3323,13 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
     }
     composite_output.applied_injection_alpha_v = frame.applied_injection.alpha;
     composite_output.applied_injection_beta_v = frame.applied_injection.beta;
+    if wants_timing {
+        // Attribution of the shared core for this frame; see `CoreTiming`.
+        sensorless_output.core_gate_cycles = core_timing.gate_cycles;
+        sensorless_output.core_observer_cycles = core_timing.observer_cycles;
+        sensorless_output.core_startup_cycles = core_timing.startup_cycles;
+        sensorless_output.core_current_loop_cycles = core_timing.current_loop_cycles;
+    }
     if frame.injection_limited {
         composite_output.status_flags |= FOC_SENSORLESS_COMPOSITE_OUTPUT_INJECTION_LIMITED;
     }
@@ -3367,6 +3402,8 @@ pub unsafe extern "C" fn foc_rust_realtime_step_advanced_no_power(
             output,
             telemetry,
             RealtimeReferenceMode::AdvancedProbe(probe_input),
+            #[cfg(feature = "sensorless-foc")]
+            None,
         )
     };
     *advanced_telemetry_out = controller.advanced_telemetry;
@@ -3558,6 +3595,8 @@ unsafe fn foc_rust_realtime_step_with_motion_impl<const FORCE_MOTION_REFERENCE: 
                 output: motion_output,
                 force_motion_reference: FORCE_MOTION_REFERENCE,
             },
+            #[cfg(feature = "sensorless-foc")]
+            None,
         )
     };
     if status == FocStatus::Ok {
@@ -3736,7 +3775,25 @@ unsafe fn foc_rust_realtime_step_core(
     output: &mut FocOutput,
     telemetry: *mut FocTelemetry,
     mut reference_mode: RealtimeReferenceMode<'_>,
+    // `Some` only when the caller is attributing this frame.  Every production
+    // caller passes `None`, which removes the marks below entirely.
+    #[cfg(feature = "sensorless-foc")] timing: Option<&mut CoreTiming>,
 ) -> FocStatus {
+    // Attribution boundaries, filled as the tick passes each one.  Declared
+    // unconditionally so the mark statements further down stay ordinary
+    // statements (Rust cannot attach #[cfg] to an expression).
+    #[cfg(feature = "sensorless-foc")]
+    let mut mark_entry: Option<u32> = None;
+    #[cfg(feature = "sensorless-foc")]
+    let mut mark_gate: Option<u32> = None;
+    #[cfg(feature = "sensorless-foc")]
+    let mut mark_observer: Option<u32> = None;
+    #[cfg(feature = "sensorless-foc")]
+    let mut mark_startup: Option<u32> = None;
+    #[cfg(feature = "sensorless-foc")]
+    if timing.is_some() {
+        mark_entry = Some(composite_mark_cycles());
+    }
     if !controller.algorithm_configured {
         return FocStatus::NotConfigured;
     }
@@ -3776,6 +3833,12 @@ unsafe fn foc_rust_realtime_step_core(
         b: feedback.phase_current_b,
         c: feedback.phase_current_c,
     });
+    // Boundary 1: state gate, feedback validation, snapshot and the shared
+    // Clarke all end here.
+    #[cfg(feature = "sensorless-foc")]
+    if timing.is_some() {
+        mark_gate = Some(composite_mark_cycles());
+    }
     // 模型总门打开时，每个控制拍只更新一次电流极性滤波；观测器修正和 PWM 前馈
     // 共享这一状态。默认总门为 0，所以既不更新滤波，也不改变任何数值输出。
     // With the master gate on, update polarity filtering exactly once per control
@@ -3921,6 +3984,12 @@ unsafe fn foc_rust_realtime_step_core(
         }
     }
     let observer_diagnostics = controller.observer.diagnostics();
+    // Boundary 2: the observer block (update plus the acquisition re-seed and
+    // prepare paths above) ends here.
+    #[cfg(feature = "sensorless-foc")]
+    if timing.is_some() {
+        mark_observer = Some(composite_mark_cycles());
+    }
     // 本拍内部统一用这两个局部量：观测器输出与可靠性在同一拍内不会再变，取局部副本
     // 可以避免中途误读被后续分支改写的字段。
     // Local copies keep the observer result consistent across the branches below.
@@ -4018,6 +4087,12 @@ unsafe fn foc_rust_realtime_step_core(
         observer_iq_a,
         controller.runtime_config.closed_loop_current_slew_a_per_s,
     );
+    // Boundary 3: the sequencer and the handoff projection around it end here;
+    // everything below is reference selection and the current loop.
+    #[cfg(feature = "sensorless-foc")]
+    if timing.is_some() {
+        mark_startup = Some(composite_mark_cycles());
+    }
     let force_reference = reference_mode.force_reference();
     let force_control_frame = reference_mode.forces_control_frame();
     let observer_controls = force_control_frame
@@ -4314,6 +4389,17 @@ unsafe fn foc_rust_realtime_step_core(
         if let Some(telemetry) = unsafe { telemetry.as_mut() } {
             *telemetry = controller.telemetry;
         }
+        #[cfg(feature = "sensorless-foc")]
+        if let (Some(sink), Some(gate)) = (timing, mark_gate) {
+            let end = composite_mark_cycles();
+            let observer = mark_observer.unwrap_or(gate);
+            let startup = mark_startup.unwrap_or(observer);
+            let entry = mark_entry.unwrap_or(gate);
+            sink.gate_cycles = gate.wrapping_sub(entry);
+            sink.observer_cycles = observer.wrapping_sub(gate);
+            sink.startup_cycles = startup.wrapping_sub(observer);
+            sink.current_loop_cycles = end.wrapping_sub(startup);
+        }
         return FocStatus::Ok;
     }
 
@@ -4442,6 +4528,17 @@ unsafe fn foc_rust_realtime_step_core(
         output.duty_a = pwm.duty_a;
         output.duty_b = pwm.duty_b;
         output.duty_c = pwm.duty_c;
+        #[cfg(feature = "sensorless-foc")]
+        if let (Some(sink), Some(gate)) = (timing, mark_gate) {
+            let end = composite_mark_cycles();
+            let observer = mark_observer.unwrap_or(gate);
+            let startup = mark_startup.unwrap_or(observer);
+            let entry = mark_entry.unwrap_or(gate);
+            sink.gate_cycles = gate.wrapping_sub(entry);
+            sink.observer_cycles = observer.wrapping_sub(gate);
+            sink.startup_cycles = startup.wrapping_sub(observer);
+            sink.current_loop_cycles = end.wrapping_sub(startup);
+        }
         return FocStatus::Ok;
     }
 
@@ -4594,6 +4691,17 @@ unsafe fn foc_rust_realtime_step_core(
     if let Some(telemetry) = unsafe { telemetry.as_mut() } {
         *telemetry = controller.telemetry;
     }
+    #[cfg(feature = "sensorless-foc")]
+    if let (Some(sink), Some(gate)) = (timing, mark_gate) {
+        let end = composite_mark_cycles();
+        let observer = mark_observer.unwrap_or(gate);
+        let startup = mark_startup.unwrap_or(observer);
+        let entry = mark_entry.unwrap_or(gate);
+        sink.gate_cycles = gate.wrapping_sub(entry);
+        sink.observer_cycles = observer.wrapping_sub(gate);
+        sink.startup_cycles = startup.wrapping_sub(observer);
+        sink.current_loop_cycles = end.wrapping_sub(startup);
+    }
     FocStatus::Ok
 }
 
@@ -4628,6 +4736,8 @@ unsafe fn foc_rust_realtime_step_legacy_impl(
             output,
             telemetry,
             RealtimeReferenceMode::legacy(),
+            #[cfg(feature = "sensorless-foc")]
+            None,
         )
     }
 }

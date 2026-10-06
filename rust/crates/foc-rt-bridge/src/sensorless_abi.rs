@@ -256,6 +256,15 @@ pub struct FocSensorlessRealtimeOutput {
     pub abi_checks_cycles: u32,
     pub abi_publish_cycles: u32,
     pub abi_tail_cycles: u32,
+    /// V3 measurement fields.  Attribution of the shared controller core for
+    /// this frame: the state gate and Clarke, the observer block, the startup
+    /// sequencer, and everything after it (reference selection, current loop,
+    /// Park/inverse Park, final limit, SVPWM).  All are 0 unless the caller
+    /// asked for timing, and no control path may read them as state.
+    pub core_gate_cycles: u32,
+    pub core_observer_cycles: u32,
+    pub core_startup_cycles: u32,
+    pub core_current_loop_cycles: u32,
 }
 
 #[repr(C)]
@@ -407,7 +416,7 @@ const _: () = assert!(size_of::<FocSensorlessFusionConfig>() == 40);
 const _: () = assert!(size_of::<FocSensorlessRuntimeConfig>() == 144);
 const _: () = assert!(size_of::<FocSensorlessConfigureGuard>() == 28);
 const _: () = assert!(size_of::<FocSensorlessRealtimeInput>() == 48);
-const _: () = assert!(size_of::<FocSensorlessRealtimeOutput>() == 116);
+const _: () = assert!(size_of::<FocSensorlessRealtimeOutput>() == 132);
 const _: () = assert!(size_of::<SensorlessAbiContext>() <= FOC_SENSORLESS_CONTEXT_CAPACITY);
 const _: () = assert!(size_of::<FocSensorlessVoltageInput>() == 48);
 const _: () = assert!(size_of::<FocSensorlessVoltageOutput>() == 44);
