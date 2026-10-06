@@ -450,13 +450,12 @@
 
 /* STM32G431RB product composition */
 
-#define FLUXRT_G431_PROFILE_BASIC_DRIVE
+#define FLUXRT_G431_PROFILE_ADVANCED_LAB
 /* end of STM32G431RB product composition */
 
 /* FOC advanced-control candidates */
 
-#define FOC_AS5600_TRUTH_DIAGNOSTIC
-#define FOC_AS5600_ALIGNMENT_CANDIDATE
+#define FOC_SENSORLESS_CONTROL_CANDIDATE
 /* end of FOC advanced-control candidates */
 
 /* FOC power-management candidates */
