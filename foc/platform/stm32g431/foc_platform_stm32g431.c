@@ -454,8 +454,21 @@ static foc_sensorless_realtime_output_t g_foc_sensorless_probe_output;
 static foc_sensorless_voltage_output_t g_foc_sensorless_probe_voltage_output;
 static foc_sensorless_composite_output_t g_foc_sensorless_composite_output;
 static volatile uint32_t g_foc_sensorless_probe_mode;
+/* Composite (mode 3) probe state.  The formal combined entry consumes the prior
+ * tick's applied injection, so the platform must carry that ledger across the
+ * ISR boundary.  These objects live only in the compile-time motor-arm-disabled
+ * commissioning image and are cleared at every probe start/finish. */
+static foc_sensorless_composite_output_t g_foc_sensorless_composite_probe_output;
+static volatile uint32_t g_foc_sensorless_composite_applied_sequence;
+static volatile float g_foc_sensorless_composite_applied_alpha_v;
+static volatile float g_foc_sensorless_composite_applied_beta_v;
+static volatile uint32_t g_foc_sensorless_composite_applied_limited;
 #define FOC_SENSORLESS_COMMISSIONING_BUS_VOLTAGE_V (12.3f)
 #define FOC_SENSORLESS_COMMISSIONING_VOLTAGE_LIMIT_V (6.5f)
+/* Mode 3 exercises the formal combined transaction in the real ADC ISR while
+ * every output enable stays off.  It is not a drive mode and grants no
+ * capability; the public provider stays zero. */
+#define FOC_SENSORLESS_PROBE_MODE_COMPOSITE (3UL)
 #endif
 #if defined(FLUXRT_DIAGNOSTIC_BUILD) && \
     defined(FOC_MOTION_CONTROL_CANDIDATE)
@@ -1778,6 +1791,207 @@ fail_closed:
             &g_foc_advanced_probe,
             (after.fault_epoch !=
              g_foc_advanced_probe.expected_fault_epoch) ?
+                FOC_ADVANCED_PROBE_RESULT_FAULT_EPOCH_CHANGED :
+                FOC_ADVANCED_PROBE_RESULT_CONTROL_FAILURE,
+            after.fault_epoch);
+    }
+    ++g_foc_diagnostics.realtime_error_count;
+    g_foc_diagnostics.flags |= FOC_PLATFORM_DIAG_CONTROL_ERROR;
+    g_foc_diagnostics.last_control_status = control_status;
+    return control_status;
+}
+
+/*
+ * Mode 3: the formal combined transaction, measured in the real ADC ISR with
+ * every output enable held off.
+ *
+ * Modes 1 and 2 drive the standalone sensorless ABI plus the standalone
+ * compose step, so they cannot bound the cost of the single shared Clarke /
+ * fused-angle / one-final-limit transaction that the armed path uses.  This
+ * step calls the same foc_rust_realtime_step_sensorless() entry the armed route
+ * calls, and supplies the previous tick's applied injection so the N/N+1 ledger
+ * closes for real instead of being asserted by the caller.
+ *
+ * Contract of this route:
+ *   - Gate, MOE and all three phase channels stay off for the whole run; the
+ *     platform start gate rejects arm while it exists and the probe register
+ *     snapshot is re-verified before and after the commit;
+ *   - only TIM1 inactive preload registers change, exactly as in mode 1/2;
+ *   - the bus voltage, control sequence and dt come from the synthetic
+ *     commissioning envelope, never from a claim that 12.3 V is present.
+ */
+/* The platform hand-builds this struct, so freeze its layout against the Rust
+ * contract.  foc_sensorless_bridge.h already pins the total size; these pin the
+ * offsets the hand-written initialiser depends on. */
+_Static_assert(sizeof(foc_sensorless_composite_input_t) == 44U,
+               "composite input ABI size drifted");
+_Static_assert(sizeof(foc_sensorless_composite_output_t) == 24U,
+               "composite output ABI size drifted");
+_Static_assert(offsetof(foc_sensorless_composite_input_t,
+                        applied_request_sequence) == 16U,
+               "composite input ledger offset drifted");
+_Static_assert(offsetof(foc_sensorless_composite_input_t,
+                        applied_injection_alpha_v) == 24U,
+               "composite input applied-injection offset drifted");
+_Static_assert(offsetof(foc_sensorless_composite_output_t,
+                        applied_injection_alpha_v) == 16U,
+               "composite output applied-injection offset drifted");
+_Static_assert(FOC_SENSORLESS_PROBE_MODE_COMPOSITE == 3UL,
+               "composite probe mode id changed");
+static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
+    int32_t current_u_counts,
+    int32_t current_v_counts,
+    int32_t current_w_counts)
+{
+    foc_advanced_probe_register_snapshot_t before;
+    foc_advanced_probe_register_snapshot_t after;
+    foc_feedback_t feedback;
+    foc_realtime_input_t input;
+    foc_output_t output;
+    foc_sensorless_composite_input_t composite_input = {0};
+    foc_sensorless_status_t sensorless_status;
+    foc_advanced_probe_result_t probe_result;
+    foc_status_t control_status = FOC_STATUS_OK;
+
+    foc_platform_advanced_probe_snapshot(&before);
+    probe_result = foc_advanced_probe_begin_tick(&g_foc_advanced_probe, &before);
+    if (probe_result != FOC_ADVANCED_PROBE_RESULT_OK)
+    {
+        control_status = FOC_STATUS_HARDWARE_FAULT;
+        goto fail_closed;
+    }
+
+    /* The formal entry owns the current sample: it Clarkes once and feeds both
+     * the full-speed angle chain and the basic current loop from that single
+     * snapshot.  Raw ADC codes stay on this side of the ABI. */
+    feedback.phase_current_a = (float)current_u_counts / FOC_CURRENT_COUNTS_PER_AMP;
+    feedback.phase_current_b = (float)current_v_counts / FOC_CURRENT_COUNTS_PER_AMP;
+    feedback.phase_current_c = (float)current_w_counts / FOC_CURRENT_COUNTS_PER_AMP;
+    feedback.dc_bus_voltage =
+        ((float)g_foc_diagnostics.bus_voltage_raw * FOC_ADC_REFERENCE_VOLTAGE) /
+        (FOC_ADC_FULL_SCALE * FOC_BUS_PARTITIONING_FACTOR);
+    feedback.electrical_angle_rad = 0.0f;
+    foc_realtime_input_from_legacy(
+        &feedback,
+        g_foc_control_sequence,
+        1.0f / (float)FOC_CONTROL_FREQUENCY_HZ,
+        &input);
+
+    composite_input.struct_size = sizeof(composite_input);
+    composite_input.version = FOC_SENSORLESS_COMPOSITE_INPUT_VERSION;
+    /* The published provider stays zero.  This synthetic all-bits mask exists
+     * only inside the compile-time motor-arm-disabled commissioning image so
+     * the combined ABI can exercise its ledger; it is never board proof. */
+    composite_input.platform_capabilities = FOC_SENSORLESS_REQUIRED_CAPABILITIES;
+    composite_input.input_flags =
+        FOC_SENSORLESS_INPUT_INJECTION_PERMITTED |
+        FOC_SENSORLESS_INPUT_BEMF_VALID;
+    if (g_foc_sensorless_composite_applied_limited != 0U)
+    {
+        composite_input.input_flags |=
+            FOC_SENSORLESS_INPUT_APPLIED_INJECTION_LIMITED;
+    }
+    /* The prior composite tick published this value; the combined entry reads
+     * it as its N/N+1 ledger. */
+    composite_input.applied_request_sequence =
+        g_foc_sensorless_composite_applied_sequence;
+    composite_input.applied_injection_alpha_v =
+        g_foc_sensorless_composite_applied_alpha_v;
+    composite_input.applied_injection_beta_v =
+        g_foc_sensorless_composite_applied_beta_v;
+    composite_input.voltage_limit_v = FOC_SENSORLESS_COMMISSIONING_VOLTAGE_LIMIT_V;
+    composite_input.minimum_duty = g_foc_platform_config.minimum_duty;
+    composite_input.maximum_duty = g_foc_platform_config.maximum_duty;
+
+    control_status = foc_rust_realtime_step_sensorless(
+        g_foc_controller,
+        &g_foc_sensorless_probe_context,
+        &input,
+        &composite_input,
+        &output,
+        0,
+        &g_foc_sensorless_probe_output,
+        &g_foc_sensorless_composite_probe_output);
+
+    /* Carry the ledger forward only from a Coherent tick.  A rejected tick
+     * keeps the previous applied values so the next attempt fails closed on the
+     * same mismatch instead of silently resynchronising. */
+    if (control_status == FOC_STATUS_OK)
+    {
+        g_foc_sensorless_composite_applied_sequence =
+            g_foc_sensorless_composite_probe_output.pwm_sequence;
+        g_foc_sensorless_composite_applied_alpha_v =
+            g_foc_sensorless_composite_probe_output.applied_injection_alpha_v;
+        g_foc_sensorless_composite_applied_beta_v =
+            g_foc_sensorless_composite_probe_output.applied_injection_beta_v;
+        g_foc_sensorless_composite_applied_limited =
+            ((g_foc_sensorless_composite_probe_output.status_flags &
+              FOC_SENSORLESS_COMPOSITE_OUTPUT_INJECTION_LIMITED) != 0U) ? 1U : 0U;
+    }
+    else
+    {
+        goto fail_closed;
+    }
+
+    g_foc_advanced_probe.decision_signature ^=
+        g_foc_sensorless_composite_probe_output.status_flags;
+    g_foc_advanced_probe.decision_signature *= 16777619UL;
+    g_foc_advanced_probe.decision_signature ^=
+        g_foc_sensorless_probe_output.stage;
+    g_foc_advanced_probe.decision_signature *= 16777619UL;
+    g_foc_advanced_probe.decision_signature ^=
+        g_foc_sensorless_probe_output.angle_source;
+    g_foc_advanced_probe.decision_signature *= 16777619UL;
+    ++g_foc_advanced_probe.decision_samples;
+
+    foc_platform_advanced_probe_snapshot(&before);
+    probe_result = foc_advanced_probe_complete_control(
+        &g_foc_advanced_probe, control_status, &before);
+    if (probe_result != FOC_ADVANCED_PROBE_RESULT_OK)
+    {
+        control_status = FOC_STATUS_HARDWARE_FAULT;
+        goto fail_closed;
+    }
+    /* Gate/MOE/CCER were rechecked immediately above, so these writes reach
+     * inactive preload registers only; they grant no arm authority and prove no
+     * powered N+1 actuation.  The next snapshot must still read safe-off. */
+    if (!((output.duty_a >= g_foc_platform_config.minimum_duty) &&
+          (output.duty_a <= g_foc_platform_config.maximum_duty)) ||
+        !((output.duty_b >= g_foc_platform_config.minimum_duty) &&
+          (output.duty_b <= g_foc_platform_config.maximum_duty)) ||
+        !((output.duty_c >= g_foc_platform_config.minimum_duty) &&
+          (output.duty_c <= g_foc_platform_config.maximum_duty)))
+    {
+        control_status = FOC_STATUS_INVALID_ARGUMENT;
+        goto fail_closed;
+    }
+    TIM1->CCR1 = (uint32_t)(output.duty_a * (float)FOC_PWM_PERIOD_TICKS + 0.5f);
+    TIM1->CCR2 = (uint32_t)(output.duty_b * (float)FOC_PWM_PERIOD_TICKS + 0.5f);
+    TIM1->CCR3 = (uint32_t)(output.duty_c * (float)FOC_PWM_PERIOD_TICKS + 0.5f);
+    __DSB();
+    foc_platform_advanced_probe_snapshot(&after);
+    probe_result = foc_advanced_probe_complete_commit(
+        &g_foc_advanced_probe, &before, &after);
+    if ((probe_result == FOC_ADVANCED_PROBE_RESULT_OK) ||
+        (probe_result == FOC_ADVANCED_PROBE_RESULT_COMPLETE))
+    {
+        ++g_foc_diagnostics.realtime_step_count;
+        g_foc_diagnostics.last_control_status = FOC_STATUS_OK;
+        return FOC_STATUS_OK;
+    }
+    control_status = FOC_STATUS_HARDWARE_FAULT;
+
+fail_closed:
+    foc_platform_disable_power_fast();
+    TIM1->CCR1 = 0U;
+    TIM1->CCR2 = 0U;
+    TIM1->CCR3 = 0U;
+    foc_platform_advanced_probe_snapshot(&after);
+    if (g_foc_advanced_probe.state == FOC_ADVANCED_PROBE_RUNNING)
+    {
+        (void)foc_advanced_probe_fail(
+            &g_foc_advanced_probe,
+            (after.fault_epoch != g_foc_advanced_probe.expected_fault_epoch) ?
                 FOC_ADVANCED_PROBE_RESULT_FAULT_EPOCH_CHANGED :
                 FOC_ADVANCED_PROBE_RESULT_CONTROL_FAILURE,
             after.fault_epoch);
@@ -3869,7 +4083,7 @@ foc_status_t foc_platform_sensorless_candidate_probe_start(
     uint32_t expected_fault_epoch;
     uint32_t key;
 
-    if ((mode < 1U) || (mode > 2U) ||
+    if ((mode < 1U) || (mode > FOC_SENSORLESS_PROBE_MODE_COMPOSITE) ||
         (requested_ticks < FOC_ADVANCED_PROBE_MIN_TICKS) ||
         (requested_ticks > FOC_ADVANCED_PROBE_MAX_TICKS) ||
         (g_foc_control_armed != 0U) ||
@@ -3936,6 +4150,15 @@ foc_status_t foc_platform_sensorless_candidate_probe_start(
                      sizeof(g_foc_sensorless_probe_voltage_output));
         (void)memset(&g_foc_sensorless_composite_output, 0,
                      sizeof(g_foc_sensorless_composite_output));
+        /* Mode 3 restarts the N/N+1 ledger from a known zero-applied state; a
+         * stale value from an earlier probe would be rejected by the combined
+         * entry as a sequence mismatch. */
+        (void)memset(&g_foc_sensorless_composite_probe_output, 0,
+                     sizeof(g_foc_sensorless_composite_probe_output));
+        g_foc_sensorless_composite_applied_sequence = 0U;
+        g_foc_sensorless_composite_applied_alpha_v = 0.0f;
+        g_foc_sensorless_composite_applied_beta_v = 0.0f;
+        g_foc_sensorless_composite_applied_limited = 0U;
         g_foc_sensorless_probe_mode = mode;
         g_foc_advanced_probe_active = 1U;
         g_foc_control_sequence = 0U;
@@ -4012,6 +4235,12 @@ foc_status_t foc_platform_sensorless_candidate_probe_finish(void)
                  sizeof(g_foc_sensorless_probe_voltage_output));
     (void)memset(&g_foc_sensorless_composite_output, 0,
                  sizeof(g_foc_sensorless_composite_output));
+    (void)memset(&g_foc_sensorless_composite_probe_output, 0,
+                 sizeof(g_foc_sensorless_composite_probe_output));
+    g_foc_sensorless_composite_applied_sequence = 0U;
+    g_foc_sensorless_composite_applied_alpha_v = 0.0f;
+    g_foc_sensorless_composite_applied_beta_v = 0.0f;
+    g_foc_sensorless_composite_applied_limited = 0U;
     (void)foc_rust_sensorless_init(&g_foc_sensorless_probe_context);
     (void)foc_advanced_probe_init(&g_foc_advanced_probe);
     foc_platform_advanced_exit_critical(key);
@@ -5244,9 +5473,23 @@ void ADC1_2_IRQHandler(void)
                                                        current_v_counts,
                                                        current_w_counts);
 #else
-            (void)foc_platform_sensorless_probe_step_isr(current_u_counts,
-                                                         current_v_counts,
-                                                         current_w_counts);
+            /* Mode 3 measures the formal combined transaction; modes 1 and 2
+             * measure the standalone sensorless ABI and standalone compose
+             * step, which the armed route no longer calls. */
+            if (g_foc_sensorless_probe_mode ==
+                FOC_SENSORLESS_PROBE_MODE_COMPOSITE)
+            {
+                (void)foc_platform_sensorless_composite_probe_step_isr(
+                    current_u_counts,
+                    current_v_counts,
+                    current_w_counts);
+            }
+            else
+            {
+                (void)foc_platform_sensorless_probe_step_isr(current_u_counts,
+                                                             current_v_counts,
+                                                             current_w_counts);
+            }
 #endif
             control_cycle_end = DWT->CYCCNT;
         }

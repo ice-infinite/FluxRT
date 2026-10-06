@@ -2553,7 +2553,12 @@ MSH_CMD_EXPORT(foc_advanced_trial, -);
 
 #if defined(FLUXRT_SENSORLESS_CANDIDATE_BUILD)
 /* foc_sensorless_wcet [ticks] [mode]
- * mode 1: BEMF/fusion hot path; mode 2: rotating-HFI/request-ledger hot path.
+ * mode 1: BEMF/fusion hot path; mode 2: rotating-HFI/request-ledger hot path;
+ * mode 3: the formal combined transaction (one shared Clarke, one fused angle,
+ *         one final voltage-circle limit) that the armed route calls.
+ * Modes 1 and 2 bound the standalone sensorless ABI; only mode 3 bounds the
+ * combined entry, and it is the mode whose number may be quoted as the
+ * composite fast-loop WCET.
  * This dedicated image has compile-time motor-arm disabled and the platform
  * verifies Gate/MOE/CCER off on every ADC tick. */
 static int foc_sensorless_wcet(int argc, char **argv)
@@ -2578,7 +2583,7 @@ static int foc_sensorless_wcet(int argc, char **argv)
          (foc_shell_parse_u32(argv[2], &mode) == 0U)) ||
         (requested_ticks < FOC_ADVANCED_PROBE_MIN_TICKS) ||
         (requested_ticks > FOC_ADVANCED_PROBE_MAX_TICKS) ||
-        (mode < 1U) || (mode > 2U))
+        (mode < 1U) || (mode > 3U))
     {
         rt_kprintf("FSLS,ERR,usage\n");
         return -1;
@@ -2636,6 +2641,12 @@ static int foc_sensorless_wcet(int argc, char **argv)
                      ((mode == 1U) ?
                          FOC_SENSORLESS_OUTPUT_ANGLE_RELIABLE :
                          FOC_SENSORLESS_OUTPUT_INJECTION_REQUESTED);
+    /* Mode 3 is accepted on the probe's own counters.  The combined entry
+     * rejects a broken N/N+1 ledger by returning InvalidArgument, which stops
+     * the run short of requested_ticks and is recorded as a rejected tick, so a
+     * full-length run with zero rejects is itself the ledger evidence.  Mode 3
+     * still requires the injection request because the combined entry is what
+     * turns the HFI request into the applied injection. */
     result = ((status == FOC_STATUS_OK) &&
               (probe_status.state == FOC_ADVANCED_PROBE_COMPLETE) &&
               (probe_status.executed_ticks == requested_ticks) &&
@@ -2653,7 +2664,8 @@ static int foc_sensorless_wcet(int argc, char **argv)
                 (output.angle_source == FOC_SENSORLESS_ANGLE_SOURCE_BEMF) &&
                 (output.angle_reliable == 1U) &&
                 (output.fallback_required == 0U)) ||
-               (mode == 2U))) ? 0 : -1;
+               (mode == 2U) ||
+               (mode == 3U))) ? 0 : -1;
     finish_status = foc_platform_sensorless_candidate_probe_finish();
     rt_kprintf("FSLS,end,%u,%u\n",
                (unsigned int)((result == 0) ? 0U : 1U),
