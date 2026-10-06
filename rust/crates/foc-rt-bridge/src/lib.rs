@@ -3207,6 +3207,11 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
     let sensorless_status = unsafe {
         foc_rust_sensorless_step(sensorless_context, &sensorless_input, sensorless_output)
     };
+    /* V2: publish the chain's own verdict.  Everything below collapses a chain
+     * rejection into FocStatus::HardwareFault, so without this the rejecting
+     * check is indistinguishable on the target.  A frame that never reached the
+     * chain keeps the zero that the initialiser above wrote. */
+    composite_output.chain_status = sensorless_status as u32;
     if sensorless_status != FocSensorlessStatus::Ok {
         controller.fault_flags |= FOC_FAULT_SENSORLESS_CONTROL;
         controller.state = FocState::Fault;

@@ -21,7 +21,12 @@ extern "C" {
 #define FOC_SENSORLESS_VOLTAGE_INPUT_VERSION    (1UL)
 #define FOC_SENSORLESS_VOLTAGE_OUTPUT_VERSION   (1UL)
 #define FOC_SENSORLESS_COMPOSITE_INPUT_VERSION  (1UL)
-#define FOC_SENSORLESS_COMPOSITE_OUTPUT_VERSION (1UL)
+/* V2 appends `chain_status`, the status the sensorless chain returned for this
+ * frame.  The combined entry collapses every chain rejection into
+ * FOC_STATUS_HARDWARE_FAULT, so the rejecting check cannot otherwise be told
+ * apart on the target.  Zero means the frame never reached the chain because an
+ * envelope or ledger check rejected the tick first. */
+#define FOC_SENSORLESS_COMPOSITE_OUTPUT_VERSION (2UL)
 #define FOC_SENSORLESS_CONTEXT_CAPACITY         (512UL)
 
 #define FOC_SENSORLESS_CAP_SYNCHRONIZED_CURRENT_SAMPLE (1UL << 0)
@@ -246,6 +251,7 @@ typedef struct
     uint32_t status_flags;
     float applied_injection_alpha_v;
     float applied_injection_beta_v;
+    uint32_t chain_status;
 } foc_sensorless_composite_output_t;
 
 #if defined(_MSC_VER)
@@ -306,7 +312,7 @@ _Static_assert(sizeof(foc_sensorless_voltage_output_t) == 44U,
                "sensorless voltage output ABI mismatch");
 _Static_assert(sizeof(foc_sensorless_composite_input_t) == 44U,
                "sensorless composite input ABI mismatch");
-_Static_assert(sizeof(foc_sensorless_composite_output_t) == 24U,
+_Static_assert(sizeof(foc_sensorless_composite_output_t) == 28U,
                "sensorless composite output ABI mismatch");
 _Static_assert(sizeof(foc_sensorless_context_t) == FOC_SENSORLESS_CONTEXT_CAPACITY,
                "sensorless context capacity mismatch");

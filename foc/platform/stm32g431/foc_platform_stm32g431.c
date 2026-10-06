@@ -1833,7 +1833,7 @@ fail_closed:
  * offsets the hand-written initialiser depends on. */
 _Static_assert(sizeof(foc_sensorless_composite_input_t) == 44U,
                "composite input ABI size drifted");
-_Static_assert(sizeof(foc_sensorless_composite_output_t) == 24U,
+_Static_assert(sizeof(foc_sensorless_composite_output_t) == 28U,
                "composite output ABI size drifted");
 _Static_assert(offsetof(foc_sensorless_composite_input_t,
                         applied_request_sequence) == 16U,
@@ -1901,6 +1901,36 @@ static void foc_platform_arm_composite_probe_sequence(void)
         0,
         &g_foc_sensorless_probe_output,
         &g_foc_sensorless_composite_probe_output);
+
+    /* This call is the only place that learns what the chain will expect on the
+     * next tick, because the sensorless chain records its requested injection as
+     * the applied injection it will check against.  Publishing it here rather
+     * than in the step function matters: the step function only carries the
+     * ledger forward on a coherent tick, so if the first measured tick were to
+     * fail, the platform would keep offering zero and the chain would reject it
+     * with AppliedRequestMismatch forever.  Hand the prime's result over now. */
+    g_foc_sensorless_composite_applied_alpha_v =
+        g_foc_sensorless_composite_probe_output.applied_injection_alpha_v;
+    g_foc_sensorless_composite_applied_beta_v =
+        g_foc_sensorless_composite_probe_output.applied_injection_beta_v;
+    g_foc_sensorless_composite_applied_limited =
+        ((g_foc_sensorless_composite_probe_output.status_flags &
+          FOC_SENSORLESS_COMPOSITE_OUTPUT_INJECTION_LIMITED) != 0U) ? 1U : 0U;
+
+    /* Mode 3 diagnosis only: the priming call is what the chain records as its
+     * expected applied injection, so its published values decide whether tick 1
+     * can satisfy the ledger.  Values are printed in 0.1 mV to stay integral. */
+    rt_kprintf("FSLSP,st=%u,ai=%d/%d,li=%08x,cs=%u,hold=%d/%d,ep=%u\n",
+               (unsigned int)g_foc_sensorless_composite_probe_output.chain_status,
+               (int)(g_foc_sensorless_composite_probe_output.applied_injection_alpha_v *
+                     10000.0f),
+               (int)(g_foc_sensorless_composite_probe_output.applied_injection_beta_v *
+                     10000.0f),
+               (unsigned int)g_foc_sensorless_composite_probe_output.status_flags,
+               (unsigned int)g_foc_sensorless_composite_probe_output.pwm_sequence,
+               (int)(g_foc_sensorless_composite_applied_alpha_v * 10000.0f),
+               (int)(g_foc_sensorless_composite_applied_beta_v * 10000.0f),
+               (unsigned int)g_foc_power_safety.fault_epoch);
 }
 
 static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
@@ -1982,15 +2012,14 @@ static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
         composite_input.input_flags |=
             FOC_SENSORLESS_INPUT_APPLIED_INJECTION_LIMITED;
     }
-    /* The combined entry checks applied_request_sequence == input.control_sequence
-     * and then forwards that same value as the chain's applied_request_sequence,
-     * which sensorless_abi.rs requires to equal sample_sequence on every tick.
-     * It must therefore carry this tick's number, not the previous tick's
-     * output sequence: the "N+1" relation is already enforced on the Rust side,
-     * which publishes pwm_sequence = control_sequence + 1 and consumes it as the
-     * next tick's applied_request_sequence.  The injection values below stay the
-     * previous tick's published output, because those are what the chain's
-     * N/N+1 ledger actually compares. */
+    /* The combined entry requires applied_request_sequence == this tick's
+     * control_sequence, and it forwards that same value to the chain as
+     * applied_request_sequence, which the chain requires to equal
+     * sample_sequence on every tick.  So this field must always carry the
+     * current sequence, never a stale one: a rejected tick would otherwise
+     * leave the next tick permanently one behind.  The injection values below
+     * are the ones the previous tick actually applied, and those are what the
+     * chain's ledger really compares. */
     composite_input.applied_request_sequence = input.control_sequence;
     composite_input.applied_injection_alpha_v =
         g_foc_sensorless_composite_applied_alpha_v;
@@ -2021,7 +2050,8 @@ static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
         (control_status != FOC_STATUS_OK))
     {
         rt_kprintf("FSLSC,cst=%u,cs=%u,arq=%u,dmin=%u,dmax=%u,vlim=%u,"
-                   "dt=%u,vf=%08x,ovs=%u,hw=%08x,ss=%08x,sf=%u\n",
+                   "dt=%u,vf=%08x,ovs=%u,hw=%08x,ss=%08x,sf=%u,cs2=%u,"
+                   "ap=%d/%d,pc=%d/%d\n",
                    (unsigned int)control_status,
                    (unsigned int)input.control_sequence,
                    (unsigned int)composite_input.applied_request_sequence,
@@ -2033,7 +2063,14 @@ static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
                    (unsigned int)input.observer_voltage_selection,
                    (unsigned int)input.hardware_fault_flags,
                    (unsigned int)g_foc_sensorless_probe_output.status_flags,
-                   (unsigned int)g_foc_sensorless_probe_output.failure);
+                   (unsigned int)g_foc_sensorless_probe_output.failure,
+                   (unsigned int)g_foc_sensorless_composite_probe_output.chain_status,
+                   (int)(g_foc_sensorless_composite_applied_alpha_v * 10000.0f),
+                   (int)(g_foc_sensorless_composite_applied_beta_v * 10000.0f),
+                   (int)(g_foc_sensorless_composite_probe_output.applied_injection_alpha_v *
+                         10000.0f),
+                   (int)(g_foc_sensorless_composite_probe_output.applied_injection_beta_v *
+                         10000.0f));
     }
 
     /* Carry the ledger forward only from a Coherent tick.  A rejected tick

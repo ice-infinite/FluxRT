@@ -24,7 +24,12 @@ pub const FOC_SENSORLESS_OUTPUT_VERSION: u32 = 2;
 pub const FOC_SENSORLESS_VOLTAGE_INPUT_VERSION: u32 = 1;
 pub const FOC_SENSORLESS_VOLTAGE_OUTPUT_VERSION: u32 = 1;
 pub const FOC_SENSORLESS_COMPOSITE_INPUT_VERSION: u32 = 1;
-pub const FOC_SENSORLESS_COMPOSITE_OUTPUT_VERSION: u32 = 1;
+/// V2 adds `chain_status`.  The combined entry collapses every sensorless-chain
+/// rejection into `FocStatus::HardwareFault`, which made the rejecting check
+/// indistinguishable on hardware; the chain's own status now travels out with
+/// the frame that failed.  The field is appended so V1 readers keep their
+/// offsets.
+pub const FOC_SENSORLESS_COMPOSITE_OUTPUT_VERSION: u32 = 2;
 pub const FOC_SENSORLESS_CONTEXT_CAPACITY: usize = 512;
 
 pub const FOC_SENSORLESS_CAP_SYNCHRONIZED_CURRENT_SAMPLE: u32 = 1 << 0;
@@ -265,6 +270,10 @@ pub struct FocSensorlessCompositeOutput {
     pub status_flags: u32,
     pub applied_injection_alpha_v: f32,
     pub applied_injection_beta_v: f32,
+    /// Status returned by the chain step this frame ran.  V2.  Zero on a frame
+    /// that never reached the chain because an envelope or ledger check
+    /// rejected the tick first.
+    pub chain_status: u32,
 }
 
 #[repr(C, align(8))]
@@ -349,7 +358,7 @@ const _: () = assert!(size_of::<SensorlessAbiContext>() <= FOC_SENSORLESS_CONTEX
 const _: () = assert!(size_of::<FocSensorlessVoltageInput>() == 48);
 const _: () = assert!(size_of::<FocSensorlessVoltageOutput>() == 44);
 const _: () = assert!(size_of::<FocSensorlessCompositeInput>() == 44);
-const _: () = assert!(size_of::<FocSensorlessCompositeOutput>() == 24);
+const _: () = assert!(size_of::<FocSensorlessCompositeOutput>() == 28);
 const _: () =
     assert!(align_of::<SensorlessAbiContext>() <= align_of::<FocSensorlessContextStorage>());
 
