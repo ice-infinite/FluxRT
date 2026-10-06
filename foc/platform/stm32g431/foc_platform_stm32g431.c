@@ -1838,6 +1838,12 @@ _Static_assert(offsetof(foc_sensorless_composite_output_t,
                "composite output applied-injection offset drifted");
 _Static_assert(FOC_SENSORLESS_PROBE_MODE_COMPOSITE == 3UL,
                "composite probe mode id changed");
+/* The diagnostic below uses rt_kprintf, which the shared include block only
+ * pulls in for the motion candidate.  Request it here so the sensorless
+ * commissioning image can report its own first-tick rejection. */
+#if defined(__RTTHREAD__)
+#include "rtthread.h"
+#endif
 static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
     int32_t current_u_counts,
     int32_t current_v_counts,
@@ -1849,7 +1855,6 @@ static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
     foc_realtime_input_t input;
     foc_output_t output;
     foc_sensorless_composite_input_t composite_input = {0};
-    foc_sensorless_status_t sensorless_status;
     foc_advanced_probe_result_t probe_result;
     foc_status_t control_status = FOC_STATUS_OK;
 
@@ -1912,6 +1917,21 @@ static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
         0,
         &g_foc_sensorless_probe_output,
         &g_foc_sensorless_composite_probe_output);
+
+    /* Mode 3 only: surface the first combined-entry rejection.  A silent
+     * CONTROL_FAILURE gives no way to tell a rejected envelope from a rejected
+     * ledger, and this image exists precisely to make that measurable. */
+    if ((g_foc_advanced_probe.decision_samples == 0U) &&
+        (control_status != FOC_STATUS_OK))
+    {
+        rt_kprintf("FSLSC,cst=%u,cs=%u,arq=%u,dmin=%u,dmax=%u,vlim=%u\n",
+                   (unsigned int)control_status,
+                   (unsigned int)input.control_sequence,
+                   (unsigned int)composite_input.applied_request_sequence,
+                   (unsigned int)(composite_input.minimum_duty * 1000.0f),
+                   (unsigned int)(composite_input.maximum_duty * 1000.0f),
+                   (unsigned int)composite_input.voltage_limit_v);
+    }
 
     /* Carry the ledger forward only from a Coherent tick.  A rejected tick
      * keeps the previous applied values so the next attempt fails closed on the
