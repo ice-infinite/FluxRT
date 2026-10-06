@@ -26,11 +26,16 @@ uint32_t foc_sensorless_platform_capabilities(void);
 
 uint32_t foc_platform_sensorless_probe_decomp_count(void);
 /* Copies up to `capacity` entries into the caller's arrays and returns the
- * number written.  `total_cycles` is the whole-ISR duration, `control_cycles`
- * the fast-loop section, both already saturated to uint16_t. */
+ * number written.  `total_cycles` is the whole-ISR duration and
+ * `control_cycles` the fast-loop section, both measured by the platform;
+ * `chain_cycles` is the sensorless chain's own cost as reported by the combined
+ * entry, so `control - chain` attributes the rest of the fast loop (Clarke,
+ * Park, current PI, final limit, SVPWM) without instrumenting every stage.
+ * All three are already saturated to uint16_t. */
 uint32_t foc_platform_sensorless_probe_decomp_copy(
     uint16_t *total_cycles,
     uint16_t *control_cycles,
+    uint16_t *chain_cycles,
     uint32_t capacity);
 
 #ifdef __cplusplus

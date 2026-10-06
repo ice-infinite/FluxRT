@@ -20,7 +20,9 @@ pub const FOC_SENSORLESS_ABI_VERSION: u32 = 0x0001_0000;
 pub const FOC_SENSORLESS_CONFIG_VERSION: u32 = 1;
 pub const FOC_SENSORLESS_GUARD_VERSION: u32 = 1;
 pub const FOC_SENSORLESS_INPUT_VERSION: u32 = 1;
-pub const FOC_SENSORLESS_OUTPUT_VERSION: u32 = 2;
+/// V3 appends `chain_cycles`, a measurement-only field.  Frames that do not
+/// request timing carry 0, so V1/V2 consumers keep their offsets and meaning.
+pub const FOC_SENSORLESS_OUTPUT_VERSION: u32 = 3;
 pub const FOC_SENSORLESS_VOLTAGE_INPUT_VERSION: u32 = 1;
 pub const FOC_SENSORLESS_VOLTAGE_OUTPUT_VERSION: u32 = 1;
 pub const FOC_SENSORLESS_COMPOSITE_INPUT_VERSION: u32 = 1;
@@ -55,6 +57,14 @@ pub const FOC_SENSORLESS_INPUT_KNOWN_MASK: u32 = FOC_SENSORLESS_INPUT_INJECTION_
     | FOC_SENSORLESS_INPUT_BEMF_VALID
     | FOC_SENSORLESS_INPUT_RESET
     | FOC_SENSORLESS_INPUT_APPLIED_INJECTION_LIMITED;
+
+/// Accepted value of the composite input's `reserved` word.  V1 required zero;
+/// V2 accepts zero (no timing) or this sentinel, which asks the combined entry
+/// to attribute the frame by filling `chain_cycles`.  It lives in `reserved`
+/// rather than the flag mask so the already-validated V1 callers keep working
+/// unchanged and the flag namespace stays intact.
+pub const FOC_SENSORLESS_COMPOSITE_TIMING_NONE: u32 = 0;
+pub const FOC_SENSORLESS_COMPOSITE_TIMING_REQUESTED: u32 = 0x5449_4D45; /* "TIME" */
 
 pub const FOC_SENSORLESS_OUTPUT_CONFIGURED: u32 = 1 << 0;
 pub const FOC_SENSORLESS_OUTPUT_ENABLED: u32 = 1 << 1;
@@ -202,6 +212,11 @@ pub struct FocSensorlessRealtimeOutput {
     pub angle_disagreement_rad: f32,
     pub high_frequency_current_alpha_a: f32,
     pub high_frequency_current_beta_a: f32,
+    /// V3 measurement field.  Cycles the chain step itself consumed, or 0 when
+    /// the caller did not request timing.  The combined entry sets it so a
+    /// measured frame can be split into chain cost and core cost without
+    /// instrumenting every stage; the platform measures the frame as a whole.
+    pub chain_cycles: u32,
 }
 
 #[repr(C)]
@@ -353,7 +368,7 @@ const _: () = assert!(size_of::<FocSensorlessFusionConfig>() == 40);
 const _: () = assert!(size_of::<FocSensorlessRuntimeConfig>() == 144);
 const _: () = assert!(size_of::<FocSensorlessConfigureGuard>() == 28);
 const _: () = assert!(size_of::<FocSensorlessRealtimeInput>() == 48);
-const _: () = assert!(size_of::<FocSensorlessRealtimeOutput>() == 84);
+const _: () = assert!(size_of::<FocSensorlessRealtimeOutput>() == 88);
 const _: () = assert!(size_of::<SensorlessAbiContext>() <= FOC_SENSORLESS_CONTEXT_CAPACITY);
 const _: () = assert!(size_of::<FocSensorlessVoltageInput>() == 48);
 const _: () = assert!(size_of::<FocSensorlessVoltageOutput>() == 44);

@@ -355,6 +355,35 @@ extern "C" {
     fn foc_math_accel_atan2(y: f32, x: f32, angle_out: *mut f32) -> u32;
 }
 
+// Free-running cycle counter supplied by the target platform, used only to
+// attribute a measured frame to its parts when the platform asks for it.
+//
+// This is the same dependency-injection shape as the CORDIC block above: the
+// algorithm library never reads a peripheral register, and the host builds do
+// not define this at all.  The hook is compiled for the target only, and it is
+// read exclusively on the composite entry's `FOC_SENSORLESS_COMPOSITE_TIMING_
+// REQUESTED` path -- never on a production frame.  A read is a few cycles, two
+// per measured frame, which is far below the resolution being attributed.
+#[cfg(all(feature = "sensorless-foc", target_os = "none"))]
+extern "C" {
+    fn foc_platform_probe_cycles() -> u32;
+}
+
+#[cfg(all(feature = "sensorless-foc", target_os = "none"))]
+#[inline(always)]
+fn composite_mark_cycles() -> u32 {
+    // SAFETY: the platform guarantees this is a lock-free counter read that does
+    // not block, allocate or re-enter Rust; it is documented to be callable from
+    // the ADC ISR.
+    unsafe { foc_platform_probe_cycles() }
+}
+
+#[cfg(not(all(feature = "sensorless-foc", target_os = "none")))]
+#[inline(always)]
+fn composite_mark_cycles() -> u32 {
+    0
+}
+
 /// Diagnostic-only entry used by the stopped-state C benchmark to measure the
 /// portable fast `sin/cos` implementation in the same firmware image as CORDIC.
 ///
@@ -3127,7 +3156,8 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
         && composite_input.maximum_duty.is_finite();
     if composite_input.struct_size != core::mem::size_of::<FocSensorlessCompositeInput>() as u32
         || composite_input.version != FOC_SENSORLESS_COMPOSITE_INPUT_VERSION
-        || composite_input.reserved != 0
+        || (composite_input.reserved != FOC_SENSORLESS_COMPOSITE_TIMING_NONE
+            && composite_input.reserved != FOC_SENSORLESS_COMPOSITE_TIMING_REQUESTED)
         || composite_input.platform_capabilities & !FOC_SENSORLESS_CAP_KNOWN_MASK != 0
         || composite_input.input_flags & !FOC_SENSORLESS_INPUT_KNOWN_MASK != 0
         || composite_input.platform_capabilities & FOC_SENSORLESS_REQUIRED_CAPABILITIES
@@ -3204,14 +3234,23 @@ pub unsafe extern "C" fn foc_rust_realtime_step_sensorless(
             0.0
         },
     };
+    let chain_start_cycles = composite_mark_cycles();
     let sensorless_status = unsafe {
         foc_rust_sensorless_step(sensorless_context, &sensorless_input, sensorless_output)
     };
+    let chain_end_cycles = composite_mark_cycles();
     /* V2: publish the chain's own verdict.  Everything below collapses a chain
      * rejection into FocStatus::HardwareFault, so without this the rejecting
      * check is indistinguishable on the target.  A frame that never reached the
      * chain keeps the zero that the initialiser above wrote. */
     composite_output.chain_status = sensorless_status as u32;
+    if composite_input.reserved == FOC_SENSORLESS_COMPOSITE_TIMING_REQUESTED {
+        /* Attribute the frame.  The platform measures the whole combined call,
+         * so the chain's own cost is what turns that total into a split between
+         * the angle/HFI chain and the shared controller core.  Only the
+         * requesting caller pays for the two counter reads. */
+        sensorless_output.chain_cycles = chain_end_cycles.wrapping_sub(chain_start_cycles);
+    }
     if sensorless_status != FocSensorlessStatus::Ok {
         controller.fault_flags |= FOC_FAULT_SENSORLESS_CONTROL;
         controller.state = FocState::Fault;

@@ -495,6 +495,7 @@ static volatile uint32_t g_foc_sensorless_composite_applied_limited;
  */
 static uint16_t g_foc_probe_decomp_total[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
 static uint16_t g_foc_probe_decomp_control[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
+static uint16_t g_foc_probe_decomp_chain[FOC_SENSORLESS_PROBE_DECOMP_TICKS];
 static volatile uint32_t g_foc_probe_decomp_count;
 #define FOC_SENSORLESS_COMMISSIONING_BUS_VOLTAGE_V (12.3f)
 #define FOC_SENSORLESS_COMMISSIONING_VOLTAGE_LIMIT_V (6.5f)
@@ -1919,6 +1920,10 @@ static void foc_platform_arm_composite_probe_sequence(void)
 
     composite_input.struct_size = sizeof(composite_input);
     composite_input.version = FOC_SENSORLESS_COMPOSITE_INPUT_VERSION;
+    /* Ask the combined entry to attribute this frame; it then fills
+     * sensorless_output.chain_cycles so the platform can split the measured
+     * frame into chain cost and shared-core cost.  Measurement only. */
+    composite_input.reserved = FOC_SENSORLESS_COMPOSITE_TIMING_REQUESTED;
     composite_input.platform_capabilities = FOC_SENSORLESS_REQUIRED_CAPABILITIES;
     composite_input.input_flags = FOC_SENSORLESS_INPUT_INJECTION_PERMITTED;
     composite_input.applied_request_sequence = input.control_sequence;
@@ -2027,6 +2032,10 @@ static foc_status_t foc_platform_sensorless_composite_probe_step_isr(
 
     composite_input.struct_size = sizeof(composite_input);
     composite_input.version = FOC_SENSORLESS_COMPOSITE_INPUT_VERSION;
+    /* Ask the combined entry to attribute this frame; it then fills
+     * sensorless_output.chain_cycles so the platform can split the measured
+     * frame into chain cost and shared-core cost.  Measurement only. */
+    composite_input.reserved = FOC_SENSORLESS_COMPOSITE_TIMING_REQUESTED;
     /* The published provider stays zero.  This synthetic all-bits mask exists
      * only inside the compile-time motor-arm-disabled commissioning image so
      * the combined ABI can exercise its ledger; it is never board proof. */
@@ -4442,6 +4451,24 @@ foc_status_t foc_platform_sensorless_candidate_probe_get_status(
 #endif
 }
 
+/*
+ * Free-running cycle counter for the Rust composite timing hook.
+ *
+ * The algorithm library never reads a peripheral register; the target platform
+ * injects this the same way it injects the CORDIC accelerators.  It is read at
+ * most twice per frame, and only when the caller sets the timing sentinel in the
+ * composite input, so a production frame pays nothing.  The ADC ISR is its only
+ * caller: it neither blocks, allocates nor re-enters Rust.
+ */
+uint32_t foc_platform_probe_cycles(void)
+{
+#if defined(FOC_TARGET_STM32G431)
+    return DWT->CYCCNT;
+#else
+    return 0U;
+#endif
+}
+
 uint32_t foc_platform_sensorless_probe_decomp_count(void)
 {
 #if defined(FOC_TARGET_STM32G431) && \
@@ -4456,6 +4483,7 @@ uint32_t foc_platform_sensorless_probe_decomp_count(void)
 uint32_t foc_platform_sensorless_probe_decomp_copy(
     uint16_t *total_cycles,
     uint16_t *control_cycles,
+    uint16_t *chain_cycles,
     uint32_t capacity)
 {
 #if defined(FOC_TARGET_STM32G431) && \
@@ -4464,7 +4492,7 @@ uint32_t foc_platform_sensorless_probe_decomp_copy(
     uint32_t count;
     uint32_t index;
 
-    if ((total_cycles == 0) || (control_cycles == 0))
+    if ((total_cycles == 0) || (control_cycles == 0) || (chain_cycles == 0))
     {
         return 0U;
     }
@@ -4481,11 +4509,13 @@ uint32_t foc_platform_sensorless_probe_decomp_copy(
     {
         total_cycles[index] = g_foc_probe_decomp_total[index];
         control_cycles[index] = g_foc_probe_decomp_control[index];
+        chain_cycles[index] = g_foc_probe_decomp_chain[index];
     }
     return count;
 #else
     (void)total_cycles;
     (void)control_cycles;
+    (void)chain_cycles;
     (void)capacity;
     return 0U;
 #endif
@@ -5853,6 +5883,10 @@ void ADC1_2_IRQHandler(void)
                 g_foc_probe_decomp_control[slot] =
                     (timing_sample.control_cycles > 0xFFFFU) ?
                         0xFFFFU : (uint16_t)timing_sample.control_cycles;
+                g_foc_probe_decomp_chain[slot] =
+                    (g_foc_sensorless_probe_output.chain_cycles > 0xFFFFU) ?
+                        0xFFFFU :
+                        (uint16_t)g_foc_sensorless_probe_output.chain_cycles;
                 g_foc_probe_decomp_count = slot + 1U;
             }
 #endif

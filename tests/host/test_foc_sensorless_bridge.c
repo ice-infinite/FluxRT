@@ -9,7 +9,10 @@ int main(void)
     assert(FOC_SENSORLESS_INPUT_KNOWN_MASK == 0x0FU);
     assert(sizeof(foc_sensorless_runtime_config_t) == 144U);
     assert(sizeof(foc_sensorless_realtime_input_t) == 48U);
-    assert(sizeof(foc_sensorless_realtime_output_t) == 84U);
+    assert(sizeof(foc_sensorless_realtime_output_t) == 88U);
+    /* V3 appended chain_cycles; the earlier offsets are unchanged. */
+    assert(FOC_SENSORLESS_OUTPUT_VERSION == 3U);
+    assert(offsetof(foc_sensorless_realtime_output_t, chain_cycles) == 84U);
     assert(sizeof(foc_sensorless_voltage_input_t) == 48U);
     assert(sizeof(foc_sensorless_voltage_output_t) == 44U);
     assert(sizeof(foc_sensorless_composite_input_t) == 44U);
